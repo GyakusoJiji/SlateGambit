@@ -97,7 +97,8 @@ export type GameEvent =
   | { tick: number; type: 'damage'; id: string; amount: number; by: string; guarded: boolean }
   | { tick: number; type: 'heal'; id: string; amount: number }
   | { tick: number; type: 'down'; id: string }
-  | { tick: number; type: 'revive'; id: string };
+  | { tick: number; type: 'revive'; id: string }
+  | { tick: number; type: 'rest'; id: string; hp: number; mp: number };
 
 export interface UnitSnapshot {
   id: string;

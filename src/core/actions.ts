@@ -3,9 +3,17 @@ import { AP_PER_TURN, type Action, type Unit } from './types';
 
 /** 行動コストなどの調整用の値(自動対戦で比較できるよう書き換え可能にしてある) */
 export const RULES = {
-  attackCost: 2,
+  attackCost: 3,
   spellCost: 3,
+  /** 休憩(敵が見えない状態で全員が待機だけのターン)での回復量 */
+  restHpRatio: 0.1,
+  restMp: 2,
 };
+
+/** 予約が待機だけ(または空)か */
+export function isRestPlan(actions: Action[] | undefined): boolean {
+  return !actions || actions.every((a) => a.type === 'wait');
+}
 
 export function actionCost(a: Action): number {
   switch (a.type) {

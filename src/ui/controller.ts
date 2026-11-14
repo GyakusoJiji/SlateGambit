@@ -6,7 +6,7 @@ import { pathTo } from '../core/path';
 import { resolveTurn } from '../core/resolve';
 import { createTestGame } from '../core/scenario';
 import type { Action, GameState, Plans, Pos, Unit } from '../core/types';
-import { sideVisibleMask } from '../core/vision';
+import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
 import { attachInput } from './input';
@@ -215,9 +215,10 @@ export class Controller {
              ${actionButtons(sel, acts, this.mode, this.stopFlag)}`
           : `<p class="prompt">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</p>`
       }
-      <div class="bottom">
+      <div class="bottom${this.foesInSight() ? '' : ' four'}">
         <button data-act="undo" class="act">${T.act.undo}</button>
         <button data-act="clear" class="act">${T.act.clear}</button>
+        ${this.foesInSight() ? '' : `<button data-act="rest" class="act">${T.act.rest}</button>`}
         <button data-act="execute" class="act primary">${T.act.execute} ▶</button>
       </div>
       ${this.lastPlayback ? eventLog(this.lastPlayback.result.events, nameOf, 4) : ''}`;
@@ -335,8 +336,18 @@ export class Controller {
     if (actBtn && !this.playback) this.onAction(actBtn.dataset.act!);
   }
 
+  private foesInSight(): boolean {
+    return visibleFoes(this.state.map, this.state.units, 'party').size > 0;
+  }
+
   private onAction(act: string): void {
     if (act === 'execute') return this.execute();
+    if (act === 'rest') {
+      // 全員の予約を消して待機させ、そのまま実行する
+      if (this.foesInSight()) return this.toast(T.err.cannotRest);
+      for (const id of Object.keys(this.plans)) this.plans[id] = [];
+      return this.execute();
+    }
     const u = this.selected ? this.unit(this.selected) : undefined;
     if (!u) return;
     const list = this.plans[u.id];

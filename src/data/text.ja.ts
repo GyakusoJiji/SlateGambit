@@ -24,6 +24,7 @@ export const T = {
     undo: '1手戻す',
     clear: '全消し',
     execute: '実行',
+    rest: '休憩',
   },
 
   prompt: {
@@ -72,10 +73,12 @@ export const T = {
     halt: (a: string) => `${a} は敵を見つけて立ち止まった`,
     reaction: (a: string) => `${a} の条件付き行動が発動!`,
     bump: (a: string) => `${a} は進めなかった`,
+    rest: (a: string, hp: number, mp: number) => `${a} は休憩した(HP+${hp}${mp > 0 ? ` MP+${mp}` : ''})`,
   },
 
   err: {
     noAp: 'AP が足りない',
+    cannotRest: '敵が見えている間は休憩できない',
     noPath: 'そこへは行けない',
     notTarget: 'そこには対象がいない',
   },

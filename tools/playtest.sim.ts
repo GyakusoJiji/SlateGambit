@@ -14,28 +14,29 @@ declare const process: { env: Record<string, string | undefined> };
 
 const GAMES = Number(process.env.GAMES ?? 300);
 const TRACE = process.env.TRACE;
-const MAX_TURNS = 60;
+const MAX_TURNS = Number(process.env.MAX_TURNS ?? 100);
 
 /** 比較する調整案。setup で数値を書き換え、終了後に元へ戻す */
 const VARIANTS: { name: string; setup: () => void }[] = [
   { name: '現行', setup: () => {} },
-  { name: '全員 HP×2', setup: () => scaleHp(Object.values({ ...CLASSES, ...MONSTERS }), 2) },
-  { name: '攻撃コスト 3', setup: () => (RULES.attackCost = 3) },
-  {
-    name: '攻撃コスト 3 + 全員 HP×1.5',
-    setup: () => {
-      RULES.attackCost = 3;
-      scaleHp(Object.values({ ...CLASSES, ...MONSTERS }), 1.5);
-    },
-  },
-  {
-    name: '攻撃コスト 3 + 味方 HP×1.5',
-    setup: () => {
-      RULES.attackCost = 3;
-      scaleHp(Object.values(CLASSES), 1.5);
-    },
-  },
+  { name: '敵 攻撃-1', setup: () => strengthen(-1, 1) },
+  { name: '敵 攻撃+1', setup: () => strengthen(1, 1) },
+  { name: '休憩なし', setup: () => rest(0, 0) },
 ];
+
+function strengthen(atk: number, hp: number): void {
+  addAtk(Object.values(MONSTERS), atk);
+  scaleHp(Object.values(MONSTERS), hp);
+}
+
+function rest(hpRatio: number, mp: number): void {
+  RULES.restHpRatio = hpRatio;
+  RULES.restMp = mp;
+}
+
+function addAtk(defs: UnitDef[], n: number): void {
+  for (const d of defs) d.atk += n;
+}
 
 function scaleHp(defs: UnitDef[], k: number): void {
   for (const d of defs) d.maxHp = Math.round(d.maxHp * k);

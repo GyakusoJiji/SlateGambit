@@ -18,7 +18,23 @@ export function planParty(state: GameState): Plans {
   const plans: Plans = {};
   if (party.length === 0) return plans;
 
-  if (foes.length === 0) return explore(state, party);
+  if (foes.length === 0) {
+    // 倒れた仲間がいて僧侶が蘇生できるなら、まず助けに行く
+    const priestU = party.find((u) => u.defId === 'priest');
+    const downed = units.some((u) => u.side === 'party' && u.down);
+    if (downed && priestU && priestU.mp >= SPELLS.revive.mp) {
+      const ctx: Ctx = { state, u: priestU, plan: [], pos: { x: priestU.x, y: priestU.y }, foes: [], endPos: new Map(), reserved: new Set() };
+      priest(ctx);
+      return { [priestU.id]: ctx.plan };
+    }
+    // 傷んでいる、または MP が少なければ休憩する(全員待機)
+    const tired = party.some((u) => {
+      const d = unitDef(u.defId);
+      return u.hp / d.maxHp < 0.6 || (d.maxMp > 0 && u.mp / d.maxMp < 0.5);
+    });
+    if (tired || (downed && priestU)) return {};
+    return explore(state, party);
+  }
 
   /** 先に計画した味方の予定位置(火球の巻き込み回避に使う) */
   const endPos = new Map<string, Pos>();
@@ -83,6 +99,7 @@ function nearest(from: Pos, list: Unit[]): Unit {
 
 function melee(ctx: Ctx): void {
   const f = nearest(ctx.pos, ctx.foes);
+  if (!f) return fill(ctx, { type: 'guard' });
   if (manhattan(ctx.pos, f) > 1) {
     const path = pathAdjacent(ctx.state.map, ctx.pos, f, occupied(ctx)) ?? [];
     moveAlong(ctx, path, RULES.attackCost);

@@ -127,6 +127,9 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
       case 'strike':
         if (e.reaction) lines.push(T.log.reaction(nameOf(e.id)));
         break;
+      case 'rest':
+        lines.push(T.log.rest(nameOf(e.id), e.hp, e.mp));
+        break;
     }
   }
   return `<ul class="log">${lines

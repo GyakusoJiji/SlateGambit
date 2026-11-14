@@ -1,6 +1,6 @@
 // 同時解決エンジン。全ユニットの予約を 1 ティックずつ同時に処理する。
 import { SPELLS, unitDef } from '../data/units';
-import { expandPlan, type Step } from './actions';
+import { RULES, expandPlan, isRestPlan, type Step } from './actions';
 import { hasLos, linePoints } from './los';
 import { dist2, isWalkable, manhattan, step } from './map';
 import { pathAdjacent } from './path';
@@ -161,6 +161,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     frames.push(snapshot(units, guard, watching));
   }
 
+  applyRest(state, plans, seenAtStart.party.size === 0, events, frames);
   updateAiMemory(state, attackedBy);
   state.rng = rng.state;
   state.turn += 1;
@@ -361,6 +362,34 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>): void
       const i = e.ai.patrolIndex ?? 0;
       if (e.x === patrol[i].x && e.y === patrol[i].y) e.ai.patrolIndex = (i + 1) % patrol.length;
     }
+  }
+}
+
+/**
+ * 休憩: ターンの開始時も終了時も敵が見えず、誰も攻撃を受けておらず、
+ * 立っている味方全員の予約が待機だけなら、HP と MP が少し回復する(気絶者は回復しない)。
+ */
+function applyRest(state: GameState, plans: Plans, quietAtStart: boolean, events: GameEvent[], frames: UnitSnapshot[][]): void {
+  const party = state.units.filter((u) => u.side === 'party' && !u.down);
+  if (!quietAtStart || party.length === 0) return;
+  if (visibleFoes(state.map, state.units, 'party').size > 0) return;
+  if (events.some((e) => e.type === 'damage')) return;
+  if (!party.every((u) => isRestPlan(plans[u.id]))) return;
+  for (const u of party) {
+    const d = unitDef(u.defId);
+    const hp = Math.min(d.maxHp - u.hp, Math.max(1, Math.round(d.maxHp * RULES.restHpRatio)));
+    const mp = Math.min(d.maxMp - u.mp, RULES.restMp);
+    if (hp <= 0 && mp <= 0) continue;
+    u.hp += hp;
+    u.mp += mp;
+    events.push({ tick: TICKS_PER_TURN, type: 'rest', id: u.id, hp, mp });
+  }
+  // 最終フレームにも回復後の値を反映する
+  const last = frames[frames.length - 1];
+  for (const s of last) {
+    const u = state.units.find((x) => x.id === s.id)!;
+    s.hp = u.hp;
+    s.mp = u.mp;
   }
 }
 

@@ -21,12 +21,12 @@ export function sideVisibleMask(map: FloorMap, units: Unit[], side: Side): Uint8
   return mask;
 }
 
-/** 陣営から見えている相手陣営のユニット ID */
+/** 陣営から見えている相手陣営のユニット ID(倒れている相手は含まない) */
 export function visibleFoes(map: FloorMap, units: Unit[], side: Side): Set<string> {
   const seen = new Set<string>();
   const watchers = units.filter((u) => u.side === side && !u.down);
   for (const f of units) {
-    if (f.side === side) continue;
+    if (f.side === side || f.down) continue;
     if (watchers.some((w) => unitSees(map, w, f))) seen.add(f.id);
   }
   return seen;

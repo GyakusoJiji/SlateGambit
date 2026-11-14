@@ -4,7 +4,7 @@ import { parseMap } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
 import { createTestGame } from '../src/core/scenario';
 import type { Action, GameState, Unit } from '../src/core/types';
-import { CLASSES, MONSTERS } from '../src/data/units';
+import { CLASSES, MONSTERS, SPELLS } from '../src/data/units';
 
 const OPEN = [
   '############',
@@ -94,7 +94,7 @@ describe('攻撃', () => {
   it('防御中は被ダメージが半減する', () => {
     const base = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)], OPEN, 7);
     const hit = resolveTurn(base, { p1: [{ type: 'attack', target: 'g1' }] });
-    const guarded = resolveTurn(base, { p1: [{ type: 'attack', target: 'g1' }], g1: [{ type: 'guard' }, { type: 'guard' }] });
+    const guarded = resolveTurn(base, { p1: [{ type: 'attack', target: 'g1' }], g1: [{ type: 'guard' }, { type: 'guard' }, { type: 'guard' }] });
     const dmg = (r: typeof hit) => r.events.find((e) => e.type === 'damage')!;
     const d1 = dmg(hit);
     const d2 = dmg(guarded);
@@ -125,7 +125,7 @@ describe('攻撃', () => {
     const r = resolveTurn(s, { p3: [{ type: 'spell', spell: 'fireball', tile: { x: 6, y: 3 } }] });
     expect(u(r.state, 'g1').hp).toBeLessThan(MONSTERS.goblin.maxHp);
     expect(u(r.state, 'p1').hp).toBeLessThan(CLASSES.warrior.maxHp);
-    expect(u(r.state, 'p3').mp).toBe(CLASSES.mage.maxMp - 4);
+    expect(u(r.state, 'p3').mp).toBe(CLASSES.mage.maxMp - SPELLS.fireball.mp);
   });
 
   it('火球は相手が動けば外れる(マス狙い)', () => {
@@ -196,6 +196,47 @@ describe('条件付き行動', () => {
     const r = resolveTurn(s, { p1: plan });
     expect(r.events.some((e) => e.type === 'halt')).toBe(true);
     expect(u(r.state, 'p1').x).toBeLessThan(7);
+  });
+});
+
+describe('休憩', () => {
+  const rows = [
+    '##############',
+    '#.....#......#',
+    '#.....#......#',
+    '##############',
+  ];
+  it('敵が見えない状態で全員が待機すると HP と MP が回復する', () => {
+    const m = mk('p3', 'mage', 1, 1);
+    m.hp = 5;
+    m.mp = 0;
+    const r = resolveTurn(game([m, mk('g1', 'goblin', 10, 1)], rows), {});
+    expect(u(r.state, 'p3').hp).toBeGreaterThan(5);
+    expect(u(r.state, 'p3').mp).toBeGreaterThan(0);
+  });
+
+  it('倒れた敵が見えていても休憩できる', () => {
+    const m = mk('p3', 'mage', 1, 1);
+    m.hp = 5;
+    const g = mk('g1', 'goblin', 3, 1);
+    g.down = true;
+    g.hp = 0;
+    const r = resolveTurn(game([m, g], rows), {});
+    expect(u(r.state, 'p3').hp).toBeGreaterThan(5);
+  });
+
+  it('誰かが動くと休憩にならない', () => {
+    const m = mk('p3', 'mage', 1, 1);
+    m.hp = 5;
+    const r = resolveTurn(game([m, mk('p1', 'warrior', 2, 2), mk('g1', 'goblin', 10, 1)], rows), { p1: moves('E', 1) });
+    expect(u(r.state, 'p3').hp).toBe(5);
+  });
+
+  it('敵が見えていると休憩にならない', () => {
+    const m = mk('p3', 'mage', 1, 1);
+    m.hp = 5;
+    const r = resolveTurn(game([m, mk('g1', 'goblin', 4, 1)], rows), {});
+    expect(u(r.state, 'p3').hp).toBeLessThanOrEqual(5);
   });
 });
 
