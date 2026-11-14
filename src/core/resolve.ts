@@ -226,6 +226,25 @@ export function settleMoves(
       const all = new Map<string, Unit[]>();
       for (const u of units) if (!u.down) all.set(key(u), [...(all.get(key(u)) ?? []), u]);
       conflict = [...all.values()].find((g) => g.some((a) => g.some((b) => a.side !== b.side)));
+      // 敵との入れ替わり(すれ違い)も通り抜けとみなし、両者を元のマスへ戻す
+      if (!conflict) {
+        const swap = intents.find((a) =>
+          intents.some(
+            (b) =>
+              a.status === 'ok' && b.status === 'ok' && a.unit.side !== b.unit.side &&
+              a.to.x === b.from.x && a.to.y === b.from.y && b.to.x === a.from.x && b.to.y === a.from.y,
+          ),
+        );
+        if (swap) {
+          const other = intents.find((b) => b.unit.x === swap.from.x && b.unit.y === swap.from.y && b.status === 'ok' && b.unit.side !== swap.unit.side)!;
+          for (const m of [swap, other]) {
+            m.status = 'blocked';
+            m.unit.x = m.from.x;
+            m.unit.y = m.from.y;
+          }
+          continue;
+        }
+      }
     }
     if (!conflict) break;
 

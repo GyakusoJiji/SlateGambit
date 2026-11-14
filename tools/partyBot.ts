@@ -1,6 +1,6 @@
 // バランス検証用のパーティ自動操作。人間の「そこそこ上手い」プレイを素朴に真似る。
 // 敵の計画は見ない(プレイヤーと同じく、見えている敵の現在位置だけで判断する)。
-import { RULES, apLeft } from '../src/core/actions';
+import { RULES, apLeft, fillPlan } from '../src/core/actions';
 import { hasLos, linePoints } from '../src/core/los';
 import { DIR_LIST, dist2, isWalkable, manhattan, step } from '../src/core/map';
 import { findPath, pathAdjacent, pathTo } from '../src/core/path';
@@ -57,7 +57,8 @@ export function planParty(state: GameState): Plans {
         priest(ctx);
         break;
     }
-    plans[u.id] = plan;
+    // UI と同じく、戦闘中の余った AP は防御で埋める
+    plans[u.id] = fillPlan(plan, true);
     endPos.set(u.id, ctx.pos);
   }
   return plans;

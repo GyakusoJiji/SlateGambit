@@ -105,6 +105,10 @@ describe('移動', () => {
       const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
       const r = resolveTurn(s, { p1: moves('E', 3) });
       expect(u(r.state, 'p1')).toMatchObject({ x: 1, y: 1 });
+      // 敵との入れ替わりもできない
+      const r2 = resolveTurn(s, { p1: moves('E', 1), g1: moves('W', 1) });
+      expect(u(r2.state, 'p1')).toMatchObject({ x: 1, y: 1 });
+      expect(u(r2.state, 'g1')).toMatchObject({ x: 2, y: 1 });
     } finally {
       RULES.passThroughFoes = true;
     }
