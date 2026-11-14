@@ -55,7 +55,7 @@ export function pathTo(map: FloorMap, start: Pos, goal: Pos, blocked?: (p: Pos) 
   return findPath(map, start, (p) => p.x === goal.x && p.y === goal.y, blocked);
 }
 
-/** goal に(上下左右で)隣接するマスまでの経路 */
+/** goal に(上下左右で)隣接する、空いているマスまでの経路 */
 export function pathAdjacent(map: FloorMap, start: Pos, goal: Pos, blocked?: (p: Pos) => boolean): Dir[] | null {
-  return findPath(map, start, (p) => Math.abs(p.x - goal.x) + Math.abs(p.y - goal.y) === 1, blocked);
+  return findPath(map, start, (p) => Math.abs(p.x - goal.x) + Math.abs(p.y - goal.y) === 1 && !(blocked && blocked(p)), blocked);
 }

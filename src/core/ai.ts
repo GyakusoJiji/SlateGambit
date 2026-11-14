@@ -1,7 +1,7 @@
 // 敵の計画生成。各敵は自分の視界と記憶だけを使って判断する。
 // 判断の揺らぎは (seed, turn, id) から作る決定的な乱数で行うため、同じ状態からは同じ計画になる。
 import { unitDef } from '../data/units';
-import { ATTACK_COST, apLeft } from './actions';
+import { RULES, apLeft } from './actions';
 import { hasLos } from './los';
 import { dist2, manhattan, samePos, step } from './map';
 import { pathAdjacent, pathTo } from './path';
@@ -63,7 +63,7 @@ function planOne(state: GameState, e: Unit): Action[] {
     if (!canShoot(pos)) {
       const path = pathTo(map, pos, target, blocked) ?? [];
       for (const d of path) {
-        if (apLeft(plan) <= ATTACK_COST || canShoot(pos)) break;
+        if (apLeft(plan) <= RULES.attackCost || canShoot(pos)) break;
         plan.push({ type: 'move', dir: d });
         pos = step(pos, d);
       }
@@ -73,7 +73,7 @@ function planOne(state: GameState, e: Unit): Action[] {
       plan.push({ type: 'overwatch', ticks: apLeft(plan) });
       return plan;
     }
-    while (apLeft(plan) >= ATTACK_COST) plan.push({ type: 'attack', target: target.id });
+    while (apLeft(plan) >= RULES.attackCost) plan.push({ type: 'attack', target: target.id });
     while (apLeft(plan) > 0) plan.push({ type: 'guard' });
     return plan;
   }
@@ -91,7 +91,7 @@ function planOne(state: GameState, e: Unit): Action[] {
     plan.push({ type: 'move', dir: d });
     pos = step(pos, d);
   }
-  while (apLeft(plan) >= ATTACK_COST) plan.push({ type: 'attack', target: target.id });
+  while (apLeft(plan) >= RULES.attackCost) plan.push({ type: 'attack', target: target.id });
   while (apLeft(plan) > 0) plan.push({ type: 'guard' });
   return plan;
 }
@@ -99,6 +99,7 @@ function planOne(state: GameState, e: Unit): Action[] {
 function patrolGoal(e: Unit): Pos | null {
   const ai = e.ai;
   if (!ai || ai.mode !== 'patrol' || !ai.patrol || ai.patrol.length === 0) return null;
+  // patrolIndex は「次に向かう巡回点」。すでに立っていれば次の点へ
   let i = ai.patrolIndex ?? 0;
   if (samePos(e, ai.patrol[i])) i = (i + 1) % ai.patrol.length;
   return ai.patrol[i];

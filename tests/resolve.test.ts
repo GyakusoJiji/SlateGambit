@@ -199,6 +199,25 @@ describe('条件付き行動', () => {
   });
 });
 
+describe('敵 AI', () => {
+  it('巡回する敵は巡回点の間を往復する', () => {
+    const o = mk('o1', 'orc', 1, 1);
+    o.ai = { mode: 'patrol', patrol: [{ x: 1, y: 1 }, { x: 10, y: 5 }], patrolIndex: 1 };
+    let s = game([o, mk('p1', 'warrior', 10, 5)]);
+    // パーティを見えない位置へ(視界外)置くため壁で区切った地図にはせず、戦士を倒れた状態にする
+    s.units[1].down = true;
+    s.units[1].hp = 0;
+    const xs: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      s = resolveTurn(s, planEnemies(s)).state;
+      xs.push(u(s, 'o1').x + u(s, 'o1').y * 100);
+    }
+    // 1 ターン目で (10,5) 付近へ到達し、その後 (1,1) へ戻る
+    expect(xs[1]).toBe(10 + 5 * 100);
+    expect(xs[3]).toBe(1 + 1 * 100);
+  });
+});
+
 describe('決定性', () => {
   it('同じ状態と同じ計画からは同じ結果になる', () => {
     const s = createTestGame(42);

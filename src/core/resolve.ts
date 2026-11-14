@@ -77,7 +77,9 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       } else if (s.k === 'follow' || s.k === 'escort') {
         const t = byId.get(s.target);
         if (t && manhattan(u, t) > 1 && !(s.k === 'follow' && t.down)) {
-          const p = pathAdjacent(map, u, t);
+          // 他のユニットを避けて回り込む。空いた隣接マスが無ければその場で待つ
+          const occupied = (p: Pos) => units.some((o) => o !== u && o !== t && !o.down && o.x === p.x && o.y === p.y);
+          const p = pathAdjacent(map, u, t, occupied);
           if (p && p.length > 0) to = step(u, p[0]);
         }
       }
@@ -353,9 +355,12 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>): void
       e.ai.alerted = false;
       e.ai.lastSeen = undefined;
     }
-    // 巡回点に立っていれば、その点を現在の巡回位置とする
-    const pi = e.ai.patrol?.findIndex((p) => p.x === e.x && p.y === e.y) ?? -1;
-    if (pi >= 0) e.ai.patrolIndex = pi;
+    // 向かっていた巡回点に着いたら、次の巡回点を目標にする
+    const patrol = e.ai.patrol;
+    if (patrol && patrol.length > 0) {
+      const i = e.ai.patrolIndex ?? 0;
+      if (e.x === patrol[i].x && e.y === patrol[i].y) e.ai.patrolIndex = (i + 1) % patrol.length;
+    }
   }
 }
 

@@ -1,0 +1,234 @@
+// バランス検証用のパーティ自動操作。人間の「そこそこ上手い」プレイを素朴に真似る。
+// 敵の計画は見ない(プレイヤーと同じく、見えている敵の現在位置だけで判断する)。
+import { RULES, apLeft } from '../src/core/actions';
+import { hasLos, linePoints } from '../src/core/los';
+import { DIR_LIST, dist2, isWalkable, manhattan, step } from '../src/core/map';
+import { findPath, pathAdjacent, pathTo } from '../src/core/path';
+import type { Action, Dir, GameState, Plans, Pos, Unit } from '../src/core/types';
+import { visibleFoes } from '../src/core/vision';
+import { SPELLS, unitDef } from '../src/data/units';
+
+const ORDER = ['warrior', 'thief', 'priest', 'mage'];
+
+export function planParty(state: GameState): Plans {
+  const { map, units } = state;
+  const party = units.filter((u) => u.side === 'party' && !u.down).sort((a, b) => ORDER.indexOf(a.defId) - ORDER.indexOf(b.defId));
+  const seenIds = visibleFoes(map, units, 'party');
+  const foes = units.filter((u) => seenIds.has(u.id) && !u.down);
+  const plans: Plans = {};
+  if (party.length === 0) return plans;
+
+  if (foes.length === 0) return explore(state, party);
+
+  /** 先に計画した味方の予定位置(火球の巻き込み回避に使う) */
+  const endPos = new Map<string, Pos>();
+  const reserved = new Set<string>();
+  for (const u of party) {
+    const plan: Action[] = [];
+    const ctx: Ctx = { state, u, plan, pos: { x: u.x, y: u.y }, foes, endPos, reserved };
+    reserved.add(key(ctx.pos));
+    switch (u.defId) {
+      case 'warrior':
+        melee(ctx);
+        break;
+      case 'thief':
+        archer(ctx);
+        break;
+      case 'mage':
+        mage(ctx);
+        break;
+      case 'priest':
+        priest(ctx);
+        break;
+    }
+    plans[u.id] = plan;
+    endPos.set(u.id, ctx.pos);
+  }
+  return plans;
+}
+
+interface Ctx {
+  state: GameState;
+  u: Unit;
+  plan: Action[];
+  pos: Pos;
+  foes: Unit[];
+  endPos: Map<string, Pos>;
+  /** 先に計画した味方が通る予定のマス */
+  reserved: Set<string>;
+}
+
+function occupied(ctx: Ctx): (p: Pos) => boolean {
+  return (p) => ctx.state.units.some((o) => o !== ctx.u && !o.down && o.x === p.x && o.y === p.y);
+}
+
+function moveAlong(ctx: Ctx, dirs: Dir[], keepAp: number): void {
+  for (const d of dirs) {
+    if (apLeft(ctx.plan) <= keepAp) break;
+    ctx.plan.push({ type: 'move', dir: d });
+    ctx.pos = step(ctx.pos, d);
+    ctx.reserved.add(key(ctx.pos));
+  }
+}
+
+const key = (p: Pos) => `${p.x},${p.y}`;
+
+function fill(ctx: Ctx, a: Action): void {
+  while (apLeft(ctx.plan) >= (a.type === 'attack' ? RULES.attackCost : 1)) ctx.plan.push(a);
+}
+
+function nearest(from: Pos, list: Unit[]): Unit {
+  return [...list].sort((a, b) => manhattan(from, a) - manhattan(from, b) || a.hp - b.hp)[0];
+}
+
+function melee(ctx: Ctx): void {
+  const f = nearest(ctx.pos, ctx.foes);
+  if (manhattan(ctx.pos, f) > 1) {
+    const path = pathAdjacent(ctx.state.map, ctx.pos, f, occupied(ctx)) ?? [];
+    moveAlong(ctx, path, RULES.attackCost);
+  }
+  if (manhattan(ctx.pos, f) === 1) fill(ctx, { type: 'attack', target: f.id });
+  else if (manhattan(ctx.pos, f) <= 3) ctx.plan.push({ type: 'intercept', ticks: apLeft(ctx.plan) });
+  fill(ctx, { type: 'guard' });
+}
+
+function clearShot(state: GameState, from: Pos, f: Unit, self: Unit, reserved?: Set<string>): boolean {
+  const r = unitDef(self.defId).range;
+  if (dist2(from, f) > r * r || !hasLos(state.map, from, f)) return false;
+  return linePoints(from, f).every(
+    (p) => (p.x === f.x && p.y === f.y) || (!reserved?.has(key(p)) && !state.units.some((o) => o !== self && !o.down && o.x === p.x && o.y === p.y)),
+  );
+}
+
+function archer(ctx: Ctx): void {
+  const { state, u } = ctx;
+  const shootable = ctx.foes.filter((f) => clearShot(state, ctx.pos, f, u, ctx.reserved));
+  if (shootable.length === 0) {
+    // 3 歩以内で射線の通るマスを探す
+    const path = findPath(state.map, ctx.pos, (p) => ctx.foes.some((f) => clearShot(state, p, f, u, ctx.reserved)), occupied(ctx), 200);
+    if (path && path.length <= 3) moveAlong(ctx, path, RULES.attackCost);
+  }
+  const now = ctx.foes.filter((f) => clearShot(state, ctx.pos, f, u, ctx.reserved));
+  if (now.length > 0) {
+    const t = nearest(ctx.pos, now);
+    fill(ctx, { type: 'attack', target: t.id });
+  }
+  if (apLeft(ctx.plan) > 0) ctx.plan.push({ type: 'overwatch', ticks: apLeft(ctx.plan) });
+}
+
+function mage(ctx: Ctx): void {
+  const { state, u } = ctx;
+  const fb = SPELLS.fireball;
+  const allies = () =>
+    state.units
+      .filter((o) => o.side === 'party' && !o.down && o !== u)
+      .map((o) => ctx.endPos.get(o.id) ?? { x: o.x, y: o.y });
+  const score = (tile: Pos) => {
+    const near = (p: Pos) => Math.max(Math.abs(p.x - tile.x), Math.abs(p.y - tile.y)) <= fb.radius;
+    const hitFoes = ctx.foes.filter(near).length;
+    const hitAllies = allies().filter(near).length + (near(ctx.pos) ? 1 : 0);
+    return hitFoes - hitAllies * 3;
+  };
+  const castable = (from: Pos, tile: Pos) => dist2(from, tile) <= fb.range * fb.range && hasLos(state.map, from, tile);
+  if (u.mp >= fb.mp) {
+    let best: { tile: Pos; s: number } | null = null;
+    for (const f of ctx.foes) {
+      const s = score(f);
+      if (s > 0 && (!best || s > best.s)) best = { tile: { x: f.x, y: f.y }, s };
+    }
+    if (best) {
+      if (!castable(ctx.pos, best.tile)) {
+        const tile = best.tile;
+        const path = findPath(state.map, ctx.pos, (p) => castable(p, tile), occupied(ctx), 300);
+        if (path) moveAlong(ctx, path, RULES.spellCost);
+      }
+      if (castable(ctx.pos, best.tile)) ctx.plan.push({ type: 'spell', spell: 'fireball', tile: best.tile });
+    }
+  }
+  retreatOrGuard(ctx);
+}
+
+function priest(ctx: Ctx): void {
+  const { state, u } = ctx;
+  const allies = state.units.filter((o) => o.side === 'party' && o !== u);
+  const downed = allies.filter((o) => o.down);
+  if (downed.length > 0 && u.mp >= SPELLS.revive.mp) {
+    const t = nearest(ctx.pos, downed);
+    if (manhattan(ctx.pos, t) > 1) moveAlong(ctx, pathAdjacent(state.map, ctx.pos, t, occupied(ctx)) ?? [], RULES.spellCost);
+    if (manhattan(ctx.pos, t) <= 1) {
+      ctx.plan.push({ type: 'spell', spell: 'revive', target: t.id });
+      return retreatOrGuard(ctx);
+    }
+  }
+  const hurt = allies
+    .filter((o) => !o.down && o.hp / unitDef(o.defId).maxHp < 0.5)
+    .filter((o) => dist2(ctx.pos, o) <= SPELLS.heal.range ** 2 && hasLos(state.map, ctx.pos, o))
+    .sort((a, b) => a.hp / unitDef(a.defId).maxHp - b.hp / unitDef(b.defId).maxHp);
+  if (hurt.length > 0 && u.mp >= SPELLS.heal.mp) ctx.plan.push({ type: 'spell', spell: 'heal', target: hurt[0].id });
+  // 立っている仲間がいなければ、自分で戦うしかない
+  if (ctx.plan.length === 0 && allies.every((o) => o.down)) return melee(ctx);
+  retreatOrGuard(ctx);
+}
+
+/** 敵が近ければ 1〜2 歩下がり、残りは防御 */
+function retreatOrGuard(ctx: Ctx): void {
+  const f = nearest(ctx.pos, ctx.foes);
+  if (f && manhattan(ctx.pos, f) <= 2 && apLeft(ctx.plan) >= 1) {
+    for (let i = 0; i < 2 && apLeft(ctx.plan) > 0; i++) {
+      const d = DIR_LIST.find((d) => {
+        const n = step(ctx.pos, d);
+        return isWalkable(ctx.state.map, n.x, n.y) && !occupied(ctx)(n) && manhattan(n, f) > manhattan(ctx.pos, f);
+      });
+      if (!d) break;
+      ctx.plan.push({ type: 'move', dir: d });
+      ctx.pos = step(ctx.pos, d);
+    }
+  }
+  fill(ctx, { type: 'guard' });
+}
+
+/**
+ * 敵が見えない間の移動(蛇行隊列)。
+ * 目標に最も近い者が先頭になって進み、残りは 1 人前の者が通った跡をなぞる。
+ * 前の者が空けたマスへ同じティックに入るので、同時解決でも詰まらない。全員「発見で停止」付き。
+ */
+function explore(state: GameState, party: Unit[]): Plans {
+  const { map } = state;
+  const plans: Plans = {};
+  const unexplored = (x: number, y: number) => x >= 0 && y >= 0 && x < map.w && y < map.h && !state.explored[y * map.w + x];
+  const frontier = (p: Pos) =>
+    DIR_LIST.some((d) => {
+      const n = step(p, d);
+      return unexplored(n.x, n.y) && isWalkable(map, n.x, n.y);
+    });
+  // 全域を探索済みなら、生き残りの敵の隣を目標にする(巡回中の敵を探す代わり)
+  const foe = state.units.find((u) => u.side === 'enemy' && !u.down);
+  const goal = state.explored.some((e, i) => !e && map.tiles[(i / map.w) | 0][i % map.w] !== '#')
+    ? frontier
+    : (p: Pos) => !!foe && manhattan(p, foe) === 1;
+
+  // 先頭: 味方を避けた経路が最も短い者
+  let leader = party[0];
+  let best: Dir[] | null = null;
+  for (const u of party) {
+    const byAlly = (p: Pos) => party.some((o) => o !== u && o.x === p.x && o.y === p.y);
+    const p = findPath(map, u, goal, byAlly, 5000);
+    if (p && (!best || p.length < best.length)) {
+      best = p;
+      leader = u;
+    }
+  }
+  const lead = (best ?? []).slice(0, 8);
+  plans[leader.id] = lead.map((d) => ({ type: 'move', dir: d, stop: true }));
+
+  // 残りは先頭に近い順に並べ、1 人前の者の出発点へ向かってから、その者と同じ経路をなぞる
+  const rest = party.filter((u) => u !== leader).sort((a, b) => manhattan(a, leader) - manhattan(b, leader));
+  let prev: { start: Pos; dirs: Dir[] } = { start: { x: leader.x, y: leader.y }, dirs: lead };
+  for (const u of rest) {
+    const toPrev = pathTo(map, u, prev.start) ?? [];
+    const dirs = [...toPrev, ...prev.dirs].slice(0, 8);
+    plans[u.id] = dirs.map((d) => ({ type: 'move', dir: d, stop: true }));
+    prev = { start: { x: u.x, y: u.y }, dirs };
+  }
+  return plans;
+}

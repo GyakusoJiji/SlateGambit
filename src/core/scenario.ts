@@ -50,7 +50,7 @@ export function createTestGame(seed: number): GameState {
     party('p4', 'priest', 2, 20),
     monster('g1', 'goblin', 15, 20),
     monster('g2', 'goblin', 17, 19),
-    monster('o1', 'orc', 28, 15, { mode: 'patrol', patrol: [{ x: 28, y: 15 }, { x: 3, y: 15 }], patrolIndex: 0 }),
+    monster('o1', 'orc', 28, 15, { mode: 'patrol', patrol: [{ x: 28, y: 15 }, { x: 3, y: 15 }], patrolIndex: 1 }),
     monster('a1', 'archer', 15, 13),
     monster('g3', 'goblin', 6, 9),
     monster('a2', 'archer', 2, 8),

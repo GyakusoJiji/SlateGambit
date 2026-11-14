@@ -1,8 +1,11 @@
 import { SPELLS, unitDef } from '../data/units';
 import { AP_PER_TURN, type Action, type Unit } from './types';
 
-export const ATTACK_COST = 2;
-export const SPELL_COST = 3;
+/** 行動コストなどの調整用の値(自動対戦で比較できるよう書き換え可能にしてある) */
+export const RULES = {
+  attackCost: 2,
+  spellCost: 3,
+};
 
 export function actionCost(a: Action): number {
   switch (a.type) {
@@ -11,9 +14,9 @@ export function actionCost(a: Action): number {
     case 'wait':
       return 1;
     case 'attack':
-      return ATTACK_COST;
+      return RULES.attackCost;
     case 'spell':
-      return SPELL_COST;
+      return RULES.spellCost;
     case 'overwatch':
     case 'intercept':
     case 'follow':
