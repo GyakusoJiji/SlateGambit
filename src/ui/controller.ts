@@ -1,6 +1,6 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
 import { planEnemies, summarizeIntent } from '../core/ai';
-import { apLeft, canAppend } from '../core/actions';
+import { apLeft, canAppend, fillPlan } from '../core/actions';
 import { samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { resolveTurn } from '../core/resolve';
@@ -59,6 +59,15 @@ export class Controller {
     el.topbar.addEventListener('click', (e) => this.onTopbarClick(e));
     el.overlay.addEventListener('click', (e) => this.onOverlayClick(e));
     el.overlay.addEventListener('change', (e) => this.onSettingChange(e));
+    window.addEventListener('keydown', (e) => this.onKey(e));
+  }
+
+  /** リターンキーは「実行▶」と同じ。再生中・設定画面の表示中は無視する */
+  private onKey(e: KeyboardEvent): void {
+    if (e.key !== 'Enter' || e.repeat || e.isComposing) return;
+    if (this.playback || !this.el.overlay.hidden || this.state.status !== 'playing') return;
+    e.preventDefault();
+    this.execute();
   }
 
   start(seed: number): void {
@@ -97,7 +106,11 @@ export class Controller {
   }
 
   private execute(): void {
-    const result = resolveTurn(this.state, { ...this.enemyPlans, ...this.plans });
+    // 指定されていない残り AP は、戦闘中は防御、非戦闘中は待機にする
+    const inCombat = this.foesInSight();
+    const filled: Plans = {};
+    for (const u of this.party()) if (!u.down) filled[u.id] = fillPlan(this.plans[u.id] ?? [], inCombat);
+    const result = resolveTurn(this.state, { ...this.enemyPlans, ...filled });
     this.playback = new Playback(this.state, result);
     this.lastPlayback = this.playback;
     this.state = result.state;
@@ -212,7 +225,7 @@ export class Controller {
       ${partyCards(this.party(), this.plans, this.selected)}
       ${
         sel && !sel.down
-          ? `<div class="plan"><b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf)}</div>
+          ? `<div class="plan"><b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf, this.foesInSight())}</div>
              <p class="prompt">${prompt}</p>
              <p class="desc">${T.desc.idle}</p>
              ${actionButtons(sel, acts, this.mode, this.stopFlag)}`

@@ -7,6 +7,8 @@ export const T = {
   hp: 'HP',
   mp: 'MP',
   down: '気絶',
+  /** 予約の残り AP の扱い(戦闘中は防御、非戦闘中は待機) */
+  restFill: (filler: string, n: number, all: boolean) => (all ? `予約なし(${filler})` : `残り ${filler}×${n}`),
 
   act: {
     move: '移動',
@@ -45,7 +47,7 @@ export const T = {
     undo: '選択中の味方の最後の予約を取り消す',
     clear: '選択中の味方の予約をすべて取り消す',
     rest: '全員の予約を消して待機し、HP と MP を少し回復する',
-    execute: '敵味方の予約を 8 ティックで同時に解決する',
+    execute: '敵味方の予約を 8 ティックで同時に解決する(リターンキーでも実行)',
   } as Record<string, string>,
 
   prompt: {

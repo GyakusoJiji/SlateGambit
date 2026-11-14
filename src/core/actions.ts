@@ -43,6 +43,18 @@ export function apLeft(actions: Action[]): number {
   return AP_PER_TURN - planCost(actions);
 }
 
+/** 余った AP を埋める行動: 戦闘中(敵が見えている)は防御、それ以外は待機 */
+export function fillerAction(inCombat: boolean): Action {
+  return { type: inCombat ? 'guard' : 'wait' };
+}
+
+/** 予約の残り AP を埋めた計画を返す(元の配列は変えない) */
+export function fillPlan(actions: Action[], inCombat: boolean): Action[] {
+  const out = [...actions];
+  for (let n = apLeft(out); n > 0; n--) out.push(fillerAction(inCombat));
+  return out;
+}
+
 /** 予約全体の MP 消費 */
 export function planMp(actions: Action[]): number {
   return actions.reduce((s, a) => s + (a.type === 'spell' ? SPELLS[a.spell].mp : 0), 0);

@@ -51,8 +51,10 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
 }
 
 /** 連続する移動を 1 つのチップにまとめて表示する */
-export function planChips(actions: Action[], nameOf: (id: string) => string): string {
-  if (actions.length === 0) return `<span class="chip empty">予約なし(待機)</span>`;
+export function planChips(actions: Action[], nameOf: (id: string) => string, inCombat: boolean): string {
+  const rest = apLeft(actions);
+  const filler = inCombat ? T.act.guard : T.act.wait;
+  const tail = rest > 0 ? `<span class="chip empty">${T.restFill(filler, rest, actions.length === 0)}</span>` : '';
   const out: string[] = [];
   let arrows = '';
   for (const a of actions) {
@@ -65,7 +67,7 @@ export function planChips(actions: Action[], nameOf: (id: string) => string): st
     out.push(`<span class="chip">${esc(actionLabel(a, nameOf))}</span>`);
   }
   if (arrows) out.push(`<span class="chip mv">${arrows}</span>`);
-  return out.join('');
+  return out.join('') + tail;
 }
 
 export function actionButtons(u: Unit, actions: Action[], mode: Mode, stopFlag: boolean): string {

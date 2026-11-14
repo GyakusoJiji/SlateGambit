@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RULES } from '../src/core/actions';
+import { RULES, fillPlan } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { parseMap } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
@@ -90,6 +90,13 @@ describe('移動', () => {
     const r = resolveTurn(s, { p1: [...moves('E', 2)], g1: [{ type: 'wait' }, ...moves('N', 1)] });
     const tiles = r.state.units.map((x) => `${x.x},${x.y}`);
     expect(new Set(tiles).size).toBe(tiles.length);
+  });
+
+  it('残り AP は戦闘中は防御、非戦闘中は待機で埋まる', () => {
+    const plan: Action[] = [...moves('E', 2), { type: 'attack', target: 'g1' }];
+    expect(fillPlan(plan, true).slice(3)).toEqual([{ type: 'guard' }, { type: 'guard' }, { type: 'guard' }]);
+    expect(fillPlan(plan, false).slice(3)).toEqual([{ type: 'wait' }, { type: 'wait' }, { type: 'wait' }]);
+    expect(plan).toHaveLength(3);
   });
 
   it('設定で敵のマスを通り抜け不可にできる', () => {
