@@ -226,8 +226,7 @@ export class Controller {
       ${
         sel && !sel.down
           ? `<div class="plan"><b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf, this.foesInSight())}</div>
-             <p class="prompt">${prompt}</p>
-             <p class="desc">${T.desc.idle}</p>
+             <p class="prompt" data-prompt="${prompt}">${prompt}</p>
              ${actionButtons(sel, acts, this.mode, this.stopFlag)}`
           : `<p class="prompt">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</p>`
       }
@@ -352,14 +351,17 @@ export class Controller {
     if (actBtn && !this.playback) this.onAction(actBtn.dataset.act!);
   }
 
-  /** 行動ボタンにマウスが乗ったら説明を 1 行出す(離れたら元に戻す) */
+  /** 行動ボタンにマウスが乗ったら、操作案内の行をそのボタンの説明に差し替える(離れたら元に戻す) */
   private showDesc(e: PointerEvent, leaving = false): void {
-    const line = this.el.panel.querySelector('.desc');
+    const line = this.el.panel.querySelector<HTMLElement>('[data-prompt]');
     if (!line) return;
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!b) return;
     if (leaving && b.contains(e.relatedTarget as Node | null)) return;
-    line.textContent = leaving ? T.desc.idle : T.desc[b.dataset.act!] ?? T.desc.idle;
+    const desc = T.desc[b.dataset.act!];
+    const label = b.childNodes[0]?.textContent ?? '';
+    line.textContent = leaving || !desc ? line.dataset.prompt! : `${label}: ${desc}`;
+    line.classList.toggle('hover', !leaving && !!desc);
   }
 
   private foesInSight(): boolean {

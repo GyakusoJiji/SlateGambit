@@ -199,19 +199,17 @@ body {
   color: var(--muted);
   background: transparent;
 }
+/* 操作案内。ボタンにマウスを乗せている間はその説明に差し替わる。1 行に収め、はみ出しは省略 */
 .prompt {
   margin: 6px 2px;
   color: var(--muted);
   font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-
-/* ボタンの説明。2 行分の高さを確保して、説明が変わってもボタンが動かないようにする */
-.desc {
-  min-height: calc(12px * 1.4 * 2);
-  margin: 0 2px 6px;
+.prompt.hover {
   color: #d8c890;
-  font-size: 12px;
-  line-height: 1.4;
 }
 
 /* ボタン */
