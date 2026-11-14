@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RULES } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { parseMap } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
@@ -62,11 +63,58 @@ describe('移動', () => {
     expect(entered).toBe(1);
   });
 
-  it('すれ違い(入れ替わり)はできない', () => {
+  it('すれ違い(入れ替わり)ができる', () => {
     const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
     const r = resolveTurn(s, { p1: moves('E', 1), g1: moves('W', 1) });
-    expect(u(r.state, 'p1')).toMatchObject({ x: 1 });
-    expect(u(r.state, 'g1')).toMatchObject({ x: 2 });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 2 });
+    expect(u(r.state, 'g1')).toMatchObject({ x: 1 });
+  });
+
+  it('止まっているユニットのマスを通り抜けられる', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('p2', 'thief', 2, 1)]);
+    const r = resolveTurn(s, { p1: moves('E', 3) });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 4, y: 1 });
+    expect(u(r.state, 'p2')).toMatchObject({ x: 2, y: 1 });
+  });
+
+  it('止まっているユニットのマスには止まれない', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('p2', 'thief', 3, 1)]);
+    const r = resolveTurn(s, { p1: moves('E', 2) });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 2, y: 1 });
+    expect(u(r.state, 'p2')).toMatchObject({ x: 3, y: 1 });
+  });
+
+  it('通り抜けの途中で止まったら空きマスへ押し出される', () => {
+    // p1 が p2 のマスを通る途中、行き先の (3,1) に g1 が同時に止まって入れない
+    const s = game([mk('p1', 'warrior', 1, 1), mk('p2', 'thief', 2, 1), mk('g1', 'goblin', 3, 2)]);
+    const r = resolveTurn(s, { p1: [...moves('E', 2)], g1: [{ type: 'wait' }, ...moves('N', 1)] });
+    const tiles = r.state.units.map((x) => `${x.x},${x.y}`);
+    expect(new Set(tiles).size).toBe(tiles.length);
+  });
+
+  it('設定で敵のマスを通り抜け不可にできる', () => {
+    RULES.passThroughFoes = false;
+    try {
+      const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
+      const r = resolveTurn(s, { p1: moves('E', 3) });
+      expect(u(r.state, 'p1')).toMatchObject({ x: 1, y: 1 });
+    } finally {
+      RULES.passThroughFoes = true;
+    }
+  });
+
+  it('止まるマスが重ならない(多数のランダムな移動)', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const units = [mk('p1', 'warrior', 1, 1), mk('p2', 'thief', 2, 1), mk('p3', 'mage', 3, 1), mk('g1', 'goblin', 4, 2), mk('g2', 'goblin', 5, 3)];
+      const s = game(units, OPEN, seed);
+      const dirs = ['N', 'E', 'S', 'W'] as const;
+      const plans: Record<string, Action[]> = {};
+      let r = seed;
+      for (const x of units) plans[x.id] = Array.from({ length: 8 }, () => ({ type: 'move', dir: dirs[(r = (r * 1103515245 + 12345) & 0x7fffffff) % 4] }));
+      const res = resolveTurn(s, plans);
+      const tiles = res.state.units.map((x) => `${x.x},${x.y}`);
+      expect(new Set(tiles).size).toBe(tiles.length);
+    }
   });
 
   it('前のユニットが動けば後ろも続いて動ける', () => {

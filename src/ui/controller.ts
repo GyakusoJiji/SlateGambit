@@ -54,6 +54,8 @@ export class Controller {
       this.dirty = true;
     }).observe(el.canvas);
     el.panel.addEventListener('click', (e) => this.onPanelClick(e));
+    el.panel.addEventListener('pointerover', (e) => this.showDesc(e));
+    el.panel.addEventListener('pointerout', (e) => this.showDesc(e, true));
     el.topbar.addEventListener('click', (e) => this.onTopbarClick(e));
     el.overlay.addEventListener('click', (e) => this.onOverlayClick(e));
     el.overlay.addEventListener('change', (e) => this.onSettingChange(e));
@@ -212,6 +214,7 @@ export class Controller {
         sel && !sel.down
           ? `<div class="plan"><b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf)}</div>
              <p class="prompt">${prompt}</p>
+             <p class="desc">${T.desc.idle}</p>
              ${actionButtons(sel, acts, this.mode, this.stopFlag)}`
           : `<p class="prompt">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</p>`
       }
@@ -334,6 +337,16 @@ export class Controller {
     }
     const actBtn = t.closest<HTMLElement>('[data-act]');
     if (actBtn && !this.playback) this.onAction(actBtn.dataset.act!);
+  }
+
+  /** 行動ボタンにマウスが乗ったら説明を 1 行出す(離れたら元に戻す) */
+  private showDesc(e: PointerEvent, leaving = false): void {
+    const line = this.el.panel.querySelector('.desc');
+    if (!line) return;
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+    if (!b) return;
+    if (leaving && b.contains(e.relatedTarget as Node | null)) return;
+    line.textContent = leaving ? T.desc.idle : T.desc[b.dataset.act!] ?? T.desc.idle;
   }
 
   private foesInSight(): boolean {

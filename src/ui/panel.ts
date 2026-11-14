@@ -1,5 +1,5 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
-import { apLeft, planCost } from '../core/actions';
+import { RULES, apLeft, planCost } from '../core/actions';
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
@@ -75,13 +75,13 @@ export function actionButtons(u: Unit, actions: Action[], mode: Mode, stopFlag: 
     `<button data-act="${id}" class="act${opts.on ? ' on' : ''}${opts.cls ? ' ' + opts.cls : ''}"${opts.off ? ' disabled' : ''}>${label}</button>`;
   const list = [
     btn('move', T.act.move, { on: mode === 'move', off: ap < 1 }),
-    btn('attack', T.act.attack, { on: mode === 'attack', off: ap < 2 }),
+    btn('attack', T.act.attack, { on: mode === 'attack', off: ap < RULES.attackCost }),
     btn('guard', T.act.guard, { off: ap < 1 }),
     btn('wait', T.act.wait, { off: ap < 1 }),
   ];
   for (const s of d.spells) {
     const sd = SPELLS[s];
-    list.push(btn(s, `${sd.name}<small>MP${sd.mp}</small>`, { on: mode === s, off: ap < 3 }));
+    list.push(btn(s, `${sd.name}<small>MP${sd.mp}</small>`, { on: mode === s, off: ap < RULES.spellCost }));
   }
   if (d.range > 1) list.push(btn('overwatch', T.act.overwatch, { off: ap < 1 }));
   list.push(btn('intercept', T.act.intercept, { off: ap < 1 }));

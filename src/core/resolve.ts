@@ -2,7 +2,7 @@
 import { SPELLS, unitDef } from '../data/units';
 import { RULES, expandPlan, isRestPlan, type Step } from './actions';
 import { hasLos, linePoints } from './los';
-import { dist2, isWalkable, manhattan, step } from './map';
+import { DIR_LIST, dist2, isWalkable, manhattan, step } from './map';
 import { pathAdjacent } from './path';
 import { triggerReaction } from './reactions';
 import { Rng } from './rng';
@@ -85,15 +85,14 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       }
       if (to) intents.push({ unit: u, from: { x: u.x, y: u.y }, to, status: 'pending' });
     }
-    resolveMoves(intents, units, map, rng);
     for (const m of intents) {
-      if (m.status === 'ok') {
-        m.unit.x = m.to.x;
-        m.unit.y = m.to.y;
-        events.push({ tick, type: 'move', id: m.unit.id, from: m.from, to: m.to });
-      } else {
-        events.push({ tick, type: 'bump', id: m.unit.id, at: m.to });
+      if (!isWalkable(map, m.to.x, m.to.y)) {
+        m.status = 'blocked';
+        continue;
       }
+      m.status = 'ok';
+      m.unit.x = m.to.x;
+      m.unit.y = m.to.y;
     }
 
     // 敵を見たら停止
@@ -113,6 +112,18 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
         events.push({ tick, type: 'halt', id: u.id });
       }
     }
+
+    // 同じマスに止まるユニットが重ならないよう整理し、移動のイベントを出す
+    // 通り抜けの途中: このティックに移動できて、次のティックも移動する
+    const intentById = new Map(intents.map((m) => [m.unit.id, m]));
+    const continues = (u: Unit) =>
+      intentById.get(u.id)?.status === 'ok' && tick < TICKS_PER_TURN && steps.get(u.id)![tick].k === 'move';
+    const displaced = settleMoves(intents, units, map, rng, continues);
+    for (const m of intents) {
+      if (m.status === 'ok') events.push({ tick, type: 'move', id: m.unit.id, from: m.from, to: m.to });
+      else events.push({ tick, type: 'bump', id: m.unit.id, at: m.to });
+    }
+    for (const d of displaced) events.push({ tick, type: 'move', id: d.unit.id, from: d.from, to: d.to });
 
     // ③ 条件付き行動の発動
     const strikes: StrikeIntent[] = [];
@@ -183,57 +194,84 @@ function snapshot(units: Unit[], guard: Set<string>, watching: Set<string>): Uni
 }
 
 /**
- * 移動の競合解決。
- * - 同じマスへの同時進入は乱数で 1 体だけ成功
- * - 入れ替わり(すれ違い)は両者失敗
- * - 動かない・失敗したユニットのいるマスへは入れない
- * - 3 体以上の循環も失敗とする
+ * 移動後の位置の整理。移動は他のユニットがいるマスも通り抜けられるが、
+ * 同じマスに 2 体以上が「止まる」ことはできない。
+ * - 次のティックも移動を続けるユニットは、他と重なっていてよい(通り抜け)
+ * - 止まるユニットが重なったら、元からそこにいたユニットを優先し、
+ *   いなければ乱数で 1 体を残す。残れなかったユニットは元のマスへ戻る(進めなかった扱い)
+ * - 戻る先にも止まるユニットがいる、または通り抜けの途中で止まった場合は、最寄りの空きマスへ押し出す
+ * 押し出したユニットの移動を返す。
  */
-export function resolveMoves(intents: MoveIntent[], units: Unit[], map: GameState['map'], rng: Rng): void {
-  for (const m of intents) {
-    if (!isWalkable(map, m.to.x, m.to.y)) m.status = 'blocked';
-  }
-  const groups = new Map<string, MoveIntent[]>();
-  for (const m of intents) {
-    if (m.status !== 'pending') continue;
-    const k = key(m.to);
-    const g = groups.get(k);
-    if (g) g.push(m);
-    else groups.set(k, [m]);
-  }
-  for (const g of groups.values()) {
-    if (g.length < 2) continue;
-    const win = rng.int(0, g.length - 1);
-    g.forEach((m, i) => {
-      if (i !== win) m.status = 'blocked';
-    });
-  }
-
-  const occupant = new Map<string, Unit>();
-  for (const u of units) if (!u.down) occupant.set(key(u), u);
+export function settleMoves(
+  intents: MoveIntent[],
+  units: Unit[],
+  map: GameState['map'],
+  rng: Rng,
+  continues: (u: Unit) => boolean,
+): { unit: Unit; from: Pos; to: Pos }[] {
   const intentOf = new Map(intents.map((m) => [m.unit.id, m]));
+  const displaced: { unit: Unit; from: Pos; to: Pos }[] = [];
+  const stoppers = () => units.filter((u) => !u.down && !continues(u));
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const m of intents) {
-      if (m.status !== 'pending') continue;
-      const occ = occupant.get(key(m.to));
-      let next: MoveIntent['status'] | null = null;
-      if (!occ) next = 'ok';
-      else {
-        const oi = intentOf.get(occ.id);
-        if (!oi || oi.status === 'blocked') next = 'blocked';
-        else if (oi.status === 'ok') next = 'ok';
-        else if (oi.to.x === m.from.x && oi.to.y === m.from.y) next = 'blocked';
+  for (let guardLoop = 0; guardLoop < units.length * 4; guardLoop++) {
+    const byTile = new Map<string, Unit[]>();
+    for (const u of stoppers()) {
+      const g = byTile.get(key(u));
+      if (g) g.push(u);
+      else byTile.set(key(u), [u]);
+    }
+    let conflict = [...byTile.values()].find((g) => g.length > 1);
+    if (!conflict && !RULES.passThroughFoes) {
+      // 敵のいるマスは通り抜けられない: 敵味方が同じマスにいたら整理の対象にする
+      const all = new Map<string, Unit[]>();
+      for (const u of units) if (!u.down) all.set(key(u), [...(all.get(key(u)) ?? []), u]);
+      conflict = [...all.values()].find((g) => g.some((a) => g.some((b) => a.side !== b.side)));
+    }
+    if (!conflict) break;
+
+    const moved = (u: Unit) => intentOf.get(u.id)?.status === 'ok';
+    // 優先順: 動かなかったユニット → 戻された・押し出されたユニット → 乱数で選んだ移動者
+    const keeper =
+      conflict.find((u) => !intentOf.has(u.id)) ??
+      conflict.find((u) => !moved(u)) ??
+      conflict[rng.int(0, conflict.length - 1)];
+    for (const u of conflict) {
+      if (u === keeper) continue;
+      const m = intentOf.get(u.id);
+      if (m && m.status === 'ok') {
+        m.status = 'blocked';
+        u.x = m.from.x;
+        u.y = m.from.y;
+        continue;
       }
-      if (next) {
-        m.status = next;
-        changed = true;
-      }
+      const from = pos(u);
+      const to = nearestFree(map, u, units, continues);
+      if (!to) continue;
+      u.x = to.x;
+      u.y = to.y;
+      displaced.push({ unit: u, from, to });
     }
   }
-  for (const m of intents) if (m.status === 'pending') m.status = 'blocked';
+  return displaced;
+}
+
+/** 止まるユニットがいない最寄りの床マス */
+function nearestFree(map: GameState['map'], start: Pos, units: Unit[], continues: (u: Unit) => boolean): Pos | null {
+  const taken = new Set(units.filter((u) => !u.down && !continues(u)).map(key));
+  const seen = new Set([key(start)]);
+  const queue: Pos[] = [pos(start)];
+  for (let i = 0; i < queue.length && i < 400; i++) {
+    const p = queue[i];
+    for (const d of DIR_LIST) {
+      const n = step(p, d);
+      const k = key(n);
+      if (seen.has(k) || !isWalkable(map, n.x, n.y)) continue;
+      if (!taken.has(k)) return n;
+      seen.add(k);
+      queue.push(n);
+    }
+  }
+  return null;
 }
 
 interface StrikeCtx {

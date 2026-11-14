@@ -22,6 +22,7 @@ const VARIANTS: { name: string; setup: () => void }[] = [
   { name: '敵 攻撃-1', setup: () => strengthen(-1, 1) },
   { name: '敵 攻撃+1', setup: () => strengthen(1, 1) },
   { name: '休憩なし', setup: () => rest(0, 0) },
+  { name: '敵は通り抜け不可', setup: () => (RULES.passThroughFoes = false) },
 ];
 
 function strengthen(atk: number, hp: number): void {
