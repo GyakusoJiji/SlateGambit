@@ -21,15 +21,7 @@ const VARIANTS: { name: string; setup: () => void }[] = [
   { name: '現行', setup: () => {} },
   { name: '敵 攻撃-1', setup: () => strengthen(-1, 1) },
   { name: '敵 攻撃+1', setup: () => strengthen(1, 1) },
-  { name: '敵 攻撃-2', setup: () => strengthen(-2, 1) },
-  { name: '敵は通り抜け不可', setup: () => (RULES.passThroughFoes = false) },
-  {
-    name: '敵は通り抜け不可・敵攻撃-1',
-    setup: () => {
-      RULES.passThroughFoes = false;
-      strengthen(-1, 1);
-    },
-  },
+  { name: '敵も通り抜け可', setup: () => (RULES.passThroughFoes = true) },
   { name: '休憩なし', setup: () => rest(0, 0) },
 ];
 

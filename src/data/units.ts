@@ -27,10 +27,10 @@ export const CLASSES: Record<string, UnitDef> = {
 };
 
 export const MONSTERS: Record<string, UnitDef> = {
-  goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 17, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [] },
-  archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 15, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [] },
-  orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 33, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [] },
-  ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 60, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [] },
+  goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 17, maxMp: 0, atk: 6, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [] },
+  archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 15, maxMp: 0, atk: 6, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [] },
+  orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 33, maxMp: 0, atk: 9, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [] },
+  ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 60, maxMp: 0, atk: 10, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [] },
 };
 
 export interface SpellDef {

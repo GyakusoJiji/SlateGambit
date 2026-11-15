@@ -9,7 +9,7 @@ export const RULES = {
   restHpRatio: 0.1,
   restMp: 2,
   /** 敵のいるマスも通り抜けられるか(false なら味方のマスだけ通り抜けられる) */
-  passThroughFoes: true,
+  passThroughFoes: false,
 };
 
 /** 予約が待機だけ(または空)か */

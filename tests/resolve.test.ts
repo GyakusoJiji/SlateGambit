@@ -63,11 +63,23 @@ describe('移動', () => {
     expect(entered).toBe(1);
   });
 
-  it('すれ違い(入れ替わり)ができる', () => {
-    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
-    const r = resolveTurn(s, { p1: moves('E', 1), g1: moves('W', 1) });
+  it('味方同士はすれ違い(入れ替わり)ができる', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('p2', 'thief', 2, 1)]);
+    const r = resolveTurn(s, { p1: moves('E', 1), p2: moves('W', 1) });
     expect(u(r.state, 'p1')).toMatchObject({ x: 2 });
-    expect(u(r.state, 'g1')).toMatchObject({ x: 1 });
+    expect(u(r.state, 'p2')).toMatchObject({ x: 1 });
+  });
+
+  it('設定で敵とのすれ違いを許可できる', () => {
+    RULES.passThroughFoes = true;
+    try {
+      const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
+      const r = resolveTurn(s, { p1: moves('E', 1), g1: moves('W', 1) });
+      expect(u(r.state, 'p1')).toMatchObject({ x: 2 });
+      expect(u(r.state, 'g1')).toMatchObject({ x: 1 });
+    } finally {
+      RULES.passThroughFoes = false;
+    }
   });
 
   it('止まっているユニットのマスを通り抜けられる', () => {
@@ -99,19 +111,13 @@ describe('移動', () => {
     expect(plan).toHaveLength(3);
   });
 
-  it('設定で敵のマスを通り抜け不可にできる', () => {
-    RULES.passThroughFoes = false;
-    try {
-      const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
-      const r = resolveTurn(s, { p1: moves('E', 3) });
-      expect(u(r.state, 'p1')).toMatchObject({ x: 1, y: 1 });
-      // 敵との入れ替わりもできない
-      const r2 = resolveTurn(s, { p1: moves('E', 1), g1: moves('W', 1) });
-      expect(u(r2.state, 'p1')).toMatchObject({ x: 1, y: 1 });
-      expect(u(r2.state, 'g1')).toMatchObject({ x: 2, y: 1 });
-    } finally {
-      RULES.passThroughFoes = true;
-    }
+  it('敵のマスは通り抜けられず、敵とのすれ違いもできない', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
+    const r = resolveTurn(s, { p1: moves('E', 3) });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 1, y: 1 });
+    const r2 = resolveTurn(s, { p1: moves('E', 1), g1: moves('W', 1) });
+    expect(u(r2.state, 'p1')).toMatchObject({ x: 1, y: 1 });
+    expect(u(r2.state, 'g1')).toMatchObject({ x: 2, y: 1 });
   });
 
   it('止まるマスが重ならない(多数のランダムな移動)', () => {
