@@ -50,6 +50,8 @@ TRACE=1000 npm run playtest      # シード 1000 の 1 戦をターンごとに
 
 比較する調整案は `tools/playtest.sim.ts` の `VARIANTS`、パーティの自動操作は `tools/partyBot.ts`。
 
+テキストで 1 ターンずつ手で遊ぶハーネスもある(使い方は `tools/manual.sim.ts` の先頭)。
+
 ## 構成
 
 - `src/core/` — ルールエンジン。DOM に依存せず、`resolveTurn(state, plans)` が唯一の進行手段。乱数はシード付きで決定的
