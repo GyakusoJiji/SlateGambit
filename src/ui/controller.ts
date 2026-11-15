@@ -5,6 +5,7 @@ import { manhattan, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { inReach, resolveTurn } from '../core/resolve';
 import { generateGame } from '../core/generate';
+import { quickMovePlans } from '../core/quickmove';
 import type { Action, Difficulty, GameState, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
@@ -48,7 +49,17 @@ export class Controller {
     },
   ) {
     this.renderer = new Renderer(el.canvas);
-    attachInput(el.canvas, this.renderer, (sx, sy) => this.onTap(sx, sy), () => (this.dirty = true));
+    attachInput(
+      el.canvas,
+      this.renderer,
+      (sx, sy) => this.onTap(sx, sy),
+      () => {
+        // 自分で盤面を動かしたら、自動のカメラ移動はやめる(再生中なら、その再生の間は追わない)
+        this.dirty = true;
+        this.camGoal = null;
+        if (this.playback) this.userPanned = true;
+      },
+    );
     new ResizeObserver(() => {
       this.renderer.resize();
       this.dirty = true;
@@ -65,9 +76,95 @@ export class Controller {
   /** リターンキーは「実行▶」と同じ。再生中・設定画面の表示中は無視する */
   private onKey(e: KeyboardEvent): void {
     if (e.key !== 'Enter' || e.repeat || e.isComposing) return;
+    if (this.stopAuto()) return;
     if (this.playback || !this.el.overlay.hidden || this.state.status !== 'playing') return;
     e.preventDefault();
     this.execute();
+  }
+
+  // ---- カメラ ----
+
+  /** カメラが滑らかに向かう先(null なら動かさない) */
+  private camGoal: Pos | null = null;
+
+  private focusOn(p: Pos): void {
+    this.camGoal = { x: p.x, y: p.y };
+    this.dirty = true;
+  }
+
+  /** 毎フレーム、カメラを目標へ近づける。再生中は動いている味方が画面の内側に収まるよう追う */
+  private updateCamera(): void {
+    const pb = this.playback;
+    if (pb && !this.userPanned) {
+      const snaps = pb.units().filter((s) => !s.down && pb.before.units.find((u) => u.id === s.id)?.side === 'party');
+      if (snaps.length > 0) {
+        const c = { x: snaps.reduce((a, s) => a + s.fx, 0) / snaps.length, y: snaps.reduce((a, s) => a + s.fy, 0) / snaps.length };
+        if (!this.renderer.inView(c, 0.25)) this.camGoal = c;
+      }
+    }
+    const g = this.camGoal;
+    if (!g) return;
+    const r = this.renderer;
+    const dx = g.x - r.cx;
+    const dy = g.y - r.cy;
+    if (Math.abs(dx) < 0.02 && Math.abs(dy) < 0.02) {
+      r.centerOn(g);
+      this.camGoal = null;
+    } else {
+      r.centerOn({ x: r.cx + dx * 0.18, y: r.cy + dy * 0.18 });
+    }
+    this.dirty = true;
+  }
+
+  /** 再生中に自分で盤面を動かしたか(動かしたらその再生の間は追わない) */
+  private userPanned = false;
+
+  // ---- 自動で進める操作(クイック移動・連続休憩) ----
+
+  /** クイック移動の行き先と先頭のキャラ */
+  private quick: { leader: string; target: Pos } | null = null;
+  /** 連続休憩の残り回数(0 なら連続休憩していない) */
+  private autoRest = 0;
+  private autoTimer = 0;
+
+  /** 自動で進めている操作を止める。止めたら true */
+  private stopAuto(msg?: string): boolean {
+    if (!this.quick && !this.autoRest) return false;
+    this.quick = null;
+    this.autoRest = 0;
+    clearTimeout(this.autoTimer);
+    if (msg) this.toast(msg);
+    this.changed();
+    return true;
+  }
+
+  /** 予約フェーズに戻ったとき、クイック移動・連続休憩の続きを行う */
+  private continueAuto(): void {
+    if (!this.quick && !this.autoRest) return;
+    if (this.state.status !== 'playing') return void this.stopAuto();
+    if (this.foesInSight()) return void this.stopAuto(T.toast.foundFoe);
+    const last = this.lastPlayback?.result.events ?? [];
+    if (last.some((e) => e.type === 'damage')) return void this.stopAuto();
+    if (this.quick) {
+      const plans = quickMovePlans(this.state, this.quick.leader, this.quick.target);
+      if (!plans) return void this.stopAuto(T.toast.arrived);
+      this.autoTimer = window.setTimeout(() => {
+        if (!this.quick || this.playback) return;
+        this.plans = { ...this.plans, ...plans };
+        this.execute(true);
+      }, 120);
+      return;
+    }
+    // 連続休憩: 立っている全員が全快するまで
+    const tired = this.party().some((u) => !u.down && (u.hp < unitDef(u.defId).maxHp || u.mp < unitDef(u.defId).maxMp));
+    if (!tired) return void this.stopAuto(T.toast.rested);
+    this.autoRest--;
+    if (this.autoRest <= 0) return void this.stopAuto();
+    this.autoTimer = window.setTimeout(() => {
+      if (!this.autoRest || this.playback) return;
+      for (const id of Object.keys(this.plans)) this.plans[id] = [];
+      this.execute(true);
+    }, 120);
   }
 
   /** 難易度選択の画面を出す。選ぶとそのシードで新しいゲームを始める */
@@ -117,16 +214,25 @@ export class Controller {
     const first = this.party().find((u) => !u.down);
     if (!this.selected || this.unit(this.selected)?.down) this.selected = first?.id ?? null;
     this.mode = this.defaultMode(this.selected);
+    // 選んでいるキャラが画面の外なら、そこへ盤面を寄せる
+    const sel = this.selected ? this.unit(this.selected) : undefined;
+    if (sel && !this.renderer.inView(sel, 0.1)) this.focusOn(sel);
     this.refresh();
-    if (this.state.status !== 'playing') this.showResult();
+    if (this.state.status !== 'playing') return this.showResult();
+    this.continueAuto();
   }
 
-  private execute(): void {
+  private execute(fast = false): void {
+    // 止まるマスが重なっていれば知らせる(実行はする。解決時に片方が押し戻される)
+    if (!fast && this.overlaps().length > 0) this.toast(T.toast.overlap);
     // 指定されていない残り AP は待機にする(敵が見えないときの待機は休憩になる)
     const filled: Plans = {};
     for (const u of this.party()) if (!u.down) filled[u.id] = fillPlan(this.plans[u.id] ?? []);
     const result = resolveTurn(this.state, { ...this.enemyPlans, ...filled });
     this.playback = new Playback(this.state, result);
+    this.userPanned = false;
+    // クイック移動・連続休憩の再生は速くする
+    if (fast) this.playback.speed = 4;
     this.lastPlayback = this.playback;
     this.state = result.state;
     this.refresh();
@@ -143,6 +249,7 @@ export class Controller {
   }
 
   private loop(now: number, prev: number): void {
+    this.updateCamera();
     const pb = this.playback;
     if (pb) {
       pb.update(now - prev);
@@ -183,7 +290,7 @@ export class Controller {
       }
       const tr = pb.treasure();
       for (const u of units) u.treasure = !!tr && tr.holder === u.id;
-      return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects(), treasureAt: tr?.at };
+      return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects(), treasureAt: tr?.at, pointers: this.pointers(pb.explored[fi], tr?.at ?? null) };
     }
 
     const st = this.state;
@@ -201,13 +308,36 @@ export class Controller {
     for (const u of this.party()) {
       marks.push(...planMarks(st, u, this.plans[u.id] ?? [], u.id === this.selected ? '#ffe14a' : '#5ab0ffaa'));
     }
+    // 止まるマスが重なっている所は赤い枠で知らせる
+    for (const p of this.overlaps()) marks.push({ kind: 'area', at: p, radius: 0, color: 'rgba(255,40,40,0.35)' }, { kind: 'target', at: p, color: '#ff3030' });
     if (this.settings.debugPlans) {
       for (const u of st.units) if (u.side === 'enemy' && !u.down) marks.push(...planMarks(st, u, this.enemyPlans[u.id] ?? [], '#ff5a5a99'));
     }
     const hints = this.settings.hints
-      ? st.units.filter((u) => u.side === 'enemy' && !u.down && seen(u)).map((u) => ({ at: { x: u.x, y: u.y }, intent: summarizeIntent(this.enemyPlans[u.id] ?? []) }))
+      ? st.units
+          .filter((u) => u.side === 'enemy' && !u.down && seen(u))
+          .map((u) => {
+            const plan = this.enemyPlans[u.id] ?? [];
+            // ブレスは着弾予定の範囲も見せる(読んでよければ避けられる)
+            const b = plan.find((a) => a.type === 'spell' && a.spell === 'breath');
+            const area = b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS.breath.radius } : undefined;
+            return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area };
+          })
       : [];
-    return { map: st.map, explored: st.explored, visible, units, marks, hints, effects: [], treasureAt: obj?.kind === 'treasure' ? obj.at : null };
+    const treasureAt = obj?.kind === 'treasure' ? obj.at : null;
+    return { map: st.map, explored: st.explored, visible, units, marks, hints, effects: [], treasureAt, pointers: this.pointers(st.explored, treasureAt) };
+  }
+
+  /** 画面外の目印: 入口の階段、見つけた宝、(誰も映っていなければ)味方 */
+  private pointers(explored: ArrayLike<number>, treasureAt: Pos | null): { at: Pos; color: string; label: string }[] {
+    const st = this.state;
+    const out: { at: Pos; color: string; label: string }[] = [];
+    const si = st.map.tiles.join('').indexOf('S');
+    if (si >= 0) out.push({ at: { x: si % st.map.w, y: Math.floor(si / st.map.w) }, color: '#c8b070', label: T.pointer.stairs });
+    if (treasureAt && explored[treasureAt.y * st.map.w + treasureAt.x]) out.push({ at: treasureAt, color: '#ffd23a', label: T.pointer.treasure });
+    const party = this.party().filter((u) => !u.down);
+    if (party.length > 0 && !party.some((u) => this.renderer.inView(u))) out.push({ at: centroid(party), color: '#5ab0ff', label: T.pointer.party });
+    return out;
   }
 
   /** トップバーの「ターン・難易度・目的」 */
@@ -215,7 +345,7 @@ export class Controller {
     const st = this.state;
     const o = st.objective;
     const goal = o?.kind === 'treasure' ? T.objectiveShort[o.holder ? 'treasureHeld' : 'treasure'] : T.objectiveShort.annihilate;
-    return `${T.turn(st.turn)}·${T.difficulty[st.difficulty ?? 'normal']}·${goal}`;
+    return `${T.turnShort(st.turn)}·${T.difficulty[st.difficulty ?? 'normal']}·${goal}`;
   }
 
   private updatePanel(): void {
@@ -267,6 +397,7 @@ export class Controller {
         ${actButton('undo', { off: !hasPlan })}
         ${actButton('clear', { off: !hasPlan })}
         ${actButton('rest', { off: this.foesInSight() })}
+        ${actButton('group', { on: this.mode === 'group', off: !active || this.foesInSight() })}
         ${actButton('execute', { cls: 'primary wide' })}
       </div>
       ${this.lastPlayback ? eventLog(this.lastPlayback.result.events, nameOf, 3) : '<ul class="log"></ul>'}`;
@@ -286,6 +417,9 @@ export class Controller {
   }
 
   private showResult(): void {
+    this.stopAuto();
+    // 結果の後ろに、パーティのいる場所を映す
+    this.focusOn(centroid(this.party()));
     const won = this.state.status === 'won';
     this.el.overlay.hidden = false;
     this.el.overlay.innerHTML = `<div class="sheet result ${won ? 'won' : 'lost'}">
@@ -383,9 +517,12 @@ export class Controller {
       this.refresh();
       return;
     }
+    // クイック移動・連続休憩の途中で何か押したら止める
+    if (!pbBtn && this.stopAuto(T.toast.stopped)) return;
     const selBtn = t.closest<HTMLElement>('[data-sel]');
     if (selBtn && !this.playback) {
-      this.select(selBtn.dataset.sel!);
+      // カードで選んだら、そのキャラの位置に盤面を寄せる
+      this.select(selBtn.dataset.sel!, true);
       return;
     }
     const actBtn = t.closest<HTMLElement>('[data-act]');
@@ -413,10 +550,16 @@ export class Controller {
   private onAction(act: string): void {
     if (act === 'execute') return this.execute();
     if (act === 'rest') {
-      // 全員の予約を消して待機させ、そのまま実行する
+      // 全員の予約を消して休憩する。全快するか敵が見えるまで続ける(最大 20 ターン)
       if (this.foesInSight()) return this.toast(T.err.cannotRest);
       for (const id of Object.keys(this.plans)) this.plans[id] = [];
-      return this.execute();
+      this.autoRest = 20;
+      return this.execute(true);
+    }
+    if (act === 'group') {
+      if (this.foesInSight()) return this.toast(T.err.cannotGroup);
+      this.mode = 'group';
+      return this.changed();
     }
     const u = this.selected ? this.unit(this.selected) : undefined;
     if (!u) return;
@@ -473,10 +616,28 @@ export class Controller {
     return m;
   }
 
-  private select(id: string): void {
+  /** focus=true なら、そのキャラの位置に盤面を寄せる(盤面をタップして選んだときは寄せない) */
+  private select(id: string, focus = false): void {
     this.selected = id;
     this.mode = this.defaultMode(id);
+    const u = this.unit(id);
+    if (focus && u) this.focusOn(u);
     this.changed();
+  }
+
+  /** 予約どおりに動いたとき、止まるマスが重なる味方のマス */
+  private overlaps(): Pos[] {
+    const ends = new Map<string, number>();
+    const out: Pos[] = [];
+    for (const u of this.party()) {
+      if (u.down) continue;
+      const e = simulate(this.state, u, this.plans[u.id] ?? []).end;
+      const k = `${e.x},${e.y}`;
+      const n = (ends.get(k) ?? 0) + 1;
+      ends.set(k, n);
+      if (n === 2) out.push(e);
+    }
+    return out;
   }
 
   private append(u: Unit, a: Action): boolean {
@@ -493,6 +654,7 @@ export class Controller {
   }
 
   private onTap(sx: number, sy: number): void {
+    if (this.stopAuto(T.toast.stopped)) return;
     if (this.playback) return;
     const tile = this.renderer.screenToTile(sx, sy);
     const st = this.state;
@@ -502,6 +664,19 @@ export class Controller {
     const ally = at.find((u) => u.side === 'party');
     const foe = at.find((u) => u.side === 'enemy' && !u.down);
     const u = this.selected ? this.unit(this.selected) : undefined;
+
+    // クイック移動: 行き先をタップすると、選んでいるキャラを先頭に全員が自動で向かう
+    if (u && this.mode === 'group') {
+      if (ally && !ally.down && ally.id !== u.id) return this.select(ally.id);
+      if (!st.explored[tile.y * st.map.w + tile.x]) return this.toast(T.err.noPath);
+      const plans = quickMovePlans(st, u.id, tile);
+      if (!plans) return this.toast(T.err.noPath);
+      this.quick = { leader: u.id, target: tile };
+      this.mode = 'move';
+      this.plans = { ...this.plans, ...plans };
+      this.execute(true);
+      return;
+    }
 
     // 対象を選ぶモード
     if (u && this.mode !== 'move') {
@@ -566,7 +741,7 @@ export class Controller {
   private advanceIfFull(u: Unit): void {
     if (apLeft(this.plans[u.id]) > 0) return;
     const next = this.party().find((p) => !p.down && apLeft(this.plans[p.id]) > 0);
-    if (next) this.select(next.id);
+    if (next) this.select(next.id, !this.renderer.inView(next, 0.1));
   }
 
   // ---- 補助 ----

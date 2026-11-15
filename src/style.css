@@ -255,7 +255,7 @@ body {
   cursor: default;
 }
 .act.wide {
-  grid-column: span 3;
+  grid-column: span 2;
 }
 .act.small {
   min-height: 34px;

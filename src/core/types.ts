@@ -19,7 +19,7 @@ export interface FloorMap {
   tiles: string[];
 }
 
-export type SpellId = 'fireball' | 'heal' | 'revive';
+export type SpellId = 'fireball' | 'heal' | 'revive' | 'breath';
 
 export interface AiMemory {
   mode: 'idle' | 'patrol';
@@ -27,6 +27,10 @@ export interface AiMemory {
   patrolIndex?: number;
   alerted?: boolean;
   lastSeen?: Pos;
+  /** 眠っている(宝探しのドラゴン)。近くで姿を見られる・攻撃される・宝を拾われると起きる */
+  asleep?: boolean;
+  /** 最後に炎のブレスを吐いたターン */
+  breathTurn?: number;
 }
 
 export interface Unit {
@@ -96,7 +100,7 @@ export type Plans = Record<string, Action[]>;
 
 // ---- 解決結果 ----
 
-export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'heal' | 'revive';
+export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | 'revive';
 
 export type GameEvent =
   | { tick: number; type: 'move'; id: string; from: Pos; to: Pos }
@@ -126,6 +130,8 @@ export type GameEvent =
   | { tick: number; type: 'spring'; id: string; revived: boolean }
   /** 担がれている間に意識を取り戻した */
   | { tick: number; type: 'wake'; id: string }
+  /** 眠っていた敵が目を覚ました */
+  | { tick: number; type: 'awaken'; id: string }
   /** 宝を拾った(got=true)/気絶して落とした(got=false) */
   | { tick: number; type: 'treasure'; id: string; got: boolean; at: Pos };
 

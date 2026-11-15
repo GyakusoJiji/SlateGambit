@@ -14,13 +14,14 @@ const COST: Record<string, number> = { goblin: 2, archer: 2, orc: 4, ogre: 7 };
 const DRAGON_COST = 7;
 
 /**
- * 難易度ごとの敵の量。budget=敵の点数の合計、group=1 部屋の点数の上限、ogres=オーガの最大数、
- * callRange=敵が仲間を呼ぶ範囲。自動対戦の勝率が Easy 95% / Normal 75% / Hard 50% 前後になるよう調整する
+ * 難易度ごとの敵の量。budget=目的ごとの敵の点数の合計(ドラゴンの分を含む)、group=1 部屋の点数の上限、
+ * ogres=オーガの最大数。全滅はドラゴンを倒す必要があり難しいので、目的ごとに予算を分けている。
+ * 自動対戦の勝率が Easy 95% / Normal 75% / Hard 50% 前後になるよう調整する
  */
-export const DIFFICULTY: Record<Difficulty, { budget: number; group: number; ogres: number }> = {
-  easy: { budget: 13, group: 7, ogres: 0 },
-  normal: { budget: 25, group: 9, ogres: 1 },
-  hard: { budget: 34, group: 12, ogres: 2 },
+export const DIFFICULTY: Record<Difficulty, { budget: Record<Objective['kind'], number>; group: number; ogres: number }> = {
+  easy: { budget: { annihilate: 13, treasure: 19 }, group: 7, ogres: 0 },
+  normal: { budget: { annihilate: 21, treasure: 29 }, group: 9, ogres: 1 },
+  hard: { budget: { annihilate: 31, treasure: 36 }, group: 12, ogres: 2 },
 };
 
 interface Room {
@@ -220,14 +221,14 @@ function placeEnemies(
   const spawn = (defId: string, p: Pos, ai: AiMemory = { mode: 'idle' }) => {
     const m = MONSTERS[defId];
     counts[defId] = (counts[defId] ?? 0) + 1;
-    const prefix = { goblin: 'g', archer: 'a', orc: 'o', ogre: 'b', dragon: 'd' }[defId] ?? 'e';
+    const prefix = { goblin: 'g', archer: 'a', orc: 'o', ogre: 'b', dragon: 'd', wyrm: 'd' }[defId] ?? 'e';
     units.push({ id: `${prefix}${counts[defId]}`, side: 'enemy', defId, name: m.name, x: p.x, y: p.y, hp: m.maxHp, mp: m.maxMp, down: false, ai });
     taken.add(key(p));
   };
 
   // 入口から近すぎる部屋には置かない
   const candidates = rooms.filter((r) => r !== startRoom && d(center(r)) >= 8);
-  let budget = cfg.budget;
+  let budget = cfg.budget[kind];
   let ogres = 0;
   const pickType = (room: number): string | null => {
     const opts = Object.keys(COST).filter((t) => COST[t] <= room && COST[t] <= budget && (t !== 'ogre' || ogres < cfg.ogres));
@@ -252,10 +253,12 @@ function placeEnemies(
     }
   };
 
-  // ボスのドラゴンは入口から最も遠い部屋(宝探しでは宝の部屋)に 1 体。点数は予算から引く
-  const lair = randomCell(rng, treasureRoom, map, [center(treasureRoom)], taken);
+  // ボスのドラゴンは入口から最も遠い部屋(宝探しでは宝の部屋)に 1 体。点数は予算から引く。
+  // Easy は若いドラゴン(HP が低い)。宝探しでは眠っていて、こっそり宝を持ち出すこともできる
+  // 宝(部屋の中央)からなるべく離れたマスに置き、起こさずに宝へ近づける余地を残す
+  const lair = farthestCell(treasureRoom, map, center(treasureRoom), taken);
   if (lair) {
-    spawn('dragon', lair);
+    spawn(difficulty === 'easy' ? 'wyrm' : 'dragon', lair, { mode: 'idle', asleep: kind === 'treasure' || undefined });
     budget -= DRAGON_COST;
   }
   // 宝探しでは宝の部屋にドラゴン以外の番人も置く
@@ -274,6 +277,23 @@ function placeEnemies(
     u.ai = { mode: 'patrol', patrol: [{ x: u.x, y: u.y }, center(away)], patrolIndex: 1 };
   }
   return units;
+}
+
+/** 部屋の中で from から最も遠い(マンハッタン距離)空いた床 */
+function farthestCell(r: Room, map: FloorMap, from: Pos, taken: Set<string>): Pos | null {
+  let best: Pos | null = null;
+  let bd = -1;
+  for (let y = r.y; y < r.y + r.h; y++)
+    for (let x = r.x; x < r.x + r.w; x++) {
+      const p = { x, y };
+      if (map.tiles[y][x] !== '.' || taken.has(key(p))) continue;
+      const d = manhattan(p, from);
+      if (d > bd) {
+        bd = d;
+        best = p;
+      }
+    }
+  return best;
 }
 
 function randomCell(rng: Rng, r: Room, map: FloorMap, avoid: Pos[], taken?: Set<string>): Pos {

@@ -178,7 +178,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     }
     const hpDelta = new Map<string, number>();
     const revived = new Set<string>();
-    const ctx: StrikeCtx = { tick, map, units, byId, rng, guard, events, hpDelta, revived, attackedBy };
+    const ctx: StrikeCtx = { tick, turn: state.turn, map, units, byId, rng, guard, events, hpDelta, revived, attackedBy };
     for (const st of strikes) performStrike(ctx, st);
 
     for (const [id, d] of hpDelta) {
@@ -217,7 +217,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   applyRest(state, plans, seenAtStart.party.size === 0, events, frames);
   applySpring(state, events, frames);
   applyWakeUp(state, rng, events, frames);
-  updateAiMemory(state, attackedBy);
+  updateAiMemory(state, attackedBy, events);
   state.rng = rng.state;
   state.turn += 1;
   state.status = judge(state);
@@ -504,6 +504,8 @@ function nearestFree(map: GameState['map'], start: Pos, units: Unit[], continues
 
 interface StrikeCtx {
   tick: number;
+  /** 解決中のターン番号 */
+  turn: number;
   map: GameState['map'];
   units: Unit[];
   byId: Map<string, Unit>;
@@ -572,7 +574,9 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   if (sd.target === 'tile') {
     const tile = action.tile!;
     if (dist2(u, tile) > sd.range * sd.range || !hasLos(map, u, tile)) return fizzle('射線が通らない');
-    events.push({ tick, type: 'strike', id: u.id, kind: 'fireball', tile, end: tile, reaction });
+    const breath = action.spell === 'breath';
+    if (breath && u.ai) u.ai.breathTurn = ctx.turn;
+    events.push({ tick, type: 'strike', id: u.id, kind: breath ? 'breath' : 'fireball', tile, end: tile, reaction });
     for (const o of units) {
       if (o.down) continue;
       if (Math.max(Math.abs(o.x - tile.x), Math.abs(o.y - tile.y)) <= sd.radius) dealDamage(ctx, u, o, sd.power, sd.powerVar);
@@ -601,10 +605,27 @@ function pos(p: Pos): Pos {
   return { x: p.x, y: p.y };
 }
 
-function updateAiMemory(state: GameState, attackedBy: Map<string, string>): void {
+function updateAiMemory(state: GameState, attackedBy: Map<string, string>, events: GameEvent[]): void {
   const { map, units } = state;
+  const treasureTaken = state.objective?.kind === 'treasure' && !!state.objective.holder;
   for (const e of units) {
     if (e.side !== 'enemy' || e.down || !e.ai) continue;
+    // 眠っている敵: 近く(射線が通る wakeRange 以内)で姿を見る・攻撃される・宝を拾われると起きる。仲間に呼ばれても起きない
+    if (e.ai.asleep) {
+      const near = units
+        .filter((p) => p.side === 'party' && !p.down && manhattan(e, p) <= RULES.wakeRange && hasLos(map, e, p))
+        .sort((a, b) => manhattan(e, a) - manhattan(e, b));
+      const by = attackedBy.get(e.id);
+      const attacker = by ? units.find((u) => u.id === by) : undefined;
+      const holder = treasureTaken ? units.find((u) => u.id === (state.objective as { holder?: string }).holder) : undefined;
+      const cause = near[0] ?? attacker ?? holder;
+      if (!cause) continue;
+      e.ai.asleep = false;
+      e.ai.alerted = true;
+      e.ai.lastSeen = pos(cause);
+      events.push({ tick: TICKS_PER_TURN, type: 'awaken', id: e.id });
+      continue;
+    }
     const seen = units.filter((p) => p.side === 'party' && !p.down && unitSees(map, e, p));
     if (seen.length > 0) {
       seen.sort((a, b) => dist2(e, a) - dist2(e, b));
@@ -636,7 +657,7 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>): void
   if (RULES.aiCallRange <= 0) return;
   const callers = units.filter((e) => e.side === 'enemy' && !e.down && e.ai?.alerted && e.ai.lastSeen);
   for (const e of units) {
-    if (e.side !== 'enemy' || e.down || !e.ai || e.ai.alerted) continue;
+    if (e.side !== 'enemy' || e.down || !e.ai || e.ai.alerted || e.ai.asleep) continue;
     const caller = callers.find((c) => c !== e && manhattan(c, e) <= RULES.aiCallRange);
     if (!caller) continue;
     e.ai.alerted = true;

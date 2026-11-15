@@ -24,6 +24,10 @@ export const RULES = {
   aiChargeRate: 0.5,
   /** 敵が仲間を呼ぶ範囲(マンハッタン距離)。0 で呼ばない */
   aiCallRange: 8,
+  /** ドラゴンが炎のブレスを吐く間隔(ターン) */
+  breathEvery: 2,
+  /** 眠っている敵が、姿を見て目を覚ます距離(マンハッタン距離、射線が通るとき) */
+  wakeRange: 3,
 };
 
 export function actionCost(a: Action): number {

@@ -42,10 +42,13 @@ export interface View {
   visible: ArrayLike<number> | null;
   units: DisplayUnit[];
   marks: Mark[];
-  hints: { at: Pos; intent: Intent }[];
+  /** 敵の予兆。area はブレスなど範囲攻撃の着弾予定(中心と半径) */
+  hints: { at: Pos; intent: Intent; area?: { at: Pos; radius: number } }[];
   effects: Effect[];
   /** 床に置かれている宝の位置(宝探しのとき) */
   treasureAt?: Pos | null;
+  /** 画面の外にあるときだけ、画面の端に矢印で方向を示す目印(階段・宝・味方) */
+  pointers?: { at: Pos; color: string; label: string }[];
 }
 
 const COLORS = {
@@ -154,6 +157,7 @@ export class Renderer {
     if (ta && (!view.visible || view.explored[ta.y * map.w + ta.x] || view.visible[ta.y * map.w + ta.x])) this.drawChest(ta);
 
     for (const m of view.marks) this.drawMark(m);
+    for (const h of view.hints) if (h.area) this.drawDanger(h.area.at, h.area.radius);
 
     // 気絶したユニットを先に、立っているユニットを後に描く
     const sorted = [...view.units].sort((a, b) => Number(b.down) - Number(a.down));
@@ -161,6 +165,52 @@ export class Renderer {
 
     for (const h of view.hints) this.drawHint(h.at, h.intent);
     for (const e of view.effects) this.drawEffect(e);
+    for (const p of view.pointers ?? []) this.drawPointer(p.at, p.color, p.label);
+  }
+
+  /** マスが画面の内側(端から margin 割合を除いた範囲)に入っているか */
+  inView(p: Pos, margin = 0): boolean {
+    const x = this.sx(p.x);
+    const y = this.sy(p.y);
+    const mx = this.cssW * margin;
+    const my = this.cssH * margin;
+    return x >= mx && y >= my && x <= this.cssW - mx && y <= this.cssH - my;
+  }
+
+  /** 画面の外にある目標へ向けて、画面の端に矢印とラベルを描く */
+  private drawPointer(p: Pos, color: string, label: string): void {
+    if (this.inView(p)) return;
+    const g = this.ctx;
+    const cx = this.cssW / 2;
+    const cy = this.cssH / 2;
+    const dx = this.sx(p.x) - cx;
+    const dy = this.sy(p.y) - cy;
+    const pad = 22;
+    const k = Math.min((cx - pad) / Math.max(1e-6, Math.abs(dx)), (cy - pad) / Math.max(1e-6, Math.abs(dy)));
+    const x = cx + dx * k;
+    const y = cy + dy * k;
+    const a = Math.atan2(dy, dx);
+    g.save();
+    g.translate(x, y);
+    g.rotate(a);
+    g.fillStyle = color;
+    g.beginPath();
+    g.moveTo(12, 0);
+    g.lineTo(-6, -8);
+    g.lineTo(-6, 8);
+    g.closePath();
+    g.fill();
+    g.restore();
+    g.font = 'bold 11px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const lx = x - Math.cos(a) * 18;
+    const ly = y - Math.sin(a) * 14;
+    g.fillStyle = '#000b';
+    const w = g.measureText(label).width + 8;
+    g.fillRect(lx - w / 2, ly - 8, w, 16);
+    g.fillStyle = color;
+    g.fillText(label, lx, ly + 0.5);
   }
 
   private drawTile(t: string, px: number, py: number, z: number): void {
@@ -280,12 +330,30 @@ export class Renderer {
     g.fillText(text, x, y + 0.5);
   }
 
+  /** 範囲攻撃の着弾予定(点線で囲んだ赤い範囲) */
+  private drawDanger(c: Pos, radius: number): void {
+    const g = this.ctx;
+    const z = this.zoom;
+    const x = this.sx(c.x - radius) - z / 2;
+    const y = this.sy(c.y - radius) - z / 2;
+    const s = z * (radius * 2 + 1);
+    g.fillStyle = 'rgba(255,90,32,0.22)';
+    g.fillRect(x, y, s, s);
+    g.strokeStyle = '#ff7a20';
+    g.lineWidth = 2;
+    g.setLineDash([z * 0.18, z * 0.12]);
+    g.strokeRect(x + 1, y + 1, s - 2, s - 2);
+    g.setLineDash([]);
+  }
+
   private drawHint(at: Pos, intent: Intent): void {
     const map: Record<Intent, [string, string]> = {
       attack: ['#ff4d4d', '!'],
       move: ['#ffd24d', '→'],
       guard: ['#5ab0ff', '■'],
       idle: ['#9a9aa8', '…'],
+      sleep: ['#8a8ad0', 'z'],
+      breath: ['#ff7a20', '炎'],
     };
     const [color, text] = map[intent];
     this.badge(this.sx(at.x) - this.zoom * 0.3, this.sy(at.y) - this.zoom * 0.32, color, text);

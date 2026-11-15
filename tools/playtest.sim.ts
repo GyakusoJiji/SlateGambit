@@ -161,13 +161,13 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
         }
       } else stallRun = 0;
       for (const e of r.events) {
-        if (e.type === 'damage' && defOf.get(e.id) === 'dragon') dragonHit = true;
+        if (e.type === 'damage' && /^(dragon|wyrm)$/.test(defOf.get(e.id)!)) dragonHit = true;
         if (e.type === 'damage' && sideOf.get(e.id) === 'party') lastPartyBlow = defOf.get(e.by)!;
       }
       state = r.state;
     }
     if (dragonHit) s.dragonFought++;
-    if (state.units.some((u) => u.defId === 'dragon' && u.down)) s.dragonKilled++;
+    if (state.units.some((u) => (u.defId === 'dragon' || u.defId === 'wyrm') && u.down)) s.dragonKilled++;
     if (state.status === 'lost') add(s.lastBlow, lastPartyBlow);
     const res = state.status === 'playing' ? 'timeout' : state.status;
     s.result[res]++;

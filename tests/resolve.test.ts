@@ -540,3 +540,72 @@ describe('決定性', () => {
     expect(s.turn).toBeGreaterThan(1);
   });
 });
+
+describe('ドラゴン', () => {
+  it('眠っている間は何もせず、仲間に呼ばれても起きない', () => {
+    const d = mk('d1', 'dragon', 9, 3);
+    d.ai = { mode: 'idle', asleep: true };
+    const g = mk('g1', 'goblin', 6, 3);
+    // 戦士はドラゴンから 6 マス、ゴブリンからは見える距離
+    const s = game([mk('p1', 'warrior', 3, 3), g, d]);
+    const plans = planEnemies(s);
+    expect(plans.d1.every((a) => a.type === 'wait')).toBe(true);
+    const r = resolveTurn(s, { ...plans, p1: [] });
+    expect(u(r.state, 'd1').ai?.asleep).toBe(true);
+    expect(u(r.state, 'g1').ai?.alerted).toBe(true);
+  });
+
+  it('近く(3 マス以内)で姿を見ると目を覚ます', () => {
+    const d = mk('d1', 'dragon', 9, 3);
+    d.ai = { mode: 'idle', asleep: true };
+    const r = resolveTurn(game([mk('p1', 'warrior', 5, 3), d]), { p1: moves('E', 1), d1: [] });
+    expect(u(r.state, 'd1').ai?.asleep).toBe(false);
+    expect(r.events.some((e) => e.type === 'awaken' && e.id === 'd1')).toBe(true);
+  });
+
+  it('攻撃されると目を覚ます', () => {
+    const d = mk('d1', 'dragon', 9, 3);
+    d.ai = { mode: 'idle', asleep: true };
+    const r = resolveTurn(game([mk('p2', 'thief', 4, 3), d]), { p2: [{ type: 'attack', target: 'd1' }], d1: [] });
+    expect(u(r.state, 'd1').ai?.asleep).toBe(false);
+  });
+
+  it('起きていれば炎のブレスを吐き、次のターンは吐かない', () => {
+    const s = game([mk('p1', 'warrior', 4, 3), mk('p3', 'mage', 4, 4), mk('d1', 'dragon', 7, 3)]);
+    const plan = planEnemies(s).d1;
+    const breath = plan.find((a) => a.type === 'spell' && a.spell === 'breath');
+    expect(breath).toBeTruthy();
+    const r = resolveTurn(s, { d1: plan });
+    expect(r.events.some((e) => e.type === 'strike' && e.kind === 'breath')).toBe(true);
+    // 巻き込まれた味方がダメージを受ける
+    expect(r.events.filter((e) => e.type === 'damage' && e.by === 'd1').length).toBeGreaterThan(0);
+    expect(u(r.state, 'd1').ai?.breathTurn).toBe(1);
+    const next = planEnemies(r.state).d1;
+    expect(next.some((a) => a.type === 'spell')).toBe(false);
+    expect(SPELLS.breath.radius).toBe(1);
+  });
+
+  it('仲間の敵を巻き込むマスにはブレスを吐かない', () => {
+    const s = game([mk('p1', 'warrior', 4, 3), mk('g1', 'goblin', 5, 3), mk('d1', 'dragon', 7, 3)]);
+    const plan = planEnemies(s).d1;
+    expect(plan.some((a) => a.type === 'spell')).toBe(false);
+  });
+});
+
+describe('クイック移動', () => {
+  it('先頭が行き先へ向かい、残りは隊列でついていく(全員「発見で停止」付き)', async () => {
+    const { quickMovePlans } = await import('../src/core/quickmove');
+    const s = game([mk('p1', 'warrior', 3, 3), mk('p2', 'thief', 2, 3), mk('p3', 'mage', 1, 3), mk('p4', 'priest', 1, 4)]);
+    const plans = quickMovePlans(s, 'p1', { x: 10, y: 3 })!;
+    expect(plans.p1).toHaveLength(7);
+    for (const id of ['p1', 'p2', 'p3', 'p4']) expect(plans[id].every((a) => a.type === 'move' && a.stop)).toBe(true);
+    const r = resolveTurn(s, plans);
+    expect(u(r.state, 'p1')).toMatchObject({ x: 10, y: 3 });
+    // 全員が東へ進み、重ならずに止まる
+    const cells = ['p1', 'p2', 'p3', 'p4'].map((id) => `${u(r.state, id).x},${u(r.state, id).y}`);
+    expect(new Set(cells).size).toBe(4);
+    expect(u(r.state, 'p4').x).toBeGreaterThan(1);
+    // 着いていれば null
+    expect(quickMovePlans(r.state, 'p1', { x: 10, y: 3 })).toBeNull();
+  });
+});

@@ -31,8 +31,10 @@ export const MONSTERS: Record<string, UnitDef> = {
   archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [] },
   orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [] },
   ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [] },
-  /** ボス。マップに 1 体、入口から最も遠い部屋にいる。強さはオーガと同じ */
-  dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [] },
+  /** ボス。マップに 1 体、入口から最も遠い部屋にいる。強さはオーガと同じで、炎のブレスを吐く */
+  dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: ['breath'] },
+  /** Easy 用のボス(若いドラゴン)。HP だけ低い */
+  wyrm: { id: 'wyrm', name: '若いドラゴン', icon: 'dragon', maxHp: 55, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: ['breath'] },
 };
 
 export interface SpellDef {
@@ -52,6 +54,8 @@ export const SPELLS: Record<SpellId, SpellDef> = {
   fireball: { id: 'fireball', name: '火球', mp: 3, range: 6, target: 'tile', power: 8, powerVar: 4, radius: 1 },
   heal: { id: 'heal', name: '回復', mp: 3, range: 4, target: 'ally', power: 10, powerVar: 3, radius: 0 },
   revive: { id: 'revive', name: '蘇生', mp: 6, range: 1, target: 'downed', power: 8, powerVar: 0, radius: 0 },
+  /** ドラゴンの炎のブレス。火球と同じく 3×3 のマス狙い。2 ターンに 1 回(RULES.breathEvery) */
+  breath: { id: 'breath', name: '炎のブレス', mp: 0, range: 4, target: 'tile', power: 10, powerVar: 4, radius: 1 },
 };
 
 export function unitDef(defId: string): UnitDef {

@@ -110,6 +110,10 @@ export class Playback {
         if (e.kind === 'ranged') out.push({ kind: 'line', from, to: e.end, color: '#ffe080', alpha });
         if (e.kind === 'melee') out.push({ kind: 'slash', at: e.end, alpha });
         if (e.kind === 'fireball') out.push({ kind: 'burst', at: e.end, radius: 1, color: '#ff7a20', alpha });
+        if (e.kind === 'breath') {
+          out.push({ kind: 'line', from, to: e.end, color: '#ff5020', alpha });
+          out.push({ kind: 'burst', at: e.end, radius: 1, color: '#ff3a10', alpha });
+        }
         if (e.kind === 'heal' || e.kind === 'revive') out.push({ kind: 'burst', at: e.end, radius: 0, color: '#60ff90', alpha });
       } else if (e.type === 'damage') {
         out.push({ kind: 'text', at: posOf(e.id), text: `-${e.amount}`, color: e.guarded ? '#9fd0ff' : '#ff6060', rise: 0.3 + k * 0.5, alpha: 1 });
@@ -127,6 +131,8 @@ export class Playback {
         out.push({ kind: 'text', at: posOf(e.id), text: '復帰', color: '#70ff90', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'carry' || e.type === 'drop') {
         out.push({ kind: 'text', at: posOf(e.id), text: e.type === 'carry' ? '担ぐ' : '降ろす', color: '#80d8ff', rise: 0.5, alpha: 1 });
+      } else if (e.type === 'awaken') {
+        out.push({ kind: 'text', at: posOf(e.id), text: '目覚めた!', color: '#ff7a20', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'treasure') {
         out.push({ kind: 'burst', at: e.at, radius: 0, color: '#ffd23a', alpha });
         out.push({ kind: 'text', at: e.at, text: e.got ? '宝!' : '落とした', color: '#ffd23a', rise: 0.3 + k * 0.5, alpha: 1 });

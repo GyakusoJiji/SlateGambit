@@ -3,6 +3,8 @@
 export const T = {
   title: 'Slate Gambit',
   turn: (n: number) => `ターン ${n}`,
+  /** 上部バー用の短い表示 */
+  turnShort: (n: number) => `T${n}`,
   ap: 'AP',
   hp: 'HP',
   mp: 'MP',
@@ -30,6 +32,7 @@ export const T = {
     clear: '全消し',
     execute: '実行',
     rest: '休憩',
+    group: '全員移動',
   },
 
   /** 行動ボタンにマウスを乗せたときの 1 行説明 */
@@ -50,7 +53,8 @@ export const T = {
     stop: '切替。新しい敵を見たら残りの移動を防御に',
     undo: '最後の予約を取り消す',
     clear: '予約をすべて取り消す',
-    rest: '全員の予約を消して 8 ティック休憩(HP 20%・MP 2 回復)',
+    rest: '全快するか敵が見えるまで休憩を続ける(1 ターンで HP 20%・MP 2 回復)',
+    group: '敵がいない間、行き先をタップすると全員が隊列で自動で向かう',
     execute: '全員の予約を同時に解決(リターンキー可)',
   } as Record<string, string>,
 
@@ -63,6 +67,7 @@ export const T = {
     revive: '蘇生する気絶した味方をタップ',
     follow: '追いかける敵をタップ',
     escort: '付き添う味方をタップ',
+    group: '全員で向かう行き先をタップ(選んでいるキャラが先頭。敵を見たら止まる)',
     playing: '同時解決を再生中',
     selectUnit: '味方をタップして選択',
   },
@@ -102,13 +107,18 @@ export const T = {
     halt: (a: string) => `${a} は敵を見つけて立ち止まった`,
     reaction: (a: string) => `${a} の条件付き行動が発動!`,
     bump: (a: string) => `${a} は進めなかった`,
-    rest: (a: string, hp: number, mp: number) => `${a} は休憩した(HP+${hp}${mp > 0 ? ` MP+${mp}` : ''})`,
+    /** 休憩した全員分を 1 行にまとめる */
+    rest: (parts: string) => `休憩: ${parts}`,
+    /** 1 人分(回復が 0 の項目は書かない。両方 0 なら空) */
+    restPart: (a: string, hp: number, mp: number) =>
+      hp > 0 || mp > 0 ? `${a} ${[hp > 0 ? `HP+${hp}` : '', mp > 0 ? `MP+${mp}` : ''].filter(Boolean).join(' ')}` : '',
     carry: (a: string, b: string) => `${a} が ${b} を担いだ`,
     drop: (a: string, b: string) => `${a} が ${b} を降ろした`,
     wake: (a: string) => `${a} は担がれている間に意識を取り戻した`,
     spring: (a: string, revived: boolean) => (revived ? `${a} は泉の力で起き上がった` : `${a} は泉で全回復した`),
     treasureGot: (a: string) => `${a} が宝を手に入れた! 入口の階段へ戻ろう`,
     treasureDrop: (a: string) => `${a} が宝を落とした`,
+    awaken: (a: string) => `${a} が目を覚ました!`,
   },
 
   difficulty: {
@@ -139,9 +149,24 @@ export const T = {
     note: 'マップと目的(敵の全滅か宝探し)は毎回ランダムに決まります',
   },
 
+  toast: {
+    overlap: '止まるマスが重なっている味方がいる(片方は押し戻される)',
+    foundFoe: '敵を見つけたので止まった',
+    arrived: '行き先に着いた',
+    rested: '全員の回復が終わった',
+    stopped: '自動の操作を止めた',
+  },
+
+  pointer: {
+    stairs: '階段',
+    treasure: '宝',
+    party: '味方',
+  },
+
   err: {
     noAp: 'AP が足りない',
     cannotRest: '敵が見えている間は休憩できない',
+    cannotGroup: '敵が見えている間は全員移動できない',
     noPath: 'そこへは行けない',
     notTarget: 'そこには対象がいない',
     carrying: '担いでいる間は攻撃できない',

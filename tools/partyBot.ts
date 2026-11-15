@@ -14,7 +14,8 @@ export function planParty(state: GameState): Plans {
   const { map, units } = state;
   const party = units.filter((u) => u.side === 'party' && !u.down).sort((a, b) => ORDER.indexOf(a.defId) - ORDER.indexOf(b.defId));
   const seenIds = visibleFoes(map, units, 'party');
-  const foes = units.filter((u) => seenIds.has(u.id) && !u.down);
+  // 眠っている敵には手を出さない(宝探しで、起こさずに宝を持ち出すことを狙う)
+  const foes = units.filter((u) => seenIds.has(u.id) && !u.down && !u.ai?.asleep);
   const plans: Plans = {};
   if (party.length === 0) return plans;
 
@@ -33,7 +34,8 @@ export function planParty(state: GameState): Plans {
       const d = unitDef(u.defId);
       return u.hp / d.maxHp < 0.6 || (d.maxMp > 0 && u.mp / d.maxMp < 0.5);
     });
-    if (tired) return {};
+    // 眠っている敵が見えている間は休憩しても回復しないので、休まずに進む
+    if (tired && seenIds.size === 0) return {};
     return explore(state, party);
   }
 

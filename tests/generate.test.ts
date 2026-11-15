@@ -41,7 +41,11 @@ describe('マップ生成', () => {
         expect(s.map.tiles.join('').split('S').length - 1).toBe(1);
         expect(s.units.filter((u) => u.side === 'enemy').length).toBeGreaterThan(1);
         // ボスのドラゴンは必ず 1 体
-        expect(s.units.filter((u) => u.defId === 'dragon').length).toBe(1);
+        const boss = s.units.filter((u) => u.defId === 'dragon' || u.defId === 'wyrm');
+        expect(boss.length).toBe(1);
+        expect(boss[0].defId).toBe(diff === 'easy' ? 'wyrm' : 'dragon');
+        // 宝探しのときだけ眠っている
+        expect(!!boss[0].ai?.asleep).toBe(s.objective?.kind === 'treasure');
         if (s.objective?.kind === 'treasure') {
           const at = s.objective.at!;
           expect(reach.has(`${at.x},${at.y}`)).toBe(true);

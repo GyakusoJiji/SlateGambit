@@ -1,6 +1,6 @@
 // 敵の計画生成。各敵は自分の視界と記憶だけを使って判断する。
 // 判断の揺らぎは (seed, turn, id) から作る決定的な乱数で行うため、同じ状態からは同じ計画になる。
-import { unitDef } from '../data/units';
+import { SPELLS, unitDef } from '../data/units';
 import { RULES, apLeft } from './actions';
 import { hasLos } from './los';
 import { DIR_LIST, dist2, isWalkable, manhattan, samePos, step } from './map';
@@ -10,7 +10,7 @@ import { Rng, hashSeed } from './rng';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from './types';
 import { unitSees } from './vision';
 
-export type Intent = 'attack' | 'move' | 'guard' | 'idle';
+export type Intent = 'attack' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath';
 
 export function planEnemies(state: GameState): Plans {
   const plans: Plans = {};
@@ -22,7 +22,9 @@ export function planEnemies(state: GameState): Plans {
 }
 
 /** 予兆表示用に、計画を大まかな意図に要約する */
-export function summarizeIntent(actions: Action[]): Intent {
+export function summarizeIntent(actions: Action[], unit?: Unit): Intent {
+  if (unit?.ai?.asleep) return 'sleep';
+  if (actions.some((a) => a.type === 'spell' && a.spell === 'breath')) return 'breath';
   if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell' || a.type === 'overwatch' || a.type === 'intercept')) return 'attack';
   if (actions.some((a) => a.type === 'move' || a.type === 'follow')) return 'move';
   if (actions.some((a) => a.type === 'guard')) return 'guard';
@@ -35,6 +37,12 @@ function planOne(state: GameState, e: Unit): Action[] {
   const def = unitDef(e.defId);
   const targets = units.filter((p) => p.side === 'party' && !p.down && unitSees(map, e, p));
   const plan: Action[] = [];
+
+  // 眠っている間は何もしない
+  if (e.ai?.asleep) {
+    while (apLeft(plan) > 0) plan.push({ type: 'wait' });
+    return plan;
+  }
 
   if (targets.length === 0) {
     const goal = e.ai?.alerted && e.ai.lastSeen ? e.ai.lastSeen : patrolGoal(e);
@@ -68,6 +76,16 @@ function planOne(state: GameState, e: Unit): Action[] {
     }
     if (r < 0.75) {
       while (apLeft(plan) > 0) plan.push({ type: 'guard' });
+      return plan;
+    }
+  }
+
+  // 炎のブレス(ドラゴン): 間隔が空いていれば、味方を最も多く巻き込むマスへ吐き、残りは接近攻撃
+  if (def.spells.includes('breath') && state.turn - (e.ai?.breathTurn ?? -99) >= RULES.breathEvery) {
+    const tile = breathTile(state, e, targets);
+    if (tile) {
+      plan.push({ type: 'spell', spell: 'breath', tile });
+      plan.push({ type: 'charge', target: target.id, ticks: apLeft(plan) });
       return plan;
     }
   }
@@ -120,6 +138,28 @@ function planOne(state: GameState, e: Unit): Action[] {
   while (apLeft(plan) >= RULES.attackCost) plan.push({ type: 'attack', target: target.id });
   while (apLeft(plan) > 0) plan.push({ type: 'guard' });
   return plan;
+}
+
+/**
+ * ブレスを吐くマス: 見えている味方の今の位置を中心候補にし、巻き込む味方の数が最も多いマス。
+ * 自分や仲間の敵を巻き込むマスは選ばない
+ */
+function breathTile(state: GameState, e: Unit, targets: Unit[]): Pos | null {
+  const sd = SPELLS.breath;
+  const inArea = (c: Pos, p: Pos) => Math.max(Math.abs(c.x - p.x), Math.abs(c.y - p.y)) <= sd.radius;
+  let best: Pos | null = null;
+  let bestHits = 0;
+  for (const t of targets) {
+    const c = { x: t.x, y: t.y };
+    if (dist2(e, c) > sd.range * sd.range || !hasLos(state.map, e, c)) continue;
+    if (state.units.some((o) => o.side === 'enemy' && !o.down && inArea(c, o))) continue;
+    const hits = targets.filter((p) => inArea(c, p)).length;
+    if (hits > bestHits) {
+      best = c;
+      bestHits = hits;
+    }
+  }
+  return best;
 }
 
 /** 見えている相手からなるべく離れ、できれば視界の外に出る経路(最大 5 マス) */

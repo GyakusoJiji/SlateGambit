@@ -5,7 +5,7 @@ import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
 import { iconUrl } from './icons';
 
-export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'follow' | 'escort' | 'carry';
+export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'follow' | 'escort' | 'carry' | 'group';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -121,6 +121,7 @@ const ICONS: Record<string, string> = {
   undo: '↩️',
   clear: '🗑️',
   rest: '💤',
+  group: '🚶',
   execute: '▶️',
 };
 
@@ -147,6 +148,7 @@ export function playbackControls(paused: boolean, speed: number, tick: number): 
 
 export function eventLog(events: GameEvent[], nameOf: (id: string) => string, limit = 6): string {
   const lines: string[] = [];
+  const rests: string[] = [];
   for (const e of events) {
     switch (e.type) {
       case 'damage': {
@@ -172,7 +174,8 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         if (e.reaction) lines.push(T.log.reaction(nameOf(e.id)));
         break;
       case 'rest':
-        lines.push(T.log.rest(nameOf(e.id), e.hp, e.mp));
+        // 休憩は全員分を 1 行にまとめる(下で追加)
+        rests.push(T.log.restPart(nameOf(e.id), e.hp, e.mp));
         break;
       case 'carry':
         lines.push(T.log.carry(nameOf(e.id), nameOf(e.target)));
@@ -186,11 +189,16 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
       case 'wake':
         lines.push(T.log.wake(nameOf(e.id)));
         break;
+      case 'awaken':
+        lines.push(T.log.awaken(nameOf(e.id)));
+        break;
       case 'treasure':
         lines.push(e.got ? T.log.treasureGot(nameOf(e.id)) : T.log.treasureDrop(nameOf(e.id)));
         break;
     }
   }
+  const restLine = rests.filter(Boolean).join('、');
+  if (restLine) lines.push(T.log.rest(restLine));
   return `<ul class="log">${lines
     .slice(-limit)
     .map((l) => `<li>${esc(l)}</li>`)
