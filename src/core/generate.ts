@@ -9,17 +9,18 @@ import { updateExplored } from './vision';
 export const MAP_W = 40;
 export const MAP_H = 30;
 
-/** 敵の点数(強さの目安) */
+/** 敵の点数(強さの目安)。ボスのドラゴンは別枠で必ず 1 体置く */
 const COST: Record<string, number> = { goblin: 2, archer: 2, orc: 4, ogre: 7 };
+const DRAGON_COST = 7;
 
 /**
  * 難易度ごとの敵の量。budget=敵の点数の合計、group=1 部屋の点数の上限、ogres=オーガの最大数、
  * callRange=敵が仲間を呼ぶ範囲。自動対戦の勝率が Easy 95% / Normal 75% / Hard 50% 前後になるよう調整する
  */
 export const DIFFICULTY: Record<Difficulty, { budget: number; group: number; ogres: number }> = {
-  easy: { budget: 22, group: 7, ogres: 0 },
-  normal: { budget: 30, group: 9, ogres: 1 },
-  hard: { budget: 40, group: 12, ogres: 2 },
+  easy: { budget: 13, group: 7, ogres: 0 },
+  normal: { budget: 25, group: 9, ogres: 1 },
+  hard: { budget: 34, group: 12, ogres: 2 },
 };
 
 interface Room {
@@ -219,7 +220,7 @@ function placeEnemies(
   const spawn = (defId: string, p: Pos, ai: AiMemory = { mode: 'idle' }) => {
     const m = MONSTERS[defId];
     counts[defId] = (counts[defId] ?? 0) + 1;
-    const prefix = { goblin: 'g', archer: 'a', orc: 'o', ogre: 'b' }[defId] ?? 'e';
+    const prefix = { goblin: 'g', archer: 'a', orc: 'o', ogre: 'b', dragon: 'd' }[defId] ?? 'e';
     units.push({ id: `${prefix}${counts[defId]}`, side: 'enemy', defId, name: m.name, x: p.x, y: p.y, hp: m.maxHp, mp: m.maxMp, down: false, ai });
     taken.add(key(p));
   };
@@ -251,8 +252,14 @@ function placeEnemies(
     }
   };
 
-  // 宝探しでは宝の部屋に必ず番人を置く
-  if (kind === 'treasure') fillRoom(treasureRoom, cfg.group);
+  // ボスのドラゴンは入口から最も遠い部屋(宝探しでは宝の部屋)に 1 体。点数は予算から引く
+  const lair = randomCell(rng, treasureRoom, map, [center(treasureRoom)], taken);
+  if (lair) {
+    spawn('dragon', lair);
+    budget -= DRAGON_COST;
+  }
+  // 宝探しでは宝の部屋にドラゴン以外の番人も置く
+  if (kind === 'treasure') fillRoom(treasureRoom, cfg.group - DRAGON_COST);
   const order = [...candidates].sort(() => rng.next() - 0.5);
   for (let i = 0; budget >= 2 && i < order.length * 3; i++) {
     const r = order[i % order.length];

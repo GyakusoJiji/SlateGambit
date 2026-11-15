@@ -31,6 +31,8 @@ export const MONSTERS: Record<string, UnitDef> = {
   archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [] },
   orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [] },
   ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [] },
+  /** ボス。マップに 1 体、入口から最も遠い部屋にいる。強さはオーガと同じ */
+  dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [] },
 };
 
 export interface SpellDef {

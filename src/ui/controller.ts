@@ -79,7 +79,7 @@ export class Controller {
     this.el.overlay.innerHTML = `<div class="sheet start">
       <h2>${T.start.title}</h2>
       ${btn('easy')}${btn('normal')}${btn('hard')}
-      <p class="note">${T.start.note}</p>
+      <p class="note">${T.start.note}<br>${T.difficultyDesc.boss}</p>
     </div>`;
   }
 

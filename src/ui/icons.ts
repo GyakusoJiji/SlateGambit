@@ -43,6 +43,10 @@ const ICONS: Record<string, Icon> = {
     palette: { Q: '#b0603a', K: '#ffd040', T: '#f4f0e0' },
     rows: ['.QQQQQQ.', 'QQKQQKQQ', 'QQQQQQQQ', 'QQTTTTQQ', 'QQQQQQQQ', 'QQQQQQQQ', 'QQQ..QQQ', 'QQ....QQ'],
   },
+  dragon: {
+    palette: { D: '#c8302c', W: '#7a1a40', K: '#ffe040', T: '#f4f0e0' },
+    rows: ['.T....T.', '.DDDDDD.', 'DDKDDKDD', 'WDDTTDDW', 'WWDDDDWW', 'W.DDDD.W', '..DDDD..', '.DD..DD.'],
+  },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();

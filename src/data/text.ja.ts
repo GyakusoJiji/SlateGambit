@@ -120,6 +120,7 @@ export const T = {
     easy: '敵が少なめ。まずはここから',
     normal: '敵が多く、オーガも出る',
     hard: '大部屋に敵が固まり、オーガが 2 体まで出る',
+    boss: 'どの難易度でも、最も奥の部屋にボスのドラゴンが待つ',
   } as Record<string, string>,
 
   objective: {

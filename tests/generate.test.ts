@@ -39,7 +39,9 @@ describe('マップ生成', () => {
         expect(new Set(cells).size).toBe(cells.length);
         for (const u of s.units) expect(isWalkable(s.map, u.x, u.y)).toBe(true);
         expect(s.map.tiles.join('').split('S').length - 1).toBe(1);
-        expect(s.units.filter((u) => u.side === 'enemy').length).toBeGreaterThan(0);
+        expect(s.units.filter((u) => u.side === 'enemy').length).toBeGreaterThan(1);
+        // ボスのドラゴンは必ず 1 体
+        expect(s.units.filter((u) => u.defId === 'dragon').length).toBe(1);
         if (s.objective?.kind === 'treasure') {
           const at = s.objective.at!;
           expect(reach.has(`${at.x},${at.y}`)).toBe(true);
