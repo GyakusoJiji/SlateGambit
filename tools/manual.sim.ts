@@ -37,10 +37,9 @@ it.runIf(env.PLAY !== undefined)('手動プレイ', () => {
       state = r.state;
     }
   } else if (env.PLAY === 'turn') {
-    const inCombat = visibleFoes(state.map, state.units, 'party').size > 0;
     const plans = parseCmd(state, env.CMD ?? '', out);
     const filled: Plans = {};
-    for (const u of state.units) if (u.side === 'party' && !u.down) filled[u.id] = fillPlan(plans[u.id] ?? [], inCombat);
+    for (const u of state.units) if (u.side === 'party' && !u.down) filled[u.id] = fillPlan(plans[u.id] ?? []);
     const r = resolveTurn(state, { ...planEnemies(state), ...filled });
     out.push(`T${state.turn} ${summarize(r.events, state)}`);
     state = r.state;

@@ -57,8 +57,8 @@ export function planParty(state: GameState): Plans {
         priest(ctx);
         break;
     }
-    // UI と同じく、戦闘中の余った AP は防御で埋める
-    plans[u.id] = fillPlan(plan, true);
+    // UI と同じく、余った AP は待機で埋める
+    plans[u.id] = fillPlan(plan);
     endPos.set(u.id, ctx.pos);
   }
   return plans;

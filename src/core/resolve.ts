@@ -1,6 +1,6 @@
 // 同時解決エンジン。全ユニットの予約を 1 ティックずつ同時に処理する。
 import { SPELLS, unitDef } from '../data/units';
-import { RULES, expandPlan, isRestPlan, type Step } from './actions';
+import { RULES, expandPlan, restTicks, type Step } from './actions';
 import { hasLos, linePoints } from './los';
 import { DIR_LIST, dist2, isWalkable, manhattan, step, tileAt } from './map';
 import { findPath } from './path';
@@ -614,19 +614,21 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>): void
 }
 
 /**
- * 休憩: ターンの開始時も終了時も敵が見えず、誰も攻撃を受けておらず、
- * 立っている味方全員の予約が待機だけなら、HP と MP が少し回復する(気絶者は回復しない)。
+ * 休憩: ターンの開始時も終了時も敵が見えず、誰も攻撃を受けていなければ、
+ * 立っている味方は待機したティック数に応じて HP と MP が回復する(8 ティック全部で最大 HP の restHpRatio と restMp)。
+ * 気絶者は回復しない。
  */
 function applyRest(state: GameState, plans: Plans, quietAtStart: boolean, events: GameEvent[], frames: UnitSnapshot[][]): void {
   const party = state.units.filter((u) => u.side === 'party' && !u.down);
   if (!quietAtStart || party.length === 0) return;
   if (visibleFoes(state.map, state.units, 'party').size > 0) return;
   if (events.some((e) => e.type === 'damage')) return;
-  if (!party.every((u) => isRestPlan(plans[u.id]))) return;
   for (const u of party) {
+    const k = restTicks(plans[u.id]) / TICKS_PER_TURN;
+    if (k <= 0) continue;
     const d = unitDef(u.defId);
-    const hp = Math.min(d.maxHp - u.hp, Math.max(1, Math.round(d.maxHp * RULES.restHpRatio)));
-    const mp = Math.min(d.maxMp - u.mp, RULES.restMp);
+    const hp = Math.min(d.maxHp - u.hp, Math.max(1, Math.round(d.maxHp * RULES.restHpRatio * k)));
+    const mp = Math.min(d.maxMp - u.mp, Math.round(RULES.restMp * k));
     if (hp <= 0 && mp <= 0) continue;
     u.hp += hp;
     u.mp += mp;

@@ -26,11 +26,6 @@ export const RULES = {
   aiCallRange: 8,
 };
 
-/** 予約が待機だけ(または空)か */
-export function isRestPlan(actions: Action[] | undefined): boolean {
-  return !actions || actions.every((a) => a.type === 'wait');
-}
-
 export function actionCost(a: Action): number {
   switch (a.type) {
     case 'move':
@@ -75,20 +70,19 @@ export function apLeft(actions: Action[]): number {
 }
 
 /**
- * 余った AP を埋める行動。
- * - 何も予約していないキャラは、戦闘中でも待機
- * - 一部だけ予約したキャラの残りは、戦闘中(敵が見えている)は防御、それ以外は待機
+ * 予約の残り AP を待機で埋めた計画を返す(元の配列は変えない)。
+ * 戦闘中はただの待機、敵が見えないときの待機は休憩になる(resolve の applyRest)
  */
-export function fillerAction(actions: Action[], inCombat: boolean): Action {
-  return { type: inCombat && actions.length > 0 ? 'guard' : 'wait' };
+export function fillPlan(actions: Action[]): Action[] {
+  const out = [...actions];
+  for (let n = apLeft(out); n > 0; n--) out.push({ type: 'wait' });
+  return out;
 }
 
-/** 予約の残り AP を埋めた計画を返す(元の配列は変えない) */
-export function fillPlan(actions: Action[], inCombat: boolean): Action[] {
-  const out = [...actions];
-  const filler = fillerAction(actions, inCombat);
-  for (let n = apLeft(out); n > 0; n--) out.push(filler);
-  return out;
+/** 休憩に数えるティック数(待機と、予約していない AP) */
+export function restTicks(actions: Action[] | undefined): number {
+  if (!actions) return AP_PER_TURN;
+  return actions.filter((a) => a.type === 'wait').length + Math.max(0, apLeft(actions));
 }
 
 /** 予約全体の MP 消費 */

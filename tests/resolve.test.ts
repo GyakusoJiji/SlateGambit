@@ -104,13 +104,11 @@ describe('移動', () => {
     expect(new Set(tiles).size).toBe(tiles.length);
   });
 
-  it('残り AP は戦闘中は防御、非戦闘中は待機で埋まる', () => {
+  it('残り AP は待機で埋まる', () => {
     const plan: Action[] = [...moves('E', 2), { type: 'attack', target: 'g1' }];
-    expect(fillPlan(plan, true).slice(3)).toEqual([{ type: 'guard' }, { type: 'guard' }, { type: 'guard' }]);
-    expect(fillPlan(plan, false).slice(3)).toEqual([{ type: 'wait' }, { type: 'wait' }, { type: 'wait' }]);
+    expect(fillPlan(plan).slice(3)).toEqual([{ type: 'wait' }, { type: 'wait' }, { type: 'wait' }]);
     expect(plan).toHaveLength(3);
-    // 何も予約していなければ、戦闘中でも待機
-    expect(fillPlan([], true).every((a) => a.type === 'wait')).toBe(true);
+    expect(fillPlan([]).every((a) => a.type === 'wait')).toBe(true);
   });
 
   it('敵のマスは通り抜けられず、敵とのすれ違いもできない', () => {
@@ -472,11 +470,22 @@ describe('休憩', () => {
     expect(u(r.state, 'p3').hp).toBeGreaterThan(5);
   });
 
-  it('誰かが動くと休憩にならない', () => {
+  it('休憩はキャラごと。待ったティック数に応じて回復する', () => {
     const m = mk('p3', 'mage', 1, 1);
     m.hp = 5;
-    const r = resolveTurn(game([m, mk('p1', 'warrior', 2, 2), mk('g1', 'goblin', 10, 1)], rows), { p1: moves('E', 1) });
-    expect(u(r.state, 'p3').hp).toBe(5);
+    const w = mk('p1', 'warrior', 2, 2);
+    w.hp = 10;
+    const w2 = mk('p4', 'priest', 1, 2);
+    w2.hp = 10;
+    // 魔法使いは何も予約しない(8 ティック休憩)、戦士は 4 マス動いて残り 4 ティック休憩、僧侶は 8 マス往復で休憩なし
+    const r = resolveTurn(game([m, w, w2, mk('g1', 'goblin', 12, 1)], rows), {
+      p1: moves('E', 4),
+      p4: [...moves('E', 4), ...moves('W', 4)],
+    });
+    const full = Math.round(CLASSES.mage.maxHp * RULES.restHpRatio);
+    expect(u(r.state, 'p3').hp).toBe(5 + full);
+    expect(u(r.state, 'p1').hp).toBe(10 + Math.round(CLASSES.warrior.maxHp * RULES.restHpRatio * 0.5));
+    expect(u(r.state, 'p4').hp).toBe(10);
   });
 
   it('敵が見えていると休憩にならない', () => {

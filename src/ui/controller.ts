@@ -107,10 +107,9 @@ export class Controller {
   }
 
   private execute(): void {
-    // 指定されていない残り AP は、戦闘中は防御、非戦闘中は待機にする
-    const inCombat = this.foesInSight();
+    // 指定されていない残り AP は待機にする(敵が見えないときの待機は休憩になる)
     const filled: Plans = {};
-    for (const u of this.party()) if (!u.down) filled[u.id] = fillPlan(this.plans[u.id] ?? [], inCombat);
+    for (const u of this.party()) if (!u.down) filled[u.id] = fillPlan(this.plans[u.id] ?? []);
     const result = resolveTurn(this.state, { ...this.enemyPlans, ...filled });
     this.playback = new Playback(this.state, result);
     this.lastPlayback = this.playback;
