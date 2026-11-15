@@ -77,6 +77,7 @@ export class Controller {
     this.lastPlayback = null;
     this.replaying = false;
     this.selected = null;
+    this.lastMode.clear();
     this.el.overlay.hidden = true;
     const party = this.party();
     this.renderer.resize();
@@ -100,7 +101,7 @@ export class Controller {
     for (const u of this.party()) this.plans[u.id] = [];
     const first = this.party().find((u) => !u.down);
     if (!this.selected || this.unit(this.selected)?.down) this.selected = first?.id ?? null;
-    this.mode = 'move';
+    this.mode = this.defaultMode(this.selected);
     this.refresh();
     if (this.state.status !== 'playing') this.showResult();
   }
@@ -407,14 +408,30 @@ export class Controller {
       case 'escort':
       case 'carry':
         this.mode = act;
+        this.lastMode.set(u.id, act);
         break;
     }
     this.changed();
   }
 
+  /** キャラごとに最後に選んだ行動モード(選択したときの初期位置にする) */
+  private lastMode = new Map<string, Mode>();
+
+  /** そのキャラを選んだときの行動モード。最後に選んだモードが今は使えなければ移動 */
+  private defaultMode(id: string | null): Mode {
+    const u = id ? this.unit(id) : undefined;
+    const m = u ? this.lastMode.get(u.id) : undefined;
+    if (!u || !m) return 'move';
+    const carrying = carryingAfter(u, this.plans[u.id] ?? []);
+    if (carrying) return 'move';
+    const spells: string[] = unitDef(u.defId).spells;
+    if ((m === 'fireball' || m === 'heal' || m === 'revive') && !spells.includes(m)) return 'move';
+    return m;
+  }
+
   private select(id: string): void {
     this.selected = id;
-    this.mode = 'move';
+    this.mode = this.defaultMode(id);
     this.changed();
   }
 
@@ -459,7 +476,8 @@ export class Controller {
       else if (m === 'revive' && ally && ally.down) ok = this.append(u, { type: 'spell', spell: 'revive', target: ally.id });
       else if (m === 'fireball' && st.explored[tile.y * st.map.w + tile.x]) ok = this.append(u, { type: 'spell', spell: 'fireball', tile });
       else this.toast(T.err.notTarget);
-      if (ok) this.mode = 'move';
+      // 予約できたら同じキャラは移動モードに戻す(AP を使い切って次のキャラに移った場合はそのキャラの初期位置のまま)
+      if (ok && this.selected === u.id) this.mode = 'move';
       this.changed();
       return;
     }
