@@ -18,6 +18,8 @@ export interface DisplayUnit {
   selected: boolean;
   /** 気絶した味方を担いでいる */
   carrying?: boolean;
+  /** 宝を持っている */
+  treasure?: boolean;
 }
 
 export type Mark =
@@ -42,6 +44,8 @@ export interface View {
   marks: Mark[];
   hints: { at: Pos; intent: Intent }[];
   effects: Effect[];
+  /** 床に置かれている宝の位置(宝探しのとき) */
+  treasureAt?: Pos | null;
 }
 
 const COLORS = {
@@ -146,6 +150,9 @@ export class Renderer {
       }
     }
 
+    const ta = view.treasureAt;
+    if (ta && (!view.visible || view.explored[ta.y * map.w + ta.x] || view.visible[ta.y * map.w + ta.x])) this.drawChest(ta);
+
     for (const m of view.marks) this.drawMark(m);
 
     // 気絶したユニットを先に、立っているユニットを後に描く
@@ -237,6 +244,26 @@ export class Renderer {
     if (u.guard) this.badge(cx + z * 0.3, cy - z * 0.32, '#5ab0ff', '盾');
     if (u.watch) this.badge(cx + z * 0.3, cy - z * 0.32, '#ffb020', '構');
     if (u.carrying) this.badge(cx - z * 0.3, cy - z * 0.32, '#80d8ff', '担');
+    if (u.treasure) this.badge(cx - z * 0.3, cy + z * 0.22, '#ffd23a', '宝');
+  }
+
+  /** 宝箱 */
+  private drawChest(p: Pos): void {
+    const g = this.ctx;
+    const z = this.zoom;
+    const x = this.sx(p.x) - z / 2;
+    const y = this.sy(p.y) - z / 2;
+    g.fillStyle = '#ffd23a33';
+    g.beginPath();
+    g.arc(x + z / 2, y + z / 2, z * 0.48, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#8a5a20';
+    g.fillRect(x + z * 0.18, y + z * 0.36, z * 0.64, z * 0.42);
+    g.fillStyle = '#a8702a';
+    g.fillRect(x + z * 0.18, y + z * 0.26, z * 0.64, z * 0.16);
+    g.fillStyle = '#ffd23a';
+    g.fillRect(x + z * 0.18, y + z * 0.42, z * 0.64, z * 0.06);
+    g.fillRect(x + z * 0.45, y + z * 0.4, z * 0.1, z * 0.14);
   }
 
   private badge(x: number, y: number, color: string, text: string): void {

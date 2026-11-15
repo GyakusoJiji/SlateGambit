@@ -186,6 +186,9 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
       case 'wake':
         lines.push(T.log.wake(nameOf(e.id)));
         break;
+      case 'treasure':
+        lines.push(e.got ? T.log.treasureGot(nameOf(e.id)) : T.log.treasureDrop(nameOf(e.id)));
+        break;
     }
   }
   return `<ul class="log">${lines

@@ -53,6 +53,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   const attackedBy = new Map<string, string>();
   /** 接近攻撃で、射程内に入ってから構えたティック数 */
   const chargeWind = new Map<string, number>();
+  const treasure = state.objective?.kind === 'treasure' ? [treasureSnap(state)] : undefined;
 
   for (let tick = 1; tick <= TICKS_PER_TURN; tick++) {
     const ti = tick - 1;
@@ -206,9 +207,11 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
         u.carrying = undefined;
       }
     }
+    updateTreasure(state, byId, events, tick);
 
     updateExplored(state);
     frames.push(snapshot(units, guard, watching));
+    if (treasure) treasure.push(treasureSnap(state));
   }
 
   applyRest(state, plans, seenAtStart.party.size === 0, events, frames);
@@ -218,7 +221,35 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   state.rng = rng.state;
   state.turn += 1;
   state.status = judge(state);
-  return { state, events, frames };
+  return { state, events, frames, treasure };
+}
+
+function treasureSnap(state: GameState): { at: Pos | null; holder?: string } {
+  const o = state.objective;
+  return o?.kind === 'treasure' ? { at: o.at && { ...o.at }, holder: o.holder } : { at: null };
+}
+
+/**
+ * 宝: 持っている味方が気絶したらその場に落ちる。床の宝に立っている味方は拾う
+ * (気絶した持ち主を担いでいる味方は、落ちた宝をそのまま拾う)
+ */
+function updateTreasure(state: GameState, byId: Map<string, Unit>, events: GameEvent[], tick: number): void {
+  const o = state.objective;
+  if (o?.kind !== 'treasure') return;
+  if (o.holder) {
+    const h = byId.get(o.holder)!;
+    if (!h.down) return;
+    o.at = { x: h.x, y: h.y };
+    o.holder = undefined;
+    events.push({ tick, type: 'treasure', id: h.id, got: false, at: { ...o.at } });
+  }
+  const at = o.at;
+  if (!at) return;
+  const finder = state.units.find((u) => u.side === 'party' && !u.down && u.x === at.x && u.y === at.y);
+  if (!finder) return;
+  o.holder = finder.id;
+  o.at = null;
+  events.push({ tick, type: 'treasure', id: finder.id, got: true, at: { ...at } });
 }
 
 function snapshot(units: Unit[], guard: Set<string>, watching: Set<string>): UnitSnapshot[] {
@@ -645,7 +676,12 @@ function applyRest(state: GameState, plans: Plans, quietAtStart: boolean, events
 
 function judge(state: GameState): GameState['status'] {
   if (state.units.filter((u) => u.side === 'party').every((u) => u.down)) return 'lost';
-  // 第 1 区間の暫定条件: 敵の全滅で勝利(宝と帰還は探索要素の実装時に置き換える)
+  const o = state.objective;
+  if (o?.kind === 'treasure') {
+    // 宝を持った味方が、立ったまま入口の階段に戻れば勝ち
+    const h = o.holder ? state.units.find((u) => u.id === o.holder) : undefined;
+    return h && !h.down && tileAt(state.map, h.x, h.y) === 'S' ? 'won' : 'playing';
+  }
   if (state.units.filter((u) => u.side === 'enemy').every((u) => u.down)) return 'won';
   return 'playing';
 }

@@ -1,5 +1,5 @@
 // 同時解決結果(TurnResult)の再生。速度変更・一時停止・コマ送り・スキップ・再視聴に対応する。
-import { TICKS_PER_TURN, type GameEvent, type GameState, type TurnResult, type UnitSnapshot } from '../core/types';
+import { TICKS_PER_TURN, type GameEvent, type GameState, type Pos, type TurnResult, type UnitSnapshot } from '../core/types';
 import { sideVisibleMask } from '../core/vision';
 import type { Effect } from './renderer';
 
@@ -83,6 +83,11 @@ export class Playback {
     });
   }
 
+  /** 表示中のフレームでの宝の状態(宝探しでなければ undefined) */
+  treasure(): { at: Pos | null; holder?: string } | undefined {
+    return this.result.treasure?.[this.frameIndex()];
+  }
+
   frameIndex(): number {
     const { tick, frac } = this.phase();
     return frac >= 0.5 ? tick : tick - 1;
@@ -122,6 +127,9 @@ export class Playback {
         out.push({ kind: 'text', at: posOf(e.id), text: '復帰', color: '#70ff90', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'carry' || e.type === 'drop') {
         out.push({ kind: 'text', at: posOf(e.id), text: e.type === 'carry' ? '担ぐ' : '降ろす', color: '#80d8ff', rise: 0.5, alpha: 1 });
+      } else if (e.type === 'treasure') {
+        out.push({ kind: 'burst', at: e.at, radius: 0, color: '#ffd23a', alpha });
+        out.push({ kind: 'text', at: e.at, text: e.got ? '宝!' : '落とした', color: '#ffd23a', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'halt') {
         out.push({ kind: 'text', at: posOf(e.id), text: '!', color: '#ffd24d', rise: 0.5, alpha: 1 });
       }

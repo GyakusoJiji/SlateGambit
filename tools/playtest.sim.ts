@@ -5,8 +5,9 @@ import { it } from 'vitest';
 import { RULES } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
+import { generateGame } from '../src/core/generate';
 import { createTestGame } from '../src/core/scenario';
-import type { GameEvent, GameState } from '../src/core/types';
+import type { Difficulty, GameEvent, GameState, Objective } from '../src/core/types';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
 import { planParty } from './partyBot';
 
@@ -14,19 +15,31 @@ declare const process: { env: Record<string, string | undefined> };
 
 const GAMES = Number(process.env.GAMES ?? 300);
 const TRACE = process.env.TRACE;
-const MAX_TURNS = Number(process.env.MAX_TURNS ?? 100);
+const MAX_TURNS = Number(process.env.MAX_TURNS ?? 150);
 
-/** 比較する調整案。setup で数値を書き換え、終了後に元へ戻す */
-const VARIANTS: { name: string; setup: () => void }[] = [
-  { name: '現行', setup: () => {} },
-  { name: '敵 攻撃-1', setup: () => strengthen(-1, 1) },
-  { name: '敵 攻撃+1', setup: () => strengthen(1, 1) },
-  { name: '味方越しでも撃つ(旧)', setup: () => (RULES.holdFireOnAlly = false) },
-  { name: '休憩 10%(旧)', setup: () => rest(0.1, 2) },
-  { name: '旧(両方)', setup: () => ((RULES.holdFireOnAlly = false), rest(0.1, 2)) },
-  { name: '仲間を呼ばない', setup: () => (RULES.aiCallRange = 0) },
-  { name: '休憩なし', setup: () => rest(0, 0) },
-];
+/** 比較する調整案。setup で数値を書き換え、終了後に元へ戻す。game は 1 戦の初期状態を作る */
+type Variant = { name: string; setup: () => void; game: (seed: number) => GameState };
+const gen = (d: Difficulty, k?: Objective['kind']) => (seed: number) => generateGame(seed, d, k);
+const VARIANTS: Variant[] = (process.env.VARIANTS === 'all'
+  ? [
+      { name: 'Easy', setup: () => {}, game: gen('easy') },
+      { name: 'Easy 全滅', setup: () => {}, game: gen('easy', 'annihilate') },
+      { name: 'Easy 宝', setup: () => {}, game: gen('easy', 'treasure') },
+      { name: 'Normal', setup: () => {}, game: gen('normal') },
+      { name: 'Normal 全滅', setup: () => {}, game: gen('normal', 'annihilate') },
+      { name: 'Normal 宝', setup: () => {}, game: gen('normal', 'treasure') },
+      { name: 'Hard', setup: () => {}, game: gen('hard') },
+      { name: 'Hard 全滅', setup: () => {}, game: gen('hard', 'annihilate') },
+      { name: 'Hard 宝', setup: () => {}, game: gen('hard', 'treasure') },
+      { name: '固定マップ(旧)', setup: () => {}, game: createTestGame },
+    ]
+  : [
+      { name: 'Easy', setup: () => {}, game: gen('easy') },
+      { name: 'Normal', setup: () => {}, game: gen('normal') },
+      { name: 'Hard', setup: () => {}, game: gen('hard') },
+    ]) as Variant[];
+void strengthen;
+void rest;
 
 function strengthen(atk: number, hp: number): void {
   addAtk(Object.values(MONSTERS), atk);
@@ -81,7 +94,7 @@ interface Stats {
 const add = (o: Record<string, number>, k: string, n = 1) => (o[k] = (o[k] ?? 0) + n);
 const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 
-function runBatch(games: number): Stats {
+function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
   const s: Stats = {
     result: { won: 0, lost: 0, timeout: 0 },
     turns: [],
@@ -102,7 +115,7 @@ function runBatch(games: number): Stats {
     timeoutSeeds: [],
   };
   for (let g = 0; g < games; g++) {
-    let state: GameState = createTestGame(1000 + g);
+    let state: GameState = makeGame(1000 + g);
     const defOf = new Map(state.units.map((u) => [u.id, u.defId]));
     const sideOf = new Map(state.units.map((u) => [u.id, u.side]));
     while (state.status === 'playing' && state.turn <= MAX_TURNS) {
@@ -209,7 +222,7 @@ it.runIf(TRACE === undefined)(`調整案の比較(各 ${GAMES} 戦)`, () => {
   const details: string[] = [];
   for (const v of VARIANTS) {
     v.setup();
-    const s = runBatch(GAMES);
+    const s = runBatch(GAMES, v.game);
     out.push(summaryRow(v.name, s, GAMES));
     details.push(`--- ${v.name} ---\n${detail(s, GAMES)}`);
     restoreDefs(original);
@@ -218,7 +231,8 @@ it.runIf(TRACE === undefined)(`調整案の比較(各 ${GAMES} 戦)`, () => {
 });
 
 it.runIf(TRACE !== undefined)('1 戦の経過', () => {
-  let state = createTestGame(Number(TRACE));
+  let state = generateGame(Number(TRACE), (process.env.DIFF ?? 'normal') as Difficulty);
+  console.log(state.map.tiles.join('\n') + `\n目的: ${state.objective?.kind}`);
   const out: string[] = [];
   while (state.status === 'playing' && state.turn <= MAX_TURNS) {
     const party = planParty(state);

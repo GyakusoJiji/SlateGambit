@@ -54,8 +54,12 @@ body {
 }
 #topbar .turn {
   flex: 1;
+  min-width: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #board {
@@ -358,6 +362,29 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+/* 難易度選択 */
+.start .diff {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 52px;
+  padding: 8px 12px;
+  white-space: normal;
+  text-align: left;
+}
+.start .diff b {
+  font-size: 16px;
+}
+.start .diff small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.start .note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 .result.won h2 {
   color: var(--accent);

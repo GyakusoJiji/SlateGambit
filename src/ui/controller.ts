@@ -4,8 +4,8 @@ import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../core/actio
 import { manhattan, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { inReach, resolveTurn } from '../core/resolve';
-import { createTestGame } from '../core/scenario';
-import type { Action, GameState, Plans, Pos, Unit } from '../core/types';
+import { generateGame } from '../core/generate';
+import type { Action, Difficulty, GameState, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
@@ -70,8 +70,23 @@ export class Controller {
     this.execute();
   }
 
-  start(seed: number): void {
-    this.state = createTestGame(seed);
+  /** 難易度選択の画面を出す。選ぶとそのシードで新しいゲームを始める */
+  showStart(seed: number): void {
+    this.pendingSeed = seed;
+    this.el.overlay.hidden = false;
+    const btn = (d: Difficulty) => `<button class="act diff" data-ov="diff" data-diff="${d}">
+        <b>${T.difficulty[d]}</b><small>${T.difficultyDesc[d]}</small></button>`;
+    this.el.overlay.innerHTML = `<div class="sheet start">
+      <h2>${T.start.title}</h2>
+      ${btn('easy')}${btn('normal')}${btn('hard')}
+      <p class="note">${T.start.note}</p>
+    </div>`;
+  }
+
+  private pendingSeed = 0;
+
+  start(seed: number, difficulty: Difficulty = 'normal'): void {
+    this.state = generateGame(seed, difficulty);
     this.names = displayNames(this.state.units);
     this.playback = null;
     this.lastPlayback = null;
@@ -166,17 +181,20 @@ export class Controller {
         const d = unitDef(u.defId);
         units.push({ id: s.id, icon: d.icon, side: u.side, x: s.fx, y: s.fy, hp: s.hp, maxHp: d.maxHp, down: s.down, guard: s.guard, watch: s.watch, selected: false, carrying: s.carrying });
       }
-      return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects() };
+      const tr = pb.treasure();
+      for (const u of units) u.treasure = !!tr && tr.holder === u.id;
+      return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects(), treasureAt: tr?.at };
     }
 
     const st = this.state;
+    const obj = st.objective;
     const visible = noFog ? null : sideVisibleMask(st.map, st.units, 'party');
     const seen = (u: Unit) => !visible || visible[u.y * st.map.w + u.x];
     const units: DisplayUnit[] = st.units
       .filter((u) => u.side === 'party' || seen(u))
       .map((u) => {
         const d = unitDef(u.defId);
-        return { id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying };
+        return { id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying, treasure: obj?.kind === 'treasure' && obj.holder === u.id };
       });
 
     const marks: Mark[] = [];
@@ -189,7 +207,15 @@ export class Controller {
     const hints = this.settings.hints
       ? st.units.filter((u) => u.side === 'enemy' && !u.down && seen(u)).map((u) => ({ at: { x: u.x, y: u.y }, intent: summarizeIntent(this.enemyPlans[u.id] ?? []) }))
       : [];
-    return { map: st.map, explored: st.explored, visible, units, marks, hints, effects: [] };
+    return { map: st.map, explored: st.explored, visible, units, marks, hints, effects: [], treasureAt: obj?.kind === 'treasure' ? obj.at : null };
+  }
+
+  /** トップバーの「ターン・難易度・目的」 */
+  private statusLine(): string {
+    const st = this.state;
+    const o = st.objective;
+    const goal = o?.kind === 'treasure' ? T.objectiveShort[o.holder ? 'treasureHeld' : 'treasure'] : T.objectiveShort.annihilate;
+    return `${T.turn(st.turn)}·${T.difficulty[st.difficulty ?? 'normal']}·${goal}`;
   }
 
   private updatePanel(): void {
@@ -199,7 +225,9 @@ export class Controller {
     this.panelKey = key;
     const nameOf = (id: string) => this.names.get(id) ?? id;
 
-    this.el.topbar.querySelector('.turn')!.textContent = T.turn(this.state.turn);
+    const turnEl = this.el.topbar.querySelector<HTMLElement>('.turn')!;
+    turnEl.textContent = this.statusLine();
+    turnEl.title = T.objective[this.state.objective?.kind ?? 'annihilate'];
     const replay = this.el.topbar.querySelector<HTMLButtonElement>('[data-top="replay"]')!;
     replay.disabled = !this.lastPlayback || !!pb;
 
@@ -261,8 +289,8 @@ export class Controller {
     const won = this.state.status === 'won';
     this.el.overlay.hidden = false;
     this.el.overlay.innerHTML = `<div class="sheet result ${won ? 'won' : 'lost'}">
-      <h2>${won ? T.result.won : T.result.lost}</h2>
-      <p>${T.turn(this.state.turn - 1)} で決着</p>
+      <h2>${won ? (this.state.objective?.kind === 'treasure' ? T.result.wonTreasure : T.result.won) : T.result.lost}</h2>
+      <p>${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.turn(this.state.turn - 1)} で決着</p>
       <button class="act primary" data-ov="new">${T.settings.newGame}</button>
       <button class="act" data-ov="close">${T.settings.close}</button>
     </div>`;
@@ -301,17 +329,25 @@ export class Controller {
   private onOverlayClick(e: Event): void {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-ov]');
     if (!b) {
-      if (e.target === this.el.overlay) this.el.overlay.hidden = true;
+      // 難易度選択は選ぶまで閉じない
+      if (e.target === this.el.overlay && !this.el.overlay.querySelector('.start')) this.el.overlay.hidden = true;
       return;
     }
     if (b.dataset.ov === 'close') this.el.overlay.hidden = true;
     if (b.dataset.ov === 'new') {
+      // 設定画面でシードを書き換えた場合だけそのシード、それ以外は毎回新しいマップ
       const input = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]');
-      const seed = input && input.value ? Number(input.value) : randomSeed();
+      const typed = input && input.value && Number(input.value) !== this.state.seed;
+      this.showStart(typed ? Number(input.value) : randomSeed());
+    }
+    if (b.dataset.ov === 'diff') {
+      const diff = b.dataset.diff as Difficulty;
+      // 再読み込みで同じゲームから始められるよう、シードと難易度を URL に残す
       const url = new URL(location.href);
-      url.searchParams.set('seed', String(seed));
+      url.searchParams.set('seed', String(this.pendingSeed));
+      url.searchParams.set('diff', diff);
       history.replaceState(null, '', url);
-      this.start(seed);
+      this.start(this.pendingSeed, diff);
     }
   }
 

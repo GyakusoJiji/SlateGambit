@@ -89,6 +89,7 @@ export const T = {
 
   result: {
     won: '勝利! 敵を全滅させた',
+    wonTreasure: '勝利! 宝を持ち帰った',
     lost: '全滅した…',
   },
 
@@ -106,6 +107,35 @@ export const T = {
     drop: (a: string, b: string) => `${a} が ${b} を降ろした`,
     wake: (a: string) => `${a} は担がれている間に意識を取り戻した`,
     spring: (a: string, revived: boolean) => (revived ? `${a} は泉の力で起き上がった` : `${a} は泉で全回復した`),
+    treasureGot: (a: string) => `${a} が宝を手に入れた! 入口の階段へ戻ろう`,
+    treasureDrop: (a: string) => `${a} が宝を落とした`,
+  },
+
+  difficulty: {
+    easy: 'Easy',
+    normal: 'Normal',
+    hard: 'Hard',
+  } as Record<string, string>,
+  difficultyDesc: {
+    easy: '敵が少なめ。まずはここから',
+    normal: '敵が多く、オーガも出る',
+    hard: '大部屋に敵が固まり、オーガが 2 体まで出る',
+  } as Record<string, string>,
+
+  objective: {
+    annihilate: '敵を全滅させる',
+    treasure: '宝を見つけて入口の階段に持ち帰る',
+  } as Record<string, string>,
+  /** トップバー用の短い表示 */
+  objectiveShort: {
+    annihilate: '敵を全滅',
+    treasure: '宝探し',
+    treasureHeld: '宝を階段へ!',
+  } as Record<string, string>,
+
+  start: {
+    title: '難易度を選んでください',
+    note: 'マップと目的(敵の全滅か宝探し)は毎回ランダムに決まります',
   },
 
   err: {

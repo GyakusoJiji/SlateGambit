@@ -49,8 +49,21 @@ export interface Unit {
 
 export type GameStatus = 'playing' | 'won' | 'lost';
 
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
+/**
+ * ゲームの目的。
+ * - annihilate: 敵の全滅
+ * - treasure: 宝を拾い、持ったまま入口の階段('S')に戻る。at=床に置かれている位置、holder=持っている味方
+ */
+export type Objective = { kind: 'annihilate' } | { kind: 'treasure'; at: Pos | null; holder?: string };
+
 export interface GameState {
   seed: number;
+  /** 未指定は normal 相当(テスト用の固定マップ) */
+  difficulty?: Difficulty;
+  /** 未指定は敵の全滅 */
+  objective?: Objective;
   /** 乱数の内部状態 */
   rng: number;
   turn: number;
@@ -112,7 +125,9 @@ export type GameEvent =
   | { tick: number; type: 'drop'; id: string; target: string }
   | { tick: number; type: 'spring'; id: string; revived: boolean }
   /** 担がれている間に意識を取り戻した */
-  | { tick: number; type: 'wake'; id: string };
+  | { tick: number; type: 'wake'; id: string }
+  /** 宝を拾った(got=true)/気絶して落とした(got=false) */
+  | { tick: number; type: 'treasure'; id: string; got: boolean; at: Pos };
 
 export interface UnitSnapshot {
   id: string;
@@ -132,6 +147,8 @@ export interface TurnResult {
   events: GameEvent[];
   /** frames[0] がターン開始時、frames[t] が t ティック終了時 */
   frames: UnitSnapshot[][];
+  /** 各フレームでの宝の状態(目的が宝探しのときだけ。frames と同じ添字) */
+  treasure?: { at: Pos | null; holder?: string }[];
 }
 
 export const TICKS_PER_TURN = 8;

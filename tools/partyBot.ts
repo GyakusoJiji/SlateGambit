@@ -25,14 +25,15 @@ export function planParty(state: GameState): Plans {
     if (downed && priestU && priestU.mp >= SPELLS.revive.mp) {
       const ctx: Ctx = { state, u: priestU, plan: [], pos: { x: priestU.x, y: priestU.y }, foes: [], endPos: new Map(), reserved: new Set() };
       priest(ctx);
-      return { [priestU.id]: ctx.plan };
+      // 近づけない(敵が上に立っているなど)ときは諦めて、ほかの行動に回す
+      if (ctx.plan.some((a) => a.type === 'move' || a.type === 'spell')) return { [priestU.id]: ctx.plan };
     }
     // 傷んでいる、または MP が少なければ休憩する(全員待機)
     const tired = party.some((u) => {
       const d = unitDef(u.defId);
       return u.hp / d.maxHp < 0.6 || (d.maxMp > 0 && u.mp / d.maxMp < 0.5);
     });
-    if (tired || (downed && priestU)) return {};
+    if (tired) return {};
     return explore(state, party);
   }
 
@@ -75,15 +76,31 @@ interface Ctx {
   reserved: Set<string>;
 }
 
+/** 経路で通れないマス。味方のマスは通り抜けられるので、敵だけ */
 function occupied(ctx: Ctx): (p: Pos) => boolean {
-  return (p) => ctx.state.units.some((o) => o !== ctx.u && !o.down && o.x === p.x && o.y === p.y);
+  return (p) => ctx.state.units.some((o) => o !== ctx.u && !o.down && o.side !== ctx.u.side && o.x === p.x && o.y === p.y);
 }
 
+/**
+ * 経路に沿って進む(keepAp は残す)。味方のマスは通り抜けられるが止まれないので、
+ * 止まる位置に味方(今いる位置か、先に決めた予定位置)がいれば手前まで戻す
+ */
 function moveAlong(ctx: Ctx, dirs: Dir[], keepAp: number): void {
-  for (const d of dirs) {
-    if (apLeft(ctx.plan) <= keepAp) break;
-    ctx.plan.push({ type: 'move', dir: d });
-    ctx.pos = step(ctx.pos, d);
+  const room = Math.max(0, apLeft(ctx.plan) - keepAp);
+  const path = dirs.slice(0, room);
+  const cells: Pos[] = [];
+  let p = ctx.pos;
+  for (const d of path) cells.push((p = step(p, d)));
+  const ends = [...ctx.endPos.values()];
+  const taken = (q: Pos) =>
+    ctx.state.units.some((o) => o !== ctx.u && !o.down && o.x === q.x && o.y === q.y) || ends.some((e) => e.x === q.x && e.y === q.y);
+  while (cells.length > 0 && taken(cells[cells.length - 1])) {
+    cells.pop();
+    path.pop();
+  }
+  for (let i = 0; i < path.length; i++) {
+    ctx.plan.push({ type: 'move', dir: path[i] });
+    ctx.pos = cells[i];
     ctx.reserved.add(key(ctx.pos));
   }
 }
@@ -122,9 +139,9 @@ function archer(ctx: Ctx): void {
   const { state, u } = ctx;
   const shootable = ctx.foes.filter((f) => clearShot(state, ctx.pos, f, u, ctx.reserved));
   if (shootable.length === 0) {
-    // 3 歩以内で射線の通るマスを探す
-    const path = findPath(state.map, ctx.pos, (p) => ctx.foes.some((f) => clearShot(state, p, f, u, ctx.reserved)), occupied(ctx), 200);
-    if (path && path.length <= 3) moveAlong(ctx, path, RULES.attackCost);
+    // 射線の通るマスへ向かう(撃つ分の AP は残す)
+    const path = findPath(state.map, ctx.pos, (p) => ctx.foes.some((f) => clearShot(state, p, f, u, ctx.reserved)), occupied(ctx), 2000);
+    if (path) moveAlong(ctx, path, RULES.attackCost);
   }
   const now = ctx.foes.filter((f) => clearShot(state, ctx.pos, f, u, ctx.reserved));
   if (now.length > 0) {
@@ -227,16 +244,29 @@ function explore(state: GameState, party: Unit[]): Plans {
     });
   // 全域を探索済みなら、生き残りの敵の隣を目標にする(巡回中の敵を探す代わり)
   const foe = state.units.find((u) => u.side === 'enemy' && !u.down);
-  const goal = state.explored.some((e, i) => !e && map.tiles[(i / map.w) | 0][i % map.w] !== '#')
+  let goal = state.explored.some((e, i) => !e && map.tiles[(i / map.w) | 0][i % map.w] !== '#')
     ? frontier
     : (p: Pos) => !!foe && manhattan(p, foe) === 1;
+  // 宝探し: 見つけた宝へ向かい、拾ったら持ち主を先頭に入口の階段へ戻る
+  const obj = state.objective;
+  let candidates = party;
+  if (obj?.kind === 'treasure') {
+    const holder = party.find((u) => u.id === obj.holder);
+    const at = obj.at;
+    if (holder) {
+      goal = (p: Pos) => map.tiles[p.y][p.x] === 'S';
+      candidates = [holder];
+    } else if (at && state.explored[at.y * map.w + at.x]) {
+      goal = (p: Pos) => p.x === at.x && p.y === at.y;
+    }
+  }
 
   // 先頭: 味方を避けた経路が最も短い者
-  let leader = party[0];
+  let leader = candidates[0];
   let best: Dir[] | null = null;
-  for (const u of party) {
-    const byAlly = (p: Pos) => party.some((o) => o !== u && o.x === p.x && o.y === p.y);
-    const p = findPath(map, u, goal, byAlly, 5000);
+  for (const u of candidates) {
+    // 味方のマスは通り抜けられる。止まる位置が重なっても解決時に押し戻されるだけ
+    const p = findPath(map, u, goal, undefined, 5000);
     if (p && (!best || p.length < best.length)) {
       best = p;
       leader = u;
