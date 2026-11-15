@@ -145,6 +145,7 @@ function summarize(events: GameEvent[], state: GameState): string {
     else if (e.type === 'halt') lines.push(`${name(e.id)} 停止`);
     else if (e.type === 'rest') lines.push(`${name(e.id)} 休憩`);
     else if (e.type === 'spring') lines.push(`${name(e.id)} 泉${e.revived ? '復活' : '全快'}`);
+    else if (e.type === 'wake') lines.push(`${name(e.id)} 意識を取り戻した`);
     else if (e.type === 'carry' || e.type === 'drop') lines.push(`${name(e.id)} ${e.type}`);
   }
   void state;
