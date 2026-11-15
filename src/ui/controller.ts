@@ -10,7 +10,7 @@ import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
 import { attachInput } from './input';
-import { actionButtons, eventLog, partyCards, planChips, playbackControls, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, partyCards, planChips, playbackControls, type Mode } from './panel';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
 
@@ -222,22 +222,27 @@ export class Controller {
     const sel = this.selected ? this.unit(this.selected) : undefined;
     const acts = sel ? this.plans[sel.id] ?? [] : [];
     const prompt = !sel ? T.prompt.selectUnit : T.prompt[this.mode];
+    // 行動ボタンは常に同じ並び(4 列 × 5 行)。選択中のキャラが使えないものはグレーアウト
+    const active = sel && !sel.down;
+    const status = active
+      ? `<b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf, this.foesInSight())}`
+      : `<span class="chip empty">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</span>`;
+    const promptText = active ? prompt : '';
+    const ACTION_IDS = ['move', 'attack', 'guard', 'wait', 'fireball', 'heal', 'revive', 'overwatch', 'intercept', 'follow', 'escort', 'stop', 'carry', 'drop'];
+    const actions = active ? actionButtons(sel, acts, this.mode, this.stopFlag) : ACTION_IDS.map((id) => actButton(id, { off: true })).join('');
+    const hasPlan = active && acts.length > 0;
     this.el.panel.innerHTML = `
       ${partyCards(this.party(), this.plans, this.selected)}
-      ${
-        sel && !sel.down
-          ? `<div class="plan"><b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf, this.foesInSight())}</div>
-             <p class="prompt" data-prompt="${prompt}">${prompt}</p>
-             ${actionButtons(sel, acts, this.mode, this.stopFlag)}`
-          : `<p class="prompt">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</p>`
-      }
-      <div class="bottom${this.foesInSight() ? '' : ' four'}">
-        <button data-act="undo" class="act">${T.act.undo}</button>
-        <button data-act="clear" class="act">${T.act.clear}</button>
-        ${this.foesInSight() ? '' : `<button data-act="rest" class="act">${T.act.rest}</button>`}
-        <button data-act="execute" class="act primary">${T.act.execute} ▶</button>
+      <div class="plan">${status}</div>
+      <p class="prompt" data-prompt="${promptText}">${promptText}</p>
+      <div class="acts">
+        ${actions}
+        ${actButton('undo', { off: !hasPlan })}
+        ${actButton('clear', { off: !hasPlan })}
+        ${actButton('rest', { off: this.foesInSight() })}
+        ${actButton('execute', { cls: 'primary wide' })}
       </div>
-      ${this.lastPlayback ? eventLog(this.lastPlayback.result.events, nameOf, 4) : ''}`;
+      ${this.lastPlayback ? eventLog(this.lastPlayback.result.events, nameOf, 3) : '<ul class="log"></ul>'}`;
   }
 
   private panelVersion = 0;
@@ -349,7 +354,8 @@ export class Controller {
       return;
     }
     const actBtn = t.closest<HTMLElement>('[data-act]');
-    if (actBtn && !this.playback) this.onAction(actBtn.dataset.act!);
+    // グレーアウトしたボタンは押しても何もしない
+    if (actBtn && !this.playback && !actBtn.classList.contains('off')) this.onAction(actBtn.dataset.act!);
   }
 
   /** 行動ボタンにマウスが乗ったら、操作案内の行をそのボタンの説明に差し替える(離れたら元に戻す) */
@@ -360,7 +366,7 @@ export class Controller {
     if (!b) return;
     if (leaving && b.contains(e.relatedTarget as Node | null)) return;
     const desc = T.desc[b.dataset.act!];
-    const label = b.childNodes[0]?.textContent ?? '';
+    const label = b.dataset.label ?? '';
     line.textContent = leaving || !desc ? line.dataset.prompt! : `${label}: ${desc}`;
     line.classList.toggle('hover', !leaving && !!desc);
   }

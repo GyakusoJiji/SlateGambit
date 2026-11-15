@@ -1,6 +1,6 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
 import { RULES, apLeft, carryingAfter, fillerAction, planCost } from '../core/actions';
-import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type Unit } from '../core/types';
+import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type SpellId, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
 import { iconUrl } from './icons';
@@ -81,26 +81,58 @@ export function actionButtons(u: Unit, actions: Action[], mode: Mode, stopFlag: 
   const ap = apLeft(actions);
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
-  const btn = (id: string, label: string, opts: { on?: boolean; off?: boolean; cls?: string } = {}) =>
-    `<button data-act="${id}" class="act${opts.on ? ' on' : ''}${opts.cls ? ' ' + opts.cls : ''}"${opts.off ? ' disabled' : ''}>${label}</button>`;
+  const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= RULES.spellCost && u.mp >= SPELLS[s].mp;
+  // ボタンはどのキャラでも同じ位置に並べ、使えないものはグレーアウトする
   const list = [
-    btn('move', T.act.move, { on: mode === 'move', off: ap < (busy ? RULES.carryMoveCost : 1) }),
-    btn('attack', T.act.attack, { on: mode === 'attack', off: busy || ap < 1 }),
-    btn('guard', T.act.guard, { off: ap < 1 }),
-    btn('wait', T.act.wait, { off: ap < 1 }),
+    actButton('move', { on: mode === 'move', off: ap < (busy ? RULES.carryMoveCost : 1) }),
+    actButton('attack', { on: mode === 'attack', off: busy || ap < 1 }),
+    actButton('guard', { off: ap < 1 }),
+    actButton('wait', { off: ap < 1 }),
+    actButton('fireball', { on: mode === 'fireball', off: !spell('fireball') }),
+    actButton('heal', { on: mode === 'heal', off: !spell('heal') }),
+    actButton('revive', { on: mode === 'revive', off: !spell('revive') }),
+    actButton('overwatch', { off: busy || ap < 1 || d.range <= 1 }),
+    actButton('intercept', { off: busy || ap < 1 }),
+    actButton('follow', { on: mode === 'follow', off: busy || ap < 1 }),
+    actButton('escort', { on: mode === 'escort', off: busy || ap < 1 }),
+    actButton('stop', { on: stopFlag, cls: 'toggle' }),
+    actButton('carry', { on: mode === 'carry', off: busy || ap < 1 }),
+    actButton('drop', { off: !busy || ap < 1 }),
   ];
-  for (const s of d.spells) {
-    const sd = SPELLS[s];
-    list.push(btn(s, `${sd.name}<small>MP${sd.mp}</small>`, { on: mode === s, off: busy || ap < RULES.spellCost }));
-  }
-  if (d.range > 1) list.push(btn('overwatch', T.act.overwatch, { off: busy || ap < 1 }));
-  list.push(btn('intercept', T.act.intercept, { off: busy || ap < 1 }));
-  list.push(btn('follow', T.act.follow, { on: mode === 'follow', off: busy || ap < 1 }));
-  list.push(btn('escort', T.act.escort, { on: mode === 'escort', off: busy || ap < 1 }));
-  if (busy) list.push(btn('drop', T.act.drop, { off: ap < 1 }));
-  else list.push(btn('carry', T.act.carry, { on: mode === 'carry', off: ap < 1 }));
-  list.push(btn('stop', T.act.stop, { on: stopFlag, cls: 'toggle' }));
-  return `<div class="acts">${list.join('')}</div>`;
+  return list.join('');
+}
+
+/** 行動ボタンのアイコン */
+const ICONS: Record<string, string> = {
+  move: '👣',
+  attack: '⚔️',
+  guard: '🛡️',
+  wait: '⏳',
+  fireball: '🔥',
+  heal: '💚',
+  revive: '✨',
+  overwatch: '🎯',
+  intercept: '⚡',
+  follow: '🐾',
+  escort: '🤝',
+  stop: '✋',
+  carry: '🎒',
+  drop: '⬇️',
+  undo: '↩️',
+  clear: '🗑️',
+  rest: '💤',
+  execute: '▶️',
+};
+
+/**
+ * 行動ボタン 1 つ。使えないボタンは disabled ではなく off クラスでグレーアウトする
+ * (disabled だとマウスを乗せても説明が出ないため)。押されても controller 側で無視する
+ */
+export function actButton(id: string, opts: { on?: boolean; off?: boolean; cls?: string } = {}): string {
+  const label = id in SPELLS ? SPELLS[id as SpellId].name : (T.act as Record<string, string>)[id];
+  const mp = id in SPELLS ? `<small>${SPELLS[id as SpellId].mp}</small>` : '';
+  const cls = ['act', opts.on ? 'on' : '', opts.off ? 'off' : '', opts.cls ?? ''].filter(Boolean).join(' ');
+  return `<button data-act="${id}" data-label="${label}" class="${cls}"${opts.off ? ' aria-disabled="true"' : ''}><span class="ic">${ICONS[id] ?? ''}</span>${label}${mp}</button>`;
 }
 
 export function playbackControls(paused: boolean, speed: number, tick: number): string {

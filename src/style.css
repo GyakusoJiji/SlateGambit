@@ -90,11 +90,13 @@ body {
 }
 
 #panel {
-  /* 予約中と再生中で高さが変わると盤面がずれるので固定する */
+  /* 予約中と再生中で高さが変わると盤面がずれるので固定する。スクロールはさせず、収まらない分はログを削る */
   flex: 0 0 auto;
-  height: min(330px, 50%);
-  overflow-y: auto;
-  padding: 8px 8px max(8px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  height: min(372px, 58%);
+  overflow: hidden;
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom));
   background: var(--panel);
   border-top: 1px solid var(--line);
 }
@@ -109,8 +111,8 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 5px 4px;
+  gap: 2px;
+  padding: 3px 4px;
   border: 2px solid transparent;
   border-radius: 8px;
   background: var(--panel2);
@@ -125,8 +127,8 @@ body {
   opacity: 0.5;
 }
 .card img {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   image-rendering: pixelated;
 }
 .card .name {
@@ -178,7 +180,9 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  margin-top: 8px;
+  flex: 0 0 auto;
+  min-height: 24px;
+  margin-top: 6px;
   font-size: 14px;
 }
 .plan .ap {
@@ -201,7 +205,9 @@ body {
 }
 /* 操作案内。ボタンにマウスを乗せている間はその説明に差し替わる。1 行に収め、はみ出しは省略 */
 .prompt {
-  margin: 6px 2px;
+  flex: 0 0 auto;
+  min-height: 1.4em;
+  margin: 4px 2px;
   color: var(--muted);
   font-size: 13px;
   white-space: nowrap;
@@ -214,21 +220,38 @@ body {
 
 /* ボタン */
 .act {
-  min-height: 44px;
-  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 34px;
+  padding: 2px 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel2);
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
+  white-space: nowrap;
   cursor: pointer;
   touch-action: manipulation;
 }
+.act .ic {
+  font-size: 13px;
+  line-height: 1;
+}
 .act small {
-  display: block;
+  margin-left: 1px;
   font-size: 10px;
-  color: var(--muted);
+  color: #8ab4ff;
+}
+/* 選択中のキャラが使えないボタン(マウスを乗せると説明は出る) */
+.act.off {
+  opacity: 0.3;
+  cursor: default;
+}
+.act.wide {
+  grid-column: span 3;
 }
 .act.small {
   min-height: 34px;
@@ -249,18 +272,10 @@ body {
   cursor: default;
 }
 .acts {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-.bottom {
-  display: grid;
-  grid-template-columns: 1fr 1fr 2fr;
-  gap: 6px;
-  margin-top: 8px;
-}
-.bottom.four {
-  grid-template-columns: 1fr 1fr 1fr 2fr;
+  gap: 4px;
 }
 .playbar {
   display: grid;
@@ -274,7 +289,10 @@ body {
 }
 
 .log {
-  margin: 8px 0 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  margin: 6px 0 0;
   padding: 6px 8px;
   border-radius: 6px;
   background: #0006;
