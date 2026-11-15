@@ -9,8 +9,8 @@ export type Dir = 'N' | 'E' | 'S' | 'W';
 
 export type Side = 'party' | 'enemy';
 
-/** マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'S'=入口階段 */
-export type TileChar = '#' | '.' | '+' | 'S';
+/** マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'S'=入口階段, 'H'=回復の泉 */
+export type TileChar = '#' | '.' | '+' | 'S' | 'H';
 
 export interface FloorMap {
   w: number;
@@ -40,6 +40,8 @@ export interface Unit {
   hp: number;
   mp: number;
   down: boolean;
+  /** 担いでいる気絶した味方の ID */
+  carrying?: string;
   ai?: AiMemory;
 }
 
@@ -60,8 +62,13 @@ export interface GameState {
 // ---- 行動(予約リストの要素) ----
 
 export type Action =
-  | { type: 'move'; dir: Dir; stop?: boolean }
+  /** slow: 担いでいる間の移動(1 マス 2 AP) */
+  | { type: 'move'; dir: Dir; stop?: boolean; slow?: boolean }
   | { type: 'attack'; target: string }
+  /** 接近攻撃: 届かなければ近づき、届けば構えて攻撃する。残り AP をすべて使い、続けて攻撃する */
+  | { type: 'charge'; target: string; ticks: number }
+  | { type: 'carry'; target: string }
+  | { type: 'drop' }
   | { type: 'guard' }
   | { type: 'wait' }
   | { type: 'spell'; spell: SpellId; target?: string; tile?: Pos }
@@ -98,7 +105,10 @@ export type GameEvent =
   | { tick: number; type: 'heal'; id: string; amount: number }
   | { tick: number; type: 'down'; id: string }
   | { tick: number; type: 'revive'; id: string }
-  | { tick: number; type: 'rest'; id: string; hp: number; mp: number };
+  | { tick: number; type: 'rest'; id: string; hp: number; mp: number }
+  | { tick: number; type: 'carry'; id: string; target: string }
+  | { tick: number; type: 'drop'; id: string; target: string }
+  | { tick: number; type: 'spring'; id: string; revived: boolean };
 
 export interface UnitSnapshot {
   id: string;
@@ -109,6 +119,8 @@ export interface UnitSnapshot {
   down: boolean;
   guard: boolean;
   watch: boolean;
+  /** 気絶した味方を担いでいるか */
+  carrying: boolean;
 }
 
 export interface TurnResult {

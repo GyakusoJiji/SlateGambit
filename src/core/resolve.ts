@@ -2,8 +2,8 @@
 import { SPELLS, unitDef } from '../data/units';
 import { RULES, expandPlan, isRestPlan, type Step } from './actions';
 import { hasLos, linePoints } from './los';
-import { DIR_LIST, dist2, isWalkable, manhattan, step } from './map';
-import { pathAdjacent } from './path';
+import { DIR_LIST, dist2, isWalkable, manhattan, step, tileAt } from './map';
+import { findPath } from './path';
 import { triggerReaction } from './reactions';
 import { Rng } from './rng';
 import {
@@ -51,17 +51,20 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   const frames: UnitSnapshot[][] = [snapshot(units, guard, watching)];
   /** このターンに攻撃してきた相手(AI の警戒用) */
   const attackedBy = new Map<string, string>();
+  /** 接近攻撃で、射程内に入ってから構えたティック数 */
+  const chargeWind = new Map<string, number>();
 
   for (let tick = 1; tick <= TICKS_PER_TURN; tick++) {
     const ti = tick - 1;
     guard.clear();
     watching.clear();
 
-    // ① 防御・構えの更新
+    // ① 防御・構えの更新(接近攻撃は、届くなら構え/攻撃、届かなければ移動に読み替える)
     const current = new Map<string, Step>();
     for (const u of units) {
       if (u.down) continue;
-      const s = steps.get(u.id)![ti];
+      let s = steps.get(u.id)![ti];
+      if (s.k === 'charge') s = chargeStep(map, u, byId.get(s.target), s, chargeWind);
       current.set(u.id, s);
       if (s.k === 'guard') guard.add(u.id);
       if (s.k === 'watch') watching.add(u.id);
@@ -77,11 +80,17 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       } else if (s.k === 'follow' || s.k === 'escort') {
         const t = byId.get(s.target);
         if (t && manhattan(u, t) > 1 && !(s.k === 'follow' && t.down)) {
-          // 他のユニットを避けて回り込む。空いた隣接マスが無ければその場で待つ
-          const occupied = (p: Pos) => units.some((o) => o !== u && o !== t && !o.down && o.x === p.x && o.y === p.y);
-          const p = pathAdjacent(map, u, t, occupied);
+          // 通れないマス(敵)を避け、空いた隣接マスを目指す。無ければその場で待つ
+          const { blocks, taken } = pathRules(units, u, t);
+          const p = findPath(map, u, (q) => manhattan(q, t) === 1 && !taken(q), blocks);
           if (p && p.length > 0) to = step(u, p[0]);
         }
+      } else if (s.k === 'charge') {
+        // ここに来るのは届かない場合だけ。届く位置へ 1 マス近づく
+        const t = byId.get(s.target)!;
+        const { blocks, taken } = pathRules(units, u, t);
+        const p = findPath(map, u, (q) => !taken(q) && inReach(map, u, q, t), blocks, 400);
+        if (p && p.length > 0) to = step(u, p[0]);
       }
       if (to) intents.push({ unit: u, from: { x: u.x, y: u.y }, to, status: 'pending' });
     }
@@ -116,14 +125,35 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     // 同じマスに止まるユニットが重ならないよう整理し、移動のイベントを出す
     // 通り抜けの途中: このティックに移動できて、次のティックも移動する
     const intentById = new Map(intents.map((m) => [m.unit.id, m]));
+    // (追尾・護衛・接近攻撃は止まれないマスを目的地にしないので、途中のマスは通り抜けとして扱う)
+    const MOVING = new Set<Step['k']>(['move', 'follow', 'escort', 'charge']);
     const continues = (u: Unit) =>
-      intentById.get(u.id)?.status === 'ok' && tick < TICKS_PER_TURN && steps.get(u.id)![tick].k === 'move';
+      intentById.get(u.id)?.status === 'ok' && tick < TICKS_PER_TURN && MOVING.has(steps.get(u.id)![tick].k);
     const displaced = settleMoves(intents, units, map, rng, continues);
     for (const m of intents) {
       if (m.status === 'ok') events.push({ tick, type: 'move', id: m.unit.id, from: m.from, to: m.to });
       else events.push({ tick, type: 'bump', id: m.unit.id, at: m.to });
     }
     for (const d of displaced) events.push({ tick, type: 'move', id: d.unit.id, from: d.from, to: d.to });
+
+    // 担ぐ・降ろす
+    for (const [id, s] of current) {
+      const u = byId.get(id)!;
+      if (s.k === 'carry') {
+        const t = byId.get(s.target);
+        const taken = units.some((o) => o.carrying === s.target);
+        if (!u.carrying && t && t.down && t.side === u.side && !taken && manhattan(u, t) <= 1) {
+          u.carrying = t.id;
+          events.push({ tick, type: 'carry', id, target: t.id });
+        } else {
+          events.push({ tick, type: 'fizzle', id, reason: '担げない' });
+        }
+      } else if (s.k === 'drop' && u.carrying) {
+        events.push({ tick, type: 'drop', id, target: u.carrying });
+        u.carrying = undefined;
+      }
+    }
+    syncCarried(units, byId);
 
     // ③ 条件付き行動の発動
     const strikes: StrikeIntent[] = [];
@@ -157,14 +187,21 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       u.down = false;
       u.hp = Math.max(u.hp, SPELLS.revive.power);
       events.push({ tick, type: 'revive', id });
+      standUp(map, units, u, events, tick);
     }
 
-    // ⑤ 戦闘不能判定(相打ちあり)
+    // ⑤ 戦闘不能判定(相打ちあり)。担いでいた者が倒れたら、その場に落とす
     for (const u of units) {
       if (!u.down && u.hp <= 0) {
         u.down = true;
         u.hp = 0;
         events.push({ tick, type: 'down', id: u.id });
+      }
+    }
+    for (const u of units) {
+      if (u.down && u.carrying) {
+        events.push({ tick, type: 'drop', id: u.id, target: u.carrying });
+        u.carrying = undefined;
       }
     }
 
@@ -173,6 +210,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   }
 
   applyRest(state, plans, seenAtStart.party.size === 0, events, frames);
+  applySpring(state, events, frames);
   updateAiMemory(state, attackedBy);
   state.rng = rng.state;
   state.turn += 1;
@@ -190,7 +228,108 @@ function snapshot(units: Unit[], guard: Set<string>, watching: Set<string>): Uni
     down: u.down,
     guard: guard.has(u.id),
     watch: watching.has(u.id),
+    carrying: !!u.carrying,
   }));
+}
+
+/**
+ * 追尾・護衛・接近攻撃の経路の条件。
+ * blocks: 途中で通れないマス(通り抜け不可の敵がいる)、taken: 止まれないマス(誰かが立っている)
+ */
+function pathRules(units: Unit[], u: Unit, target: Unit): { blocks: (p: Pos) => boolean; taken: (p: Pos) => boolean } {
+  const others = units.filter((o) => o !== u && o !== target && !o.down);
+  return {
+    blocks: (p) => others.some((o) => o.x === p.x && o.y === p.y && o.side !== u.side && !RULES.passThroughFoes),
+    taken: (p) => others.some((o) => o.x === p.x && o.y === p.y),
+  };
+}
+
+/** 攻撃が届く位置か(近接は上下左右に隣接、遠隔は射程内で射線が通る) */
+export function inReach(map: GameState['map'], u: Unit, from: Pos, t: Pos): boolean {
+  const def = unitDef(u.defId);
+  if (def.range <= 1) return manhattan(from, t) === 1;
+  return dist2(from, t) <= def.range * def.range && hasLos(map, from, t);
+}
+
+/** 接近攻撃の 1 ティック分を、構え・攻撃・移動(charge のまま)・防御のいずれかに読み替える */
+function chargeStep(
+  map: GameState['map'],
+  u: Unit,
+  t: Unit | undefined,
+  s: Extract<Step, { k: 'charge' }>,
+  wind: Map<string, number>,
+): Step {
+  if (!t || t.down) {
+    wind.delete(u.id);
+    return { k: 'guard' };
+  }
+  if (!inReach(map, u, u, t)) {
+    wind.delete(u.id);
+    return s;
+  }
+  const action = { type: 'attack' as const, target: t.id };
+  const w = wind.get(u.id) ?? 0;
+  if (w >= RULES.attackCost - 1) {
+    wind.delete(u.id);
+    return { k: 'strike', action };
+  }
+  wind.set(u.id, w + 1);
+  return { k: 'windup', action };
+}
+
+/** 担がれている味方を、担いでいる者と同じマスに置く */
+function syncCarried(units: Unit[], byId: Map<string, Unit>): void {
+  for (const u of units) {
+    if (u.down || !u.carrying) continue;
+    const t = byId.get(u.carrying);
+    if (!t || !t.down) {
+      u.carrying = undefined;
+      continue;
+    }
+    t.x = u.x;
+    t.y = u.y;
+  }
+}
+
+/** 起き上がったユニット: 担がれていれば降ろし、他と同じマスにいれば最寄りの空きマスへずらす */
+function standUp(map: GameState['map'], units: Unit[], u: Unit, events: GameEvent[], tick: number): void {
+  for (const c of units) {
+    if (c.carrying === u.id) {
+      events.push({ tick, type: 'drop', id: c.id, target: u.id });
+      c.carrying = undefined;
+    }
+  }
+  if (!units.some((o) => o !== u && !o.down && o.x === u.x && o.y === u.y)) return;
+  const from = pos(u);
+  const others = units.filter((o) => o !== u);
+  const to = nearestFree(map, u, others, () => false);
+  if (!to) return;
+  u.x = to.x;
+  u.y = to.y;
+  events.push({ tick, type: 'move', id: u.id, from, to });
+}
+
+/**
+ * 回復の泉: ターンの終わりに泉のマスにいる味方は、気絶から復帰し、HP と MP が全回復する。
+ * 担がれている味方は、担いでいる者が泉にいれば回復する。
+ */
+function applySpring(state: GameState, events: GameEvent[], frames: UnitSnapshot[][]): void {
+  const { map, units } = state;
+  let changed = false;
+  for (const u of units) {
+    if (u.side !== 'party' || tileAt(map, u.x, u.y) !== 'H') continue;
+    const d = unitDef(u.defId);
+    if (!u.down && u.hp === d.maxHp && u.mp === d.maxMp) continue;
+    const revived = u.down;
+    u.down = false;
+    u.hp = d.maxHp;
+    u.mp = d.maxMp;
+    events.push({ tick: TICKS_PER_TURN, type: 'spring', id: u.id, revived });
+    if (revived) standUp(map, units, u, events, TICKS_PER_TURN);
+    changed = true;
+  }
+  if (!changed) return;
+  frames[frames.length - 1] = snapshot(units, new Set(), new Set());
 }
 
 /**

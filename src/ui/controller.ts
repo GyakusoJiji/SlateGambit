@@ -1,9 +1,9 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
 import { planEnemies, summarizeIntent } from '../core/ai';
-import { apLeft, canAppend, fillPlan } from '../core/actions';
-import { samePos, step } from '../core/map';
+import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../core/actions';
+import { manhattan, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
-import { resolveTurn } from '../core/resolve';
+import { inReach, resolveTurn } from '../core/resolve';
 import { createTestGame } from '../core/scenario';
 import type { Action, GameState, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
@@ -164,7 +164,7 @@ export class Controller {
         if (u.side === 'enemy' && visible && !visible[s.y * pb.before.map.w + s.x] && !s.down) continue;
         if (u.side === 'enemy' && visible && s.down && !visible[s.y * pb.before.map.w + s.x]) continue;
         const d = unitDef(u.defId);
-        units.push({ id: s.id, icon: d.icon, side: u.side, x: s.fx, y: s.fy, hp: s.hp, maxHp: d.maxHp, down: s.down, guard: s.guard, watch: s.watch, selected: false });
+        units.push({ id: s.id, icon: d.icon, side: u.side, x: s.fx, y: s.fy, hp: s.hp, maxHp: d.maxHp, down: s.down, guard: s.guard, watch: s.watch, selected: false, carrying: s.carrying });
       }
       return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects() };
     }
@@ -176,7 +176,7 @@ export class Controller {
       .filter((u) => u.side === 'party' || seen(u))
       .map((u) => {
         const d = unitDef(u.defId);
-        return { id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected };
+        return { id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying };
       });
 
     const marks: Mark[] = [];
@@ -391,6 +391,7 @@ export class Controller {
         break;
       case 'guard':
       case 'wait':
+      case 'drop':
         this.append(u, { type: act });
         break;
       case 'overwatch':
@@ -404,6 +405,7 @@ export class Controller {
       case 'revive':
       case 'follow':
       case 'escort':
+      case 'carry':
         this.mode = act;
         break;
     }
@@ -444,7 +446,13 @@ export class Controller {
     if (u && this.mode !== 'move') {
       const m = this.mode;
       let ok = false;
-      if (m === 'attack' && foe) ok = this.append(u, { type: 'attack', target: foe.id });
+      if (m === 'attack' && foe) ok = this.attackOrCharge(u, foe);
+      else if (m === 'carry' && ally && ally.down && ally.id !== u.id) {
+        const end = simulate(st, u, this.plans[u.id]).end;
+        if (manhattan(end, ally) > 1) {
+          this.toast(T.err.notTarget);
+        } else ok = this.append(u, { type: 'carry', target: ally.id });
+      }
       else if (m === 'follow' && foe) ok = this.append(u, { type: 'follow', target: foe.id, ticks: apLeft(this.plans[u.id]) });
       else if (m === 'escort' && ally && ally.id !== u.id) ok = this.append(u, { type: 'escort', target: ally.id, ticks: apLeft(this.plans[u.id]) });
       else if (m === 'heal' && ally && !ally.down) ok = this.append(u, { type: 'spell', spell: 'heal', target: ally.id });
@@ -460,18 +468,33 @@ export class Controller {
     if (ally && !ally.down && ally.id !== this.selected) return this.select(ally.id);
     if (!u || u.down) return;
     if (foe) {
-      this.append(u, { type: 'attack', target: foe.id });
+      if (carryingAfter(u, this.plans[u.id])) return this.toast(T.err.carrying);
+      this.attackOrCharge(u, foe);
       return;
     }
     if (!st.explored[tile.y * st.map.w + tile.x]) return this.toast(T.err.noPath);
     const from = simulate(st, u, this.plans[u.id]).end;
     const path = pathTo(st.map, from, tile);
     if (!path || path.length === 0) return this.toast(T.err.noPath);
-    const room = apLeft(this.plans[u.id]);
+    // 担いでいる間は 1 マス 2 AP
+    const slow = carryingAfter(u, this.plans[u.id]);
+    const room = Math.floor(apLeft(this.plans[u.id]) / (slow ? RULES.carryMoveCost : 1));
     if (room <= 0) return this.toast(T.err.noAp);
-    for (const d of path.slice(0, room)) this.plans[u.id].push({ type: 'move', dir: d, stop: this.stopFlag || undefined });
+    for (const d of path.slice(0, room)) {
+      this.plans[u.id].push({ type: 'move', dir: d, stop: this.stopFlag || undefined, slow: slow || undefined });
+    }
     this.changed();
     this.advanceIfFull(u);
+  }
+
+  /** 予定位置から届くなら攻撃、届かなければ接近攻撃(残り AP 全部)を予約する */
+  private attackOrCharge(u: Unit, foe: Unit): boolean {
+    const plan = this.plans[u.id];
+    const end = simulate(this.state, u, plan).end;
+    if (inReach(this.state.map, u, end, foe)) return this.append(u, { type: 'attack', target: foe.id });
+    const ok = this.append(u, { type: 'charge', target: foe.id, ticks: apLeft(plan) });
+    if (ok) this.toast(T.err.toCharge);
+    return ok;
   }
 
   /** AP を使い切ったら次の味方を選択する */
@@ -530,6 +553,15 @@ function planMarks(st: GameState, u: Unit, actions: Action[], color: string): Ma
         const t = find(a.target);
         if (t) marks.push({ kind: 'target', at: t, color: '#60ff90' });
       }
+    } else if (a.type === 'charge') {
+      const t = find(a.target);
+      if (t) {
+        marks.push({ kind: 'target', at: t, color: '#ff5050' });
+        marks.push({ kind: 'path', points: [end, t], color: '#ff5050', dashed: true });
+      }
+    } else if (a.type === 'carry') {
+      const t = find(a.target);
+      if (t) marks.push({ kind: 'target', at: t, color: '#60d0ff' });
     } else if (a.type === 'follow' || a.type === 'escort') {
       const t = find(a.target);
       if (t) marks.push({ kind: 'path', points: [end, t], color: a.type === 'follow' ? '#ff9050' : '#60d0ff', dashed: true });

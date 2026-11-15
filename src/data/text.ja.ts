@@ -23,6 +23,9 @@ export const T = {
     follow: '追尾',
     escort: '護衛',
     stop: '発見で停止',
+    charge: '接近攻撃',
+    carry: '担ぐ',
+    drop: '降ろす',
     undo: '1手戻す',
     clear: '全消し',
     execute: '実行',
@@ -32,7 +35,9 @@ export const T = {
   /** 行動ボタンにマウスを乗せたときの 1 行説明 */
   desc: {
     move: '1AP/マス。味方は通り抜けられるが重なって止まれない',
-    attack: '3AP。3ティック目に撃つ。離れられると不発',
+    attack: '3AP。届かない敵を選ぶと近づいて攻撃(残りAP全部)',
+    carry: '1AP。隣の気絶した味方を担ぐ。移動 2AP/マス',
+    drop: '1AP。担いでいる味方をその場に降ろす',
     guard: '1AP。そのティックの被ダメージ半減',
     wait: '1AP。何もしない。全員が待機なら休憩',
     fireball: '3AP。マス指定、3×3 を爆破。味方も巻き込む',
@@ -51,7 +56,8 @@ export const T = {
 
   prompt: {
     move: '移動先のマスをタップ(敵をタップで攻撃)',
-    attack: '攻撃する敵をタップ',
+    attack: '攻撃する敵をタップ(届かなければ近づいて攻撃)',
+    carry: '担ぐ気絶した味方(隣のマス)をタップ',
     fireball: '撃ち込むマスをタップ(3×3・味方も巻き込む)',
     heal: '回復する味方をタップ',
     revive: '蘇生する気絶した味方をタップ',
@@ -96,6 +102,9 @@ export const T = {
     reaction: (a: string) => `${a} の条件付き行動が発動!`,
     bump: (a: string) => `${a} は進めなかった`,
     rest: (a: string, hp: number, mp: number) => `${a} は休憩した(HP+${hp}${mp > 0 ? ` MP+${mp}` : ''})`,
+    carry: (a: string, b: string) => `${a} が ${b} を担いだ`,
+    drop: (a: string, b: string) => `${a} が ${b} を降ろした`,
+    spring: (a: string, revived: boolean) => (revived ? `${a} は泉の力で起き上がった` : `${a} は泉で全回復した`),
   },
 
   err: {
@@ -103,5 +112,7 @@ export const T = {
     cannotRest: '敵が見えている間は休憩できない',
     noPath: 'そこへは行けない',
     notTarget: 'そこには対象がいない',
+    carrying: '担いでいる間は攻撃できない',
+    toCharge:'届かないので、近づいて攻撃する(残りAP全部)',
   },
 };

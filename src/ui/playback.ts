@@ -114,6 +114,11 @@ export class Playback {
         out.push({ kind: 'text', at: posOf(e.id), text: 'miss', color: '#c0c0c0', rise: 0.3 + k * 0.4, alpha });
       } else if (e.type === 'rest') {
         out.push({ kind: 'text', at: posOf(e.id), text: `+${e.hp}`, color: '#70ff90', rise: 0.3 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'spring') {
+        out.push({ kind: 'burst', at: posOf(e.id), radius: 0, color: '#60c8ff', alpha });
+        out.push({ kind: 'text', at: posOf(e.id), text: e.revived ? '復活' : '全快', color: '#80d8ff', rise: 0.3 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'carry' || e.type === 'drop') {
+        out.push({ kind: 'text', at: posOf(e.id), text: e.type === 'carry' ? '担ぐ' : '降ろす', color: '#80d8ff', rise: 0.5, alpha: 1 });
       } else if (e.type === 'halt') {
         out.push({ kind: 'text', at: posOf(e.id), text: '!', color: '#ffd24d', rise: 0.5, alpha: 1 });
       }

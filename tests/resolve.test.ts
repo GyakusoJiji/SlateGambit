@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RULES, fillPlan } from '../src/core/actions';
+import { RULES, canAppend, fillPlan } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { parseMap } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
@@ -208,6 +208,81 @@ describe('攻撃', () => {
     });
     expect(u(r.state, 'p1').down).toBe(false);
     expect(u(r.state, 'p1').hp).toBeGreaterThan(0);
+  });
+
+  it('接近攻撃は離れた敵に近づいて攻撃し、AP が残れば続けて攻撃する', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 4, 1)]);
+    const r = resolveTurn(s, { p1: [{ type: 'charge', target: 'g1', ticks: 8 }] });
+    // 2 マス進んで隣接(2 ティック)→ 構え 2 + 攻撃 → 構え 2 + 攻撃 = 8 ティックで 2 回
+    expect(u(r.state, 'p1')).toMatchObject({ x: 3, y: 1 });
+    expect(r.events.filter((e) => e.type === 'strike' && e.id === 'p1')).toHaveLength(2);
+  });
+
+  it('接近攻撃は逃げる相手を追いかけ、届くまで構えない', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 3, 1)]);
+    const r = resolveTurn(s, { p1: [{ type: 'charge', target: 'g1', ticks: 8 }], g1: moves('E', 4) });
+    expect(r.events.some((e) => e.type === 'fizzle' && e.id === 'p1')).toBe(false);
+    expect(u(r.state, 'p1').x).toBeGreaterThan(1);
+  });
+
+  it('接近攻撃は味方に囲まれていても通り抜けて近づく', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('p2', 'thief', 2, 1), mk('p3', 'mage', 1, 2), mk('g1', 'goblin', 6, 1)]);
+    const r = resolveTurn(s, { p1: [{ type: 'charge', target: 'g1', ticks: 8 }] });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 5, y: 1 });
+    expect(r.events.some((e) => e.type === 'strike' && e.id === 'p1')).toBe(true);
+  });
+
+  it('遠隔の接近攻撃は射線が通る位置まで寄って撃つ', () => {
+    const s = game([mk('p2', 'thief', 1, 1), mk('g1', 'goblin', 10, 5)], ['############', '#..........#', '#..........#', '#..........#', '#..........#', '#..........#', '############']);
+    const r = resolveTurn(s, { p2: [{ type: 'charge', target: 'g1', ticks: 8 }] });
+    expect(r.events.some((e) => e.type === 'strike' && e.id === 'p2')).toBe(true);
+  });
+});
+
+describe('担ぐ・泉', () => {
+  const downed = (id: string, defId: string, x: number, y: number) => {
+    const d = mk(id, defId, x, y);
+    d.hp = 0;
+    d.down = true;
+    return d;
+  };
+
+  it('気絶した味方を担いで運び、降ろせる。担いでいる間の移動は 1 マス 2 AP', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), downed('p3', 'mage', 2, 1)]);
+    const slow: Action = { type: 'move', dir: 'E', slow: true };
+    const r = resolveTurn(s, { p1: [{ type: 'carry', target: 'p3' }, slow, slow, { type: 'drop' }] });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 3, y: 1 });
+    expect(u(r.state, 'p3')).toMatchObject({ x: 3, y: 1, down: true });
+    expect(u(r.state, 'p1').carrying).toBeUndefined();
+  });
+
+  it('担いでいる者が倒れたら、その場に落とす', () => {
+    const p1 = mk('p1', 'warrior', 1, 1);
+    p1.hp = 1;
+    const s = game([p1, downed('p3', 'mage', 2, 1), mk('g1', 'goblin', 1, 2)]);
+    const r = resolveTurn(s, { p1: [{ type: 'carry', target: 'p3' }], g1: [{ type: 'attack', target: 'p1' }] });
+    expect(u(r.state, 'p1').down).toBe(true);
+    expect(u(r.state, 'p1').carrying).toBeUndefined();
+    expect(r.events.some((e) => e.type === 'drop')).toBe(true);
+  });
+
+  it('担いだまま攻撃は予約できない', () => {
+    const p1 = mk('p1', 'warrior', 1, 1);
+    expect(canAppend(p1, [{ type: 'carry', target: 'p3' }], { type: 'attack', target: 'g1' })).not.toBeNull();
+    expect(canAppend(p1, [{ type: 'carry', target: 'p3' }, { type: 'drop' }], { type: 'attack', target: 'g1' })).toBeNull();
+  });
+
+  it('泉のマスでターンを終えると気絶から復帰し、全回復する', () => {
+    const rows = ['#######', '#..H..#', '#######'];
+    const p1 = mk('p1', 'warrior', 1, 1);
+    p1.hp = 5;
+    const s = game([p1, downed('p3', 'mage', 2, 1)], rows);
+    const slow: Action = { type: 'move', dir: 'E', slow: true };
+    const r = resolveTurn(s, { p1: [{ type: 'carry', target: 'p3' }, slow, slow] });
+    // p1 は (3,1) の泉に立ち、担がれた p3 も同じマス → 両方回復し、p3 は隣の空きマスに立つ
+    expect(u(r.state, 'p1').hp).toBe(CLASSES.warrior.maxHp);
+    expect(u(r.state, 'p3')).toMatchObject({ down: false, hp: CLASSES.mage.maxHp });
+    expect(`${u(r.state, 'p3').x},${u(r.state, 'p3').y}`).not.toBe('3,1');
   });
 });
 

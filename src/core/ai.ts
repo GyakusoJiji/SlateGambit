@@ -22,7 +22,7 @@ export function planEnemies(state: GameState): Plans {
 
 /** 予兆表示用に、計画を大まかな意図に要約する */
 export function summarizeIntent(actions: Action[]): Intent {
-  if (actions.some((a) => a.type === 'attack' || a.type === 'spell' || a.type === 'overwatch' || a.type === 'intercept')) return 'attack';
+  if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell' || a.type === 'overwatch' || a.type === 'intercept')) return 'attack';
   if (actions.some((a) => a.type === 'move' || a.type === 'follow')) return 'move';
   if (actions.some((a) => a.type === 'guard')) return 'guard';
   return 'idle';

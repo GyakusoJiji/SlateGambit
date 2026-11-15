@@ -10,6 +10,8 @@ export const RULES = {
   restMp: 2,
   /** 敵のいるマスも通り抜けられるか(false なら味方のマスだけ通り抜けられる) */
   passThroughFoes: false,
+  /** 気絶した味方を担いでいる間の移動コスト(1 マスあたり) */
+  carryMoveCost: 2,
 };
 
 /** 予約が待機だけ(または空)か */
@@ -20,8 +22,11 @@ export function isRestPlan(actions: Action[] | undefined): boolean {
 export function actionCost(a: Action): number {
   switch (a.type) {
     case 'move':
+      return a.slow ? RULES.carryMoveCost : 1;
     case 'guard':
     case 'wait':
+    case 'carry':
+    case 'drop':
       return 1;
     case 'attack':
       return RULES.attackCost;
@@ -31,9 +36,23 @@ export function actionCost(a: Action): number {
     case 'intercept':
     case 'follow':
     case 'escort':
+    case 'charge':
       return a.ticks;
   }
 }
+
+/** 予約 actions をすべて実行した時点で、気絶した味方を担いでいるか */
+export function carryingAfter(unit: Unit, actions: Action[]): boolean {
+  let c = !!unit.carrying;
+  for (const a of actions) {
+    if (a.type === 'carry') c = true;
+    if (a.type === 'drop') c = false;
+  }
+  return c;
+}
+
+/** 担いでいる間に予約できる行動 */
+const WHILE_CARRYING = new Set<Action['type']>(['move', 'guard', 'wait', 'drop']);
 
 export function planCost(actions: Action[]): number {
   return actions.reduce((s, a) => s + actionCost(a), 0);
@@ -70,6 +89,9 @@ export function canAppend(unit: Unit, actions: Action[], action: Action): string
     if (planMp(actions) + SPELLS[action.spell].mp > unit.mp) return 'MP が足りない';
   }
   if (action.type === 'overwatch' && def.range <= 1) return '遠隔攻撃を持たない';
+  const carrying = carryingAfter(unit, actions);
+  if (carrying && !WHILE_CARRYING.has(action.type)) return '担いでいる間はできない';
+  if (!carrying && action.type === 'drop') return '誰も担いでいない';
   return null;
 }
 
@@ -86,6 +108,9 @@ export type Step =
   | { k: 'watch'; mode: 'overwatch' | 'intercept' }
   | { k: 'follow'; target: string }
   | { k: 'escort'; target: string }
+  | { k: 'charge'; target: string }
+  | { k: 'carry'; target: string }
+  | { k: 'drop' }
   | { k: 'recover' };
 
 export function expandPlan(actions: Action[]): Step[] {
@@ -93,7 +118,18 @@ export function expandPlan(actions: Action[]): Step[] {
   for (const a of actions) {
     switch (a.type) {
       case 'move':
+        // 担いでいる間は、1 ティック踏ん張ってから 1 マス進む
+        if (a.slow) for (let i = 1; i < RULES.carryMoveCost; i++) steps.push({ k: 'wait' });
         steps.push({ k: 'move', action: a });
+        break;
+      case 'charge':
+        for (let i = 0; i < a.ticks; i++) steps.push({ k: 'charge', target: a.target });
+        break;
+      case 'carry':
+        steps.push({ k: 'carry', target: a.target });
+        break;
+      case 'drop':
+        steps.push({ k: 'drop' });
         break;
       case 'guard':
         steps.push({ k: 'guard' });

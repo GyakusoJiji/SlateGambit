@@ -16,6 +16,8 @@ export interface DisplayUnit {
   guard: boolean;
   watch: boolean;
   selected: boolean;
+  /** 気絶した味方を担いでいる */
+  carrying?: boolean;
 }
 
 export type Mark =
@@ -180,6 +182,15 @@ export class Renderer {
       g.fillRect(px + z * 0.15, py + z * 0.15, z * 0.7, z * 0.7);
       g.fillStyle = '#e0c060';
       g.fillRect(px + z * 0.62, py + z * 0.48, z * 0.08, z * 0.08);
+    } else if (t === 'H') {
+      // 回復の泉
+      g.fillStyle = '#2a6fa8';
+      g.beginPath();
+      g.ellipse(px + z / 2, py + z / 2, z * 0.38, z * 0.3, 0, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#9ad8ff';
+      g.fillRect(px + z * 0.32, py + z * 0.4, z * 0.14, z * 0.06);
+      g.fillRect(px + z * 0.52, py + z * 0.56, z * 0.14, z * 0.06);
     } else if (t === 'S') {
       g.fillStyle = COLORS.stairs;
       for (let i = 0; i < 4; i++) g.fillRect(px + z * 0.15, py + z * (0.15 + i * 0.19), z * (0.7 - i * 0.15), z * 0.12);
@@ -225,6 +236,7 @@ export class Renderer {
     }
     if (u.guard) this.badge(cx + z * 0.3, cy - z * 0.32, '#5ab0ff', '盾');
     if (u.watch) this.badge(cx + z * 0.3, cy - z * 0.32, '#ffb020', '構');
+    if (u.carrying) this.badge(cx - z * 0.3, cy - z * 0.32, '#80d8ff', '担');
   }
 
   private badge(x: number, y: number, color: string, text: string): void {

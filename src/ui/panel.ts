@@ -1,11 +1,11 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
-import { RULES, apLeft, planCost } from '../core/actions';
+import { RULES, apLeft, carryingAfter, planCost } from '../core/actions';
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
 import { iconUrl } from './icons';
 
-export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'follow' | 'escort';
+export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'follow' | 'escort' | 'carry';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -30,9 +30,15 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
   const arrow = { N: '↑', E: '→', S: '↓', W: '←' };
   switch (a.type) {
     case 'move':
-      return arrow[a.dir] + (a.stop ? '!' : '');
+      return arrow[a.dir] + (a.stop ? '!' : '') + (a.slow ? '⁺' : '');
     case 'attack':
       return `${T.act.attack}:${nameOf(a.target)}`;
+    case 'charge':
+      return `${T.act.charge}:${nameOf(a.target)}×${a.ticks}`;
+    case 'carry':
+      return `${T.act.carry}:${nameOf(a.target)}`;
+    case 'drop':
+      return T.act.drop;
     case 'guard':
       return T.act.guard;
     case 'wait':
@@ -73,22 +79,26 @@ export function planChips(actions: Action[], nameOf: (id: string) => string, inC
 export function actionButtons(u: Unit, actions: Action[], mode: Mode, stopFlag: boolean): string {
   const d = unitDef(u.defId);
   const ap = apLeft(actions);
+  // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
+  const busy = carryingAfter(u, actions);
   const btn = (id: string, label: string, opts: { on?: boolean; off?: boolean; cls?: string } = {}) =>
     `<button data-act="${id}" class="act${opts.on ? ' on' : ''}${opts.cls ? ' ' + opts.cls : ''}"${opts.off ? ' disabled' : ''}>${label}</button>`;
   const list = [
-    btn('move', T.act.move, { on: mode === 'move', off: ap < 1 }),
-    btn('attack', T.act.attack, { on: mode === 'attack', off: ap < RULES.attackCost }),
+    btn('move', T.act.move, { on: mode === 'move', off: ap < (busy ? RULES.carryMoveCost : 1) }),
+    btn('attack', T.act.attack, { on: mode === 'attack', off: busy || ap < 1 }),
     btn('guard', T.act.guard, { off: ap < 1 }),
     btn('wait', T.act.wait, { off: ap < 1 }),
   ];
   for (const s of d.spells) {
     const sd = SPELLS[s];
-    list.push(btn(s, `${sd.name}<small>MP${sd.mp}</small>`, { on: mode === s, off: ap < RULES.spellCost }));
+    list.push(btn(s, `${sd.name}<small>MP${sd.mp}</small>`, { on: mode === s, off: busy || ap < RULES.spellCost }));
   }
-  if (d.range > 1) list.push(btn('overwatch', T.act.overwatch, { off: ap < 1 }));
-  list.push(btn('intercept', T.act.intercept, { off: ap < 1 }));
-  list.push(btn('follow', T.act.follow, { on: mode === 'follow', off: ap < 1 }));
-  list.push(btn('escort', T.act.escort, { on: mode === 'escort', off: ap < 1 }));
+  if (d.range > 1) list.push(btn('overwatch', T.act.overwatch, { off: busy || ap < 1 }));
+  list.push(btn('intercept', T.act.intercept, { off: busy || ap < 1 }));
+  list.push(btn('follow', T.act.follow, { on: mode === 'follow', off: busy || ap < 1 }));
+  list.push(btn('escort', T.act.escort, { on: mode === 'escort', off: busy || ap < 1 }));
+  if (busy) list.push(btn('drop', T.act.drop, { off: ap < 1 }));
+  else list.push(btn('carry', T.act.carry, { on: mode === 'carry', off: ap < 1 }));
   list.push(btn('stop', T.act.stop, { on: stopFlag, cls: 'toggle' }));
   return `<div class="acts">${list.join('')}</div>`;
 }
@@ -131,6 +141,15 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'rest':
         lines.push(T.log.rest(nameOf(e.id), e.hp, e.mp));
+        break;
+      case 'carry':
+        lines.push(T.log.carry(nameOf(e.id), nameOf(e.target)));
+        break;
+      case 'drop':
+        lines.push(T.log.drop(nameOf(e.id), nameOf(e.target)));
+        break;
+      case 'spring':
+        lines.push(T.log.spring(nameOf(e.id), e.revived));
         break;
     }
   }
