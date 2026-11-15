@@ -180,11 +180,30 @@ describe('攻撃', () => {
     expect(r.state.status).toBe('lost');
   });
 
-  it('矢は射線上で最初に当たったユニット(味方)に命中する', () => {
+  it('撃つ瞬間に味方が射線上にいれば撃たない(AP は消費する)', () => {
     const s = game([mk('p2', 'thief', 1, 1), mk('p1', 'warrior', 3, 1), mk('g1', 'goblin', 6, 1)]);
     const r = resolveTurn(s, { p2: [{ type: 'attack', target: 'g1' }] });
-    expect(u(r.state, 'p1').hp).toBeLessThan(CLASSES.warrior.maxHp);
+    expect(u(r.state, 'p1').hp).toBe(CLASSES.warrior.maxHp);
     expect(u(r.state, 'g1').hp).toBe(MONSTERS.goblin.maxHp);
+    expect(r.events.some((e) => e.type === 'fizzle' && e.id === 'p2' && e.reason === '味方が射線上にいる')).toBe(true);
+  });
+
+  it('矢は射線上で最初に当たった敵に命中する', () => {
+    const s = game([mk('p2', 'thief', 1, 1), mk('g2', 'goblin', 3, 1), mk('g1', 'goblin', 6, 1)]);
+    const r = resolveTurn(s, { p2: [{ type: 'attack', target: 'g1' }] });
+    expect(u(r.state, 'g2').hp).toBeLessThan(MONSTERS.goblin.maxHp);
+    expect(u(r.state, 'g1').hp).toBe(MONSTERS.goblin.maxHp);
+  });
+
+  it('旧ルール(holdFireOnAlly=false)では味方に当たる', () => {
+    RULES.holdFireOnAlly = false;
+    try {
+      const s = game([mk('p2', 'thief', 1, 1), mk('p1', 'warrior', 3, 1), mk('g1', 'goblin', 6, 1)]);
+      const r = resolveTurn(s, { p2: [{ type: 'attack', target: 'g1' }] });
+      expect(u(r.state, 'p1').hp).toBeLessThan(CLASSES.warrior.maxHp);
+    } finally {
+      RULES.holdFireOnAlly = true;
+    }
   });
 
   it('火球はマスを狙い、範囲内の味方も巻き込む', () => {

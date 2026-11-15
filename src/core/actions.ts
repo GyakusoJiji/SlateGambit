@@ -6,10 +6,12 @@ export const RULES = {
   attackCost: 3,
   spellCost: 3,
   /** 休憩(敵が見えない状態で全員が待機だけのターン)での回復量 */
-  restHpRatio: 0.1,
+  restHpRatio: 0.2,
   restMp: 2,
   /** 敵のいるマスも通り抜けられるか(false なら味方のマスだけ通り抜けられる) */
   passThroughFoes: false,
+  /** 弓などの遠隔攻撃で、撃つ瞬間に味方が射線上にいたら撃たない(AP は消費する) */
+  holdFireOnAlly: true,
   /** 気絶した味方を担いでいる間の移動コスト(1 マスあたり) */
   carryMoveCost: 2,
   /** 担がれたまま何ターン過ごすと、意識を取り戻す判定が始まるか */

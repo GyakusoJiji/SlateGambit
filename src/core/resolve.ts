@@ -517,7 +517,8 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
       return;
     }
     if (dist2(u, target) > def.range * def.range || !hasLos(map, u, target)) return fizzle('射線が通らない');
-    // 射線上で最初に当たったユニットに命中する(味方でも)
+    // 射線上で最初に当たったユニットに命中する。
+    // ただし撃つ瞬間に味方が射線上にいれば撃たない(AP は消費する)
     let hit: Unit | undefined;
     let end: Pos = pos(target);
     for (const p of linePoints(u, target)) {
@@ -527,6 +528,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
         break;
       }
     }
+    if (RULES.holdFireOnAlly && hit && hit !== target && hit.side === u.side) return fizzle('味方が射線上にいる');
     events.push({ tick, type: 'strike', id: u.id, kind: 'ranged', target: target.id, hitId: hit?.id, end, reaction });
     if (hit) dealDamage(ctx, u, hit, def.atk, def.dmgVar);
     return;

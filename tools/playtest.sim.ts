@@ -21,8 +21,10 @@ const VARIANTS: { name: string; setup: () => void }[] = [
   { name: '現行', setup: () => {} },
   { name: '敵 攻撃-1', setup: () => strengthen(-1, 1) },
   { name: '敵 攻撃+1', setup: () => strengthen(1, 1) },
+  { name: '味方越しでも撃つ(旧)', setup: () => (RULES.holdFireOnAlly = false) },
+  { name: '休憩 10%(旧)', setup: () => rest(0.1, 2) },
+  { name: '旧(両方)', setup: () => ((RULES.holdFireOnAlly = false), rest(0.1, 2)) },
   { name: '仲間を呼ばない', setup: () => (RULES.aiCallRange = 0) },
-  { name: '敵の接近攻撃なし', setup: () => (RULES.aiChargeRate = 0) },
   { name: '休憩なし', setup: () => rest(0, 0) },
 ];
 
