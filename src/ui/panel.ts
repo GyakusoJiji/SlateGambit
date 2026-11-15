@@ -1,5 +1,5 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
-import { RULES, apLeft, carryingAfter, planCost } from '../core/actions';
+import { RULES, apLeft, carryingAfter, fillerAction, planCost } from '../core/actions';
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
@@ -59,7 +59,7 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
 /** 連続する移動を 1 つのチップにまとめて表示する */
 export function planChips(actions: Action[], nameOf: (id: string) => string, inCombat: boolean): string {
   const rest = apLeft(actions);
-  const filler = inCombat ? T.act.guard : T.act.wait;
+  const filler = fillerAction(actions, inCombat).type === 'guard' ? T.act.guard : T.act.wait;
   const tail = rest > 0 ? `<span class="chip empty">${T.restFill(filler, rest, actions.length === 0)}</span>` : '';
   const out: string[] = [];
   let arrows = '';

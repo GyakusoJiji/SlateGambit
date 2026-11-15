@@ -109,6 +109,8 @@ describe('移動', () => {
     expect(fillPlan(plan, true).slice(3)).toEqual([{ type: 'guard' }, { type: 'guard' }, { type: 'guard' }]);
     expect(fillPlan(plan, false).slice(3)).toEqual([{ type: 'wait' }, { type: 'wait' }, { type: 'wait' }]);
     expect(plan).toHaveLength(3);
+    // 何も予約していなければ、戦闘中でも待機
+    expect(fillPlan([], true).every((a) => a.type === 'wait')).toBe(true);
   });
 
   it('敵のマスは通り抜けられず、敵とのすれ違いもできない', () => {

@@ -62,15 +62,20 @@ export function apLeft(actions: Action[]): number {
   return AP_PER_TURN - planCost(actions);
 }
 
-/** 余った AP を埋める行動: 戦闘中(敵が見えている)は防御、それ以外は待機 */
-export function fillerAction(inCombat: boolean): Action {
-  return { type: inCombat ? 'guard' : 'wait' };
+/**
+ * 余った AP を埋める行動。
+ * - 何も予約していないキャラは、戦闘中でも待機
+ * - 一部だけ予約したキャラの残りは、戦闘中(敵が見えている)は防御、それ以外は待機
+ */
+export function fillerAction(actions: Action[], inCombat: boolean): Action {
+  return { type: inCombat && actions.length > 0 ? 'guard' : 'wait' };
 }
 
 /** 予約の残り AP を埋めた計画を返す(元の配列は変えない) */
 export function fillPlan(actions: Action[], inCombat: boolean): Action[] {
   const out = [...actions];
-  for (let n = apLeft(out); n > 0; n--) out.push(fillerAction(inCombat));
+  const filler = fillerAction(actions, inCombat);
+  for (let n = apLeft(out); n > 0; n--) out.push(filler);
   return out;
 }
 

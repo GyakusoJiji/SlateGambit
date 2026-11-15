@@ -417,11 +417,14 @@ export class Controller {
   /** キャラごとに最後に選んだ行動モード(選択したときの初期位置にする) */
   private lastMode = new Map<string, Mode>();
 
-  /** そのキャラを選んだときの行動モード。最後に選んだモードが今は使えなければ移動 */
+  /**
+   * そのキャラを選んだときの行動モード。
+   * 戦闘中(敵が誰かの視界にいる)なら最後に選んだモード、非戦闘中は移動。使えないモードなら移動
+   */
   private defaultMode(id: string | null): Mode {
     const u = id ? this.unit(id) : undefined;
     const m = u ? this.lastMode.get(u.id) : undefined;
-    if (!u || !m) return 'move';
+    if (!u || !m || !this.foesInSight()) return 'move';
     const carrying = carryingAfter(u, this.plans[u.id] ?? []);
     if (carrying) return 'move';
     const spells: string[] = unitDef(u.defId).spells;
