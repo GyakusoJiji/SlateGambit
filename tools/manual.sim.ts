@@ -85,7 +85,7 @@ function parseCmd(state: GameState, cmd: string, out: string[]): Plans {
         }
         case 'atk': {
           const t = state.units.find((x) => x.id === arg)!;
-          if (inReach(state.map, u, end(), t)) push({ type: 'attack', target: arg });
+          if (inReach(state.map, u, end(), t, state.units)) push({ type: 'attack', target: arg });
           else push({ type: 'charge', target: arg, ticks: apLeft(list) });
           break;
         }

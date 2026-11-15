@@ -21,7 +21,6 @@ const VARIANTS: { name: string; setup: () => void }[] = [
   { name: '現行', setup: () => {} },
   { name: '敵 攻撃-1', setup: () => strengthen(-1, 1) },
   { name: '敵 攻撃+1', setup: () => strengthen(1, 1) },
-  { name: '敵も通り抜け可', setup: () => (RULES.passThroughFoes = true) },
   { name: '休憩なし', setup: () => rest(0, 0) },
 ];
 

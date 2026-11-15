@@ -4,7 +4,7 @@ import { RULES, expandPlan, isRestPlan, type Step } from './actions';
 import { hasLos, linePoints } from './los';
 import { DIR_LIST, dist2, isWalkable, manhattan, step, tileAt } from './map';
 import { findPath } from './path';
-import { triggerReaction } from './reactions';
+import { clearShot, triggerReaction } from './reactions';
 import { Rng } from './rng';
 import {
   TICKS_PER_TURN,
@@ -64,7 +64,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     for (const u of units) {
       if (u.down) continue;
       let s = steps.get(u.id)![ti];
-      if (s.k === 'charge') s = chargeStep(map, u, byId.get(s.target), s, chargeWind);
+      if (s.k === 'charge') s = chargeStep(map, u, byId.get(s.target), s, chargeWind, units);
       current.set(u.id, s);
       if (s.k === 'guard') guard.add(u.id);
       if (s.k === 'watch') watching.add(u.id);
@@ -89,7 +89,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
         // ここに来るのは届かない場合だけ。届く位置へ 1 マス近づく
         const t = byId.get(s.target)!;
         const { blocks, taken } = pathRules(units, u, t);
-        const p = findPath(map, u, (q) => !taken(q) && inReach(map, u, q, t), blocks, 400);
+        const p = findPath(map, u, (q) => !taken(q) && inReach(map, u, q, t, units), blocks, 400);
         if (p && p.length > 0) to = step(u, p[0]);
       }
       if (to) intents.push({ unit: u, from: { x: u.x, y: u.y }, to, status: 'pending' });
@@ -135,6 +135,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       else events.push({ tick, type: 'bump', id: m.unit.id, at: m.to });
     }
     for (const d of displaced) events.push({ tick, type: 'move', id: d.unit.id, from: d.from, to: d.to });
+    /** このティックに実際に位置が変わったユニット(条件付き行動の発動条件) */
+    const movedNow = new Set([...intents.filter((m) => m.status === 'ok').map((m) => m.unit.id), ...displaced.map((d) => d.unit.id)]);
 
     // 担ぐ・降ろす
     for (const [id, s] of current) {
@@ -161,7 +163,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       const u = byId.get(id)!;
       const s = current.get(id);
       if (s?.k !== 'watch') continue;
-      const target = triggerReaction(map, u, s.mode, units);
+      const target = triggerReaction(map, u, s.mode, units, movedNow);
       if (!target) continue;
       strikes.push({ unit: u, action: { type: 'attack', target: target.id }, reaction: true });
       // 発動した攻撃の残りコスト(1 ティック)を消費する
@@ -244,11 +246,15 @@ function pathRules(units: Unit[], u: Unit, target: Unit): { blocks: (p: Pos) => 
   };
 }
 
-/** 攻撃が届く位置か(近接は上下左右に隣接、遠隔は射程内で射線が通る) */
-export function inReach(map: GameState['map'], u: Unit, from: Pos, t: Pos): boolean {
+/**
+ * 攻撃が届く位置か(近接は上下左右に隣接、遠隔は射程内で射線が通る)。
+ * units を渡すと、遠隔は味方などが射線上にいない(最初に当たるのが t)ことも条件にする
+ */
+export function inReach(map: GameState['map'], u: Unit, from: Pos, t: Unit, units?: Unit[]): boolean {
   const def = unitDef(u.defId);
   if (def.range <= 1) return manhattan(from, t) === 1;
-  return dist2(from, t) <= def.range * def.range && hasLos(map, from, t);
+  if (dist2(from, t) > def.range * def.range || !hasLos(map, from, t)) return false;
+  return !units || clearShot(units, u, from, t);
 }
 
 /** 接近攻撃の 1 ティック分を、構え・攻撃・移動(charge のまま)・防御のいずれかに読み替える */
@@ -258,12 +264,14 @@ function chargeStep(
   t: Unit | undefined,
   s: Extract<Step, { k: 'charge' }>,
   wind: Map<string, number>,
+  units: Unit[],
 ): Step {
   if (!t || t.down) {
     wind.delete(u.id);
     return { k: 'guard' };
   }
-  if (!inReach(map, u, u, t)) {
+  // 遠隔は、味方が射線上にいる間は撃たずに位置を変える
+  if (!inReach(map, u, u, t, units)) {
     wind.delete(u.id);
     return s;
   }

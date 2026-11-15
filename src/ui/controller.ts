@@ -508,11 +508,14 @@ export class Controller {
     this.advanceIfFull(u);
   }
 
-  /** 予定位置から届くなら攻撃、届かなければ接近攻撃(残り AP 全部)を予約する */
+  /**
+   * 予定位置から届くなら攻撃、届かなければ接近攻撃(残り AP 全部)を予約する。
+   * 遠隔で味方が射線上にいる場合も「届かない」とみなし、接近攻撃で射線の空く位置へ動かす
+   */
   private attackOrCharge(u: Unit, foe: Unit): boolean {
     const plan = this.plans[u.id];
     const end = simulate(this.state, u, plan).end;
-    if (inReach(this.state.map, u, end, foe)) return this.append(u, { type: 'attack', target: foe.id });
+    if (inReach(this.state.map, u, end, foe, this.state.units)) return this.append(u, { type: 'attack', target: foe.id });
     const ok = this.append(u, { type: 'charge', target: foe.id, ticks: apLeft(plan) });
     if (ok) this.toast(T.err.toCharge);
     return ok;

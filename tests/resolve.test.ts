@@ -234,6 +234,13 @@ describe('攻撃', () => {
     expect(r.events.some((e) => e.type === 'strike' && e.id === 'p1')).toBe(true);
   });
 
+  it('遠隔の接近攻撃は味方越しには撃たず、射線が空く位置へ動く', () => {
+    const s = game([mk('p2', 'thief', 1, 1), mk('p1', 'warrior', 3, 1), mk('g1', 'goblin', 6, 1)]);
+    const r = resolveTurn(s, { p2: [{ type: 'charge', target: 'g1', ticks: 8 }] });
+    expect(u(r.state, 'p1').hp).toBe(CLASSES.warrior.maxHp);
+    expect(u(r.state, 'g1').hp).toBeLessThan(MONSTERS.goblin.maxHp);
+  });
+
   it('遠隔の接近攻撃は射線が通る位置まで寄って撃つ', () => {
     const s = game([mk('p2', 'thief', 1, 1), mk('g1', 'goblin', 10, 5)], ['############', '#..........#', '#..........#', '#..........#', '#..........#', '#..........#', '############']);
     const r = resolveTurn(s, { p2: [{ type: 'charge', target: 'g1', ticks: 8 }] });
@@ -298,9 +305,21 @@ describe('条件付き行動', () => {
 
   it('警戒射撃は味方越しには撃たない', () => {
     const s = game([mk('p2', 'thief', 1, 3), mk('p1', 'warrior', 3, 3), mk('g1', 'goblin', 6, 3)]);
-    const r = resolveTurn(s, { p2: [{ type: 'overwatch', ticks: 8 }] });
+    const r = resolveTurn(s, { p2: [{ type: 'overwatch', ticks: 8 }], g1: [{ type: 'wait' }, ...moves('W', 1)] });
     expect(r.events.some((e) => e.type === 'strike' && e.id === 'p2')).toBe(false);
     expect(u(r.state, 'p1').hp).toBe(CLASSES.warrior.maxHp);
+  });
+
+  it('警戒射撃・迎撃は動かない敵には反応しない', () => {
+    const s = game([mk('p2', 'thief', 1, 3), mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 4, 3), mk('g2', 'goblin', 2, 1)]);
+    const r = resolveTurn(s, { p2: [{ type: 'overwatch', ticks: 8 }], p1: [{ type: 'intercept', ticks: 8 }] });
+    expect(r.events.some((e) => e.type === 'strike' && e.reaction)).toBe(false);
+  });
+
+  it('迎撃は隣に居続ける敵には 1 回だけ反応する(動いて来たティックのみ)', () => {
+    const s = game([mk('p1', 'warrior', 1, 3), mk('g1', 'goblin', 3, 3)]);
+    const r = resolveTurn(s, { p1: [{ type: 'intercept', ticks: 8 }], g1: [...moves('W', 1), { type: 'guard' }, { type: 'guard' }, { type: 'guard' }] });
+    expect(r.events.filter((e) => e.type === 'strike' && e.id === 'p1')).toHaveLength(1);
   });
 
   it('迎撃は隣接してきた敵を攻撃する', () => {
