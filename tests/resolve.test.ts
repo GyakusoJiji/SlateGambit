@@ -248,6 +248,39 @@ describe('攻撃', () => {
   });
 });
 
+describe('敵 AI', () => {
+  it('パーティを見た敵は、近くの仲間を呼ぶ', () => {
+    const rows = ['##############', '#......#.....#', '#......#.....#', '#............#', '##############'];
+    const g2 = mk('g2', 'goblin', 10, 1);
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 5, 1), g2], rows);
+    const r = resolveTurn(s, {});
+    expect(u(r.state, 'g1').ai?.alerted).toBe(true);
+    expect(u(r.state, 'g2').ai).toMatchObject({ alerted: true, lastSeen: { x: 1, y: 1 } });
+  });
+
+  it('弓兵は仲間越しには撃たない(計画時点で射線上にいる仲間を避ける)', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 3, 1), mk('a1', 'archer', 5, 1)]);
+    for (let t = 1; t <= 10; t++) {
+      // 仲間のゴブリンは動かない(撃つ途中で射線に入ってくる場合は、同時解決の結果として起こりうる)
+      const plans = { ...planEnemies({ ...s, turn: t }), g1: [] };
+      const r = resolveTurn({ ...s, turn: t }, plans);
+      expect(r.events.some((e) => e.type === 'damage' && e.by === 'a1' && e.id === 'g1')).toBe(false);
+    }
+  });
+
+  it('弱った敵は下がるか守りを固める(何度か試して、少なくとも一度は下がる)', () => {
+    let retreated = false;
+    for (let t = 1; t <= 12 && !retreated; t++) {
+      const g = mk('g1', 'goblin', 3, 1);
+      g.hp = 3;
+      const s = { ...game([mk('p1', 'warrior', 1, 1), g]), turn: t };
+      const r = resolveTurn(s, planEnemies(s));
+      if (u(r.state, 'g1').x > 3) retreated = true;
+    }
+    expect(retreated).toBe(true);
+  });
+});
+
 describe('担ぐ・泉', () => {
   const downed = (id: string, defId: string, x: number, y: number) => {
     const d = mk(id, defId, x, y);

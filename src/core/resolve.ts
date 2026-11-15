@@ -567,6 +567,17 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>): void
       if (e.x === patrol[i].x && e.y === patrol[i].y) e.ai.patrolIndex = (i + 1) % patrol.length;
     }
   }
+
+  // 仲間を呼ぶ: パーティを見た・攻撃された敵の近くにいる、まだ気付いていない敵も同じ場所へ向かう
+  if (RULES.aiCallRange <= 0) return;
+  const callers = units.filter((e) => e.side === 'enemy' && !e.down && e.ai?.alerted && e.ai.lastSeen);
+  for (const e of units) {
+    if (e.side !== 'enemy' || e.down || !e.ai || e.ai.alerted) continue;
+    const caller = callers.find((c) => c !== e && manhattan(c, e) <= RULES.aiCallRange);
+    if (!caller) continue;
+    e.ai.alerted = true;
+    e.ai.lastSeen = pos(caller.ai!.lastSeen!);
+  }
 }
 
 /**

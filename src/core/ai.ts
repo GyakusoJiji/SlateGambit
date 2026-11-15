@@ -3,10 +3,11 @@
 import { unitDef } from '../data/units';
 import { RULES, apLeft } from './actions';
 import { hasLos } from './los';
-import { dist2, manhattan, samePos, step } from './map';
+import { DIR_LIST, dist2, isWalkable, manhattan, samePos, step } from './map';
 import { pathAdjacent, pathTo } from './path';
+import { clearShot } from './reactions';
 import { Rng, hashSeed } from './rng';
-import type { Action, GameState, Plans, Pos, Unit } from './types';
+import type { Action, Dir, GameState, Plans, Pos, Unit } from './types';
 import { unitSees } from './vision';
 
 export type Intent = 'attack' | 'move' | 'guard' | 'idle';
@@ -45,21 +46,41 @@ function planOne(state: GameState, e: Unit): Action[] {
     return plan;
   }
 
-  targets.sort((a, b) => dist2(e, a) - dist2(e, b) || a.hp - b.hp);
+  // 狙う相手: 近さだけでなく、弱っている相手を優先する(距離 + HP 割合 × 4 が小さい順)
+  const score = (p: Unit) => manhattan(e, p) + 4 * (p.hp / unitDef(p.defId).maxHp);
+  targets.sort((a, b) => score(a) - score(b) || a.id.localeCompare(b.id));
   const target = targets[0];
   const hpRatio = e.hp / def.maxHp;
-
-  // 弱ったら守りを固める
-  if (hpRatio < 0.35 && rng.next() < 0.5) {
-    while (apLeft(plan) > 0) plan.push({ type: 'guard' });
-    return plan;
-  }
 
   let pos: Pos = { x: e.x, y: e.y };
   const blocked = (p: Pos) => units.some((o) => o !== e && !o.down && o.x === p.x && o.y === p.y);
 
+  // 弱ったら、半分は下がって距離を取り、残りの一部は守りを固める
+  if (hpRatio < 0.35) {
+    const r = rng.next();
+    if (r < 0.5) {
+      const path = retreatPath(state, e, targets, blocked);
+      if (path.length > 0) {
+        for (const d of path) plan.push({ type: 'move', dir: d });
+        while (apLeft(plan) > 0) plan.push({ type: 'guard' });
+        return plan;
+      }
+    }
+    if (r < 0.75) {
+      while (apLeft(plan) > 0) plan.push({ type: 'guard' });
+      return plan;
+    }
+  }
+
+  // 一部の敵は、相手の動きに合わせて追いかけ、届いてから構える(接近攻撃)。フェイントに強い
+  if (rng.next() < RULES.aiChargeRate) {
+    plan.push({ type: 'charge', target: target.id, ticks: apLeft(plan) });
+    return plan;
+  }
+
   if (def.range > 1) {
-    const canShoot = (p: Pos) => dist2(p, target) <= def.range * def.range && hasLos(map, p, target);
+    // 仲間が射線上にいる位置からは撃たない
+    const canShoot = (p: Pos) => dist2(p, target) <= def.range * def.range && hasLos(map, p, target) && clearShot(units, e, p, target);
     if (!canShoot(pos)) {
       const path = pathTo(map, pos, target, blocked) ?? [];
       for (const d of path) {
@@ -71,6 +92,11 @@ function planOne(state: GameState, e: Unit): Action[] {
     if (canShoot(pos) && rng.next() < 0.3) {
       // 待ち構えて撃つ(相手が動いても撃てる)
       plan.push({ type: 'overwatch', ticks: apLeft(plan) });
+      return plan;
+    }
+    if (!canShoot(pos)) {
+      // 撃てる位置まで来られなければ、残りは相手の動きに合わせて射線の空く位置を探す
+      if (apLeft(plan) > 0) plan.push({ type: 'charge', target: target.id, ticks: apLeft(plan) });
       return plan;
     }
     while (apLeft(plan) >= RULES.attackCost) plan.push({ type: 'attack', target: target.id });
@@ -94,6 +120,44 @@ function planOne(state: GameState, e: Unit): Action[] {
   while (apLeft(plan) >= RULES.attackCost) plan.push({ type: 'attack', target: target.id });
   while (apLeft(plan) > 0) plan.push({ type: 'guard' });
   return plan;
+}
+
+/** 見えている相手からなるべく離れ、できれば視界の外に出る経路(最大 5 マス) */
+function retreatPath(state: GameState, e: Unit, foes: Unit[], blocked: (p: Pos) => boolean): Dir[] {
+  const { map } = state;
+  const key = (p: Pos) => `${p.x},${p.y}`;
+  const start = { x: e.x, y: e.y };
+  const prev = new Map<string, { from: string; dir: Dir } | null>([[key(start), null]]);
+  const queue: { p: Pos; d: number }[] = [{ p: start, d: 0 }];
+  const value = (p: Pos) => {
+    const near = Math.min(...foes.map((f) => manhattan(p, f)));
+    const seen = foes.some((f) => hasLos(map, f, p)) ? 0 : 3;
+    return near + seen;
+  };
+  let best = start;
+  let bestValue = value(start);
+  for (let i = 0; i < queue.length; i++) {
+    const { p, d } = queue[i];
+    if (d >= 5) continue;
+    for (const dir of DIR_LIST) {
+      const n = step(p, dir);
+      if (prev.has(key(n)) || !isWalkable(map, n.x, n.y) || blocked(n)) continue;
+      prev.set(key(n), { from: key(p), dir });
+      queue.push({ p: n, d: d + 1 });
+      const v = value(n);
+      if (v > bestValue) {
+        best = n;
+        bestValue = v;
+      }
+    }
+  }
+  const dirs: Dir[] = [];
+  let k = key(best);
+  for (let link = prev.get(k); link; link = prev.get(k)) {
+    dirs.unshift(link.dir);
+    k = link.from;
+  }
+  return dirs;
 }
 
 function patrolGoal(e: Unit): Pos | null {

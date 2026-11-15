@@ -12,6 +12,10 @@ export const RULES = {
   passThroughFoes: false,
   /** 気絶した味方を担いでいる間の移動コスト(1 マスあたり) */
   carryMoveCost: 2,
+  /** 敵 AI が接近攻撃(相手の動きに合わせて追う)を選ぶ割合 */
+  aiChargeRate: 0.5,
+  /** 敵が仲間を呼ぶ範囲(マンハッタン距離)。0 で呼ばない */
+  aiCallRange: 8,
 };
 
 /** 予約が待機だけ(または空)か */

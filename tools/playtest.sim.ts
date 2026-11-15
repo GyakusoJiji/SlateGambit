@@ -21,6 +21,8 @@ const VARIANTS: { name: string; setup: () => void }[] = [
   { name: '現行', setup: () => {} },
   { name: '敵 攻撃-1', setup: () => strengthen(-1, 1) },
   { name: '敵 攻撃+1', setup: () => strengthen(1, 1) },
+  { name: '仲間を呼ばない', setup: () => (RULES.aiCallRange = 0) },
+  { name: '敵の接近攻撃なし', setup: () => (RULES.aiChargeRate = 0) },
   { name: '休憩なし', setup: () => rest(0, 0) },
 ];
 
