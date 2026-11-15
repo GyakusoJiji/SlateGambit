@@ -22,7 +22,7 @@ export interface UnitDef {
 export const CLASSES: Record<string, UnitDef> = {
   warrior: { id: 'warrior', name: '戦士', icon: 'warrior', maxHp: 48, maxMp: 0, atk: 7, dmgVar: 3, def: 2, range: 1, sight: 7, spells: [] },
   thief: { id: 'thief', name: '盗賊', icon: 'thief', maxHp: 30, maxMp: 0, atk: 5, dmgVar: 3, def: 1, range: 6, sight: 8, spells: [] },
-  mage: { id: 'mage', name: '魔法使い', icon: 'mage', maxHp: 24, maxMp: 14, atk: 3, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'] },
+  mage: { id: 'mage', name: '魔法使い', icon: 'mage', maxHp: 24, maxMp: 14, atk: 3, dmgVar: 2, def: 0, range: 6, sight: 7, spells: ['fireball'] },
   priest: { id: 'priest', name: '僧侶', icon: 'priest', maxHp: 33, maxMp: 14, atk: 4, dmgVar: 2, def: 1, range: 1, sight: 7, spells: ['heal', 'revive'] },
 };
 

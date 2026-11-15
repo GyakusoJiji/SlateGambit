@@ -163,6 +163,12 @@ function mage(ctx: Ctx): void {
       if (castable(ctx.pos, best.tile)) ctx.plan.push({ type: 'spell', spell: 'fireball', tile: best.tile });
     }
   }
+  // 残りの AP で、その場から射線の通る敵を杖で撃つ
+  const shootable = ctx.foes.filter((f) => clearShot(state, ctx.pos, f, u, ctx.reserved));
+  if (shootable.length > 0) {
+    const t = nearest(ctx.pos, shootable);
+    while (apLeft(ctx.plan) >= RULES.attackCost) ctx.plan.push({ type: 'attack', target: t.id });
+  }
   retreatOrGuard(ctx);
 }
 
