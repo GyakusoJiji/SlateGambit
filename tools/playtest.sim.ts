@@ -8,6 +8,7 @@ import { resolveTurn } from '../src/core/resolve';
 import { generateGame } from '../src/core/generate';
 import { createTestGame } from '../src/core/scenario';
 import type { Difficulty, GameEvent, GameState, Objective } from '../src/core/types';
+import { visibleFoes } from '../src/core/vision';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
 import { planParty } from './partyBot';
 
@@ -89,9 +90,23 @@ interface Stats {
   meleeTries: number;
   meleeWhiffs: number;
   timeoutSeeds: number[];
+  /** ターンの内訳(戦闘=開始時に敵が見えている / 休憩=休憩イベントあり / 探索=それ以外) */
+  phase: Record<string, number>;
+  /** 敵が見えているのに誰もダメージ・回復をしなかった戦闘ターン(膠着) */
+  stallTurns: number;
+  /** 膠着が 5 ターン以上続いた戦闘(1 戦で 1 回まで数える) */
+  longStalls: number;
+  bumps: Record<string, number>;
+  treasureDrops: number;
+  /** ドラゴンと戦った(ダメージを与えた)戦の数、倒した戦の数 */
+  dragonFought: number;
+  dragonKilled: number;
+  /** 全滅させたユニットの最後の一撃(負けの原因) */
+  lastBlow: Record<string, number>;
 }
 
 const add = (o: Record<string, number>, k: string, n = 1) => (o[k] = (o[k] ?? 0) + n);
+const pct = (n: number, d: number) => `${Math.round((n / Math.max(1, d)) * 100)}%`;
 const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 
 function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
@@ -113,18 +128,47 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
     meleeTries: 0,
     meleeWhiffs: 0,
     timeoutSeeds: [],
+    phase: {},
+    stallTurns: 0,
+    longStalls: 0,
+    bumps: {},
+    treasureDrops: 0,
+    dragonFought: 0,
+    dragonKilled: 0,
+    lastBlow: {},
   };
   for (let g = 0; g < games; g++) {
     let state: GameState = makeGame(1000 + g);
     const defOf = new Map(state.units.map((u) => [u.id, u.defId]));
     const sideOf = new Map(state.units.map((u) => [u.id, u.side]));
+    let stallRun = 0;
+    let longStallCounted = false;
+    let dragonHit = false;
+    let lastPartyBlow = '';
     while (state.status === 'playing' && state.turn <= MAX_TURNS) {
       const hpBefore = new Map(state.units.map((u) => [u.id, u.hp / unitDef(u.defId).maxHp]));
+      const fight = visibleFoes(state.map, state.units, 'party').size > 0;
       const r = resolveTurn(state, { ...planEnemies(state), ...planParty(state) });
       const lastHit = new Map<string, string>();
       for (const e of r.events) collect(e, lastHit, hpBefore);
+      const active = r.events.some((e) => e.type === 'damage' || e.type === 'heal' || e.type === 'revive');
+      add(s.phase, fight ? '戦闘' : r.events.some((e) => e.type === 'rest') ? '休憩' : '探索');
+      if (fight && !active) {
+        s.stallTurns++;
+        if (++stallRun >= 5 && !longStallCounted) {
+          s.longStalls++;
+          longStallCounted = true;
+        }
+      } else stallRun = 0;
+      for (const e of r.events) {
+        if (e.type === 'damage' && defOf.get(e.id) === 'dragon') dragonHit = true;
+        if (e.type === 'damage' && sideOf.get(e.id) === 'party') lastPartyBlow = defOf.get(e.by)!;
+      }
       state = r.state;
     }
+    if (dragonHit) s.dragonFought++;
+    if (state.units.some((u) => u.defId === 'dragon' && u.down)) s.dragonKilled++;
+    if (state.status === 'lost') add(s.lastBlow, lastPartyBlow);
     const res = state.status === 'playing' ? 'timeout' : state.status;
     s.result[res]++;
     if (res === 'timeout') s.timeoutSeeds.push(1000 + g);
@@ -166,6 +210,12 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
         case 'revive':
           s.revives++;
           break;
+        case 'bump':
+          add(s.bumps, sideOf.get(e.id)!);
+          break;
+        case 'treasure':
+          if (!e.got) s.treasureDrops++;
+          break;
         case 'heal':
           s.heals++;
           break;
@@ -203,6 +253,13 @@ function detail(s: Stats, games: number): string {
   }
   lines.push(`時間切れのシード例: ${s.timeoutSeeds.slice(0, 6).join(', ')}`);
   lines.push(`蘇生 ${(s.revives / games).toFixed(2)} 回/戦、回復 ${(s.heals / games).toFixed(2)} 回/戦`);
+  const ph = Object.entries(s.phase).map(([k, v]) => `${k} ${(v / games).toFixed(1)}`).join(' / ');
+  lines.push(`ターンの内訳(1 戦あたり): ${ph}`);
+  lines.push(`膠着ターン ${(s.stallTurns / games).toFixed(1)}/戦、5 ターン以上の膠着 ${pct(s.longStalls, games)} の戦`);
+  lines.push(`進めなかった移動(1 戦あたり): 味方 ${((s.bumps.party ?? 0) / games).toFixed(1)}、敵 ${((s.bumps.enemy ?? 0) / games).toFixed(1)}`);
+  lines.push(`ドラゴン: 戦った ${pct(s.dragonFought, games)}、倒した ${pct(s.dragonKilled, games)}。宝を落とした ${(s.treasureDrops / games).toFixed(2)} 回/戦`);
+  const lb = Object.entries(s.lastBlow).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${unitDef(k).name} ${v}`).join('、');
+  lines.push(`全滅したときの最後の一撃: ${lb || 'なし'}`);
   lines.push('不発(1 戦あたり、多い順):');
   for (const [k, v] of Object.entries(s.fizzles)
     .sort((a, b) => b[1] - a[1])
