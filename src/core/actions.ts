@@ -12,6 +12,12 @@ export const RULES = {
   passThroughFoes: false,
   /** 気絶した味方を担いでいる間の移動コスト(1 マスあたり) */
   carryMoveCost: 2,
+  /** 担がれたまま何ターン過ごすと、意識を取り戻す判定が始まるか */
+  carryWakeTurns: 3,
+  /** 判定が始まった後、ターンの終わりごとに意識を取り戻す確率 */
+  carryWakeChance: 0.5,
+  /** 意識を取り戻したときの HP */
+  carryWakeHp: 8,
   /** 敵 AI が接近攻撃(相手の動きに合わせて追う)を選ぶ割合 */
   aiChargeRate: 0.5,
   /** 敵が仲間を呼ぶ範囲(マンハッタン距離)。0 で呼ばない */

@@ -298,6 +298,40 @@ describe('担ぐ・泉', () => {
     expect(u(r.state, 'p1').carrying).toBeUndefined();
   });
 
+  it('担がれたまま 3 ターン目以降は、ターンの終わりに 50% で意識を取り戻す', () => {
+    const results: number[] = [];
+    for (let seed = 1; seed <= 40; seed++) {
+      let s = game([mk('p1', 'warrior', 1, 1), downed('p3', 'mage', 2, 1)], OPEN, seed);
+      s = resolveTurn(s, { p1: [{ type: 'carry', target: 'p3' }] }).state;
+      let woke = 0;
+      for (let t = 2; t <= 12 && !woke; t++) {
+        const r = resolveTurn(s, {});
+        if (r.events.some((e) => e.type === 'wake')) woke = t;
+        s = r.state;
+      }
+      results.push(woke);
+      if (woke) {
+        expect(u(s, 'p3')).toMatchObject({ down: false, hp: RULES.carryWakeHp });
+        expect(u(s, 'p1').carrying).toBeUndefined();
+        expect(`${u(s, 'p3').x},${u(s, 'p3').y}`).not.toBe(`${u(s, 'p1').x},${u(s, 'p1').y}`);
+      }
+    }
+    // 1・2 ターン目には起きない。3 ターン目にはおよそ半分が起きる
+    expect(results.every((t) => t === 0 || t >= 3)).toBe(true);
+    const third = results.filter((t) => t === 3).length;
+    expect(third).toBeGreaterThan(8);
+    expect(third).toBeLessThan(32);
+  });
+
+  it('降ろすと、担がれた回数は数え直しになる', () => {
+    let s = game([mk('p1', 'warrior', 1, 1), downed('p3', 'mage', 2, 1)]);
+    s = resolveTurn(s, { p1: [{ type: 'carry', target: 'p3' }] }).state;
+    s = resolveTurn(s, {}).state;
+    expect(u(s, 'p3').carriedTurns).toBe(2);
+    s = resolveTurn(s, { p1: [{ type: 'drop' }] }).state;
+    expect(u(s, 'p3').carriedTurns).toBeUndefined();
+  });
+
   it('担いでいる者が倒れたら、その場に落とす', () => {
     const p1 = mk('p1', 'warrior', 1, 1);
     p1.hp = 1;

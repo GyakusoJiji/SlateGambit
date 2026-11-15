@@ -104,6 +104,7 @@ export const T = {
     rest: (a: string, hp: number, mp: number) => `${a} は休憩した(HP+${hp}${mp > 0 ? ` MP+${mp}` : ''})`,
     carry: (a: string, b: string) => `${a} が ${b} を担いだ`,
     drop: (a: string, b: string) => `${a} が ${b} を降ろした`,
+    wake: (a: string) => `${a} は担がれている間に意識を取り戻した`,
     spring: (a: string, revived: boolean) => (revived ? `${a} は泉の力で起き上がった` : `${a} は泉で全回復した`),
   },
 

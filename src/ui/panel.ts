@@ -17,7 +17,7 @@ export function partyCards(party: Unit[], plans: Record<string, Action[]>, selec
       const pips = Array.from({ length: AP_PER_TURN }, (_, i) => `<i class="${i < used ? 'used' : ''}"></i>`).join('');
       return `<button class="card${u.id === selected ? ' sel' : ''}${u.down ? ' down' : ''}" data-sel="${u.id}">
         <img src="${iconUrl(d.icon)}" alt="">
-        <span class="name">${esc(u.name)}${u.down ? `<small>${T.down}</small>` : ''}</span>
+        <span class="name">${esc(u.name)}${u.down ? `<small>${T.down}${u.carriedTurns ? `·担${u.carriedTurns}` : ''}</small>` : ''}</span>
         <span class="bar hp"><i style="width:${(u.hp / d.maxHp) * 100}%"></i></span>
         ${d.maxMp > 0 ? `<span class="bar mp"><i style="width:${(u.mp / d.maxMp) * 100}%"></i></span>` : '<span class="bar none"></span>'}
         <span class="pips">${pips}</span>
@@ -150,6 +150,9 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'spring':
         lines.push(T.log.spring(nameOf(e.id), e.revived));
+        break;
+      case 'wake':
+        lines.push(T.log.wake(nameOf(e.id)));
         break;
     }
   }

@@ -213,6 +213,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
 
   applyRest(state, plans, seenAtStart.party.size === 0, events, frames);
   applySpring(state, events, frames);
+  applyWakeUp(state, rng, events, frames);
   updateAiMemory(state, attackedBy);
   state.rng = rng.state;
   state.turn += 1;
@@ -315,6 +316,36 @@ function standUp(map: GameState['map'], units: Unit[], u: Unit, events: GameEven
   u.x = to.x;
   u.y = to.y;
   events.push({ tick, type: 'move', id: u.id, from, to });
+}
+
+/**
+ * 担がれている気絶者の回復: 担がれたままターンを終えた回数を数え、
+ * RULES.carryWakeTurns 回目以降は、ターンの終わりごとに RULES.carryWakeChance の確率で意識を取り戻す。
+ * 降ろされている気絶者の回数は 0 に戻す。
+ */
+function applyWakeUp(state: GameState, rng: Rng, events: GameEvent[], frames: UnitSnapshot[][]): void {
+  const { map, units } = state;
+  let changed = false;
+  for (const u of units) {
+    if (!u.down) {
+      u.carriedTurns = undefined;
+      continue;
+    }
+    const carried = units.some((c) => !c.down && c.carrying === u.id);
+    if (!carried) {
+      u.carriedTurns = undefined;
+      continue;
+    }
+    u.carriedTurns = (u.carriedTurns ?? 0) + 1;
+    if (u.carriedTurns < RULES.carryWakeTurns || rng.next() >= RULES.carryWakeChance) continue;
+    u.down = false;
+    u.hp = Math.min(unitDef(u.defId).maxHp, RULES.carryWakeHp);
+    u.carriedTurns = undefined;
+    events.push({ tick: TICKS_PER_TURN, type: 'wake', id: u.id });
+    standUp(map, units, u, events, TICKS_PER_TURN);
+    changed = true;
+  }
+  if (changed) frames[frames.length - 1] = snapshot(units, new Set(), new Set());
 }
 
 /**

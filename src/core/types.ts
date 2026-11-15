@@ -42,6 +42,8 @@ export interface Unit {
   down: boolean;
   /** 担いでいる気絶した味方の ID */
   carrying?: string;
+  /** 気絶中に、担がれたままターンを終えた連続回数(降ろされると 0 に戻る) */
+  carriedTurns?: number;
   ai?: AiMemory;
 }
 
@@ -108,7 +110,9 @@ export type GameEvent =
   | { tick: number; type: 'rest'; id: string; hp: number; mp: number }
   | { tick: number; type: 'carry'; id: string; target: string }
   | { tick: number; type: 'drop'; id: string; target: string }
-  | { tick: number; type: 'spring'; id: string; revived: boolean };
+  | { tick: number; type: 'spring'; id: string; revived: boolean }
+  /** 担がれている間に意識を取り戻した */
+  | { tick: number; type: 'wake'; id: string };
 
 export interface UnitSnapshot {
   id: string;
