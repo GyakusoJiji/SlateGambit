@@ -1,7 +1,7 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
 import { planEnemies, summarizeIntent } from '../core/ai';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../core/actions';
-import { nearOrSame, samePos, step } from '../core/map';
+import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { inReach, resolveTurn } from '../core/resolve';
 import { generateGame } from '../core/generate';
@@ -630,6 +630,7 @@ export class Controller {
     if (act === 'group') {
       if (this.foesInSight()) return this.toast(T.err.cannotGroup);
       this.mode = 'group';
+      if (this.selected) this.lastMode.set(this.selected, 'group');
       return this.changed();
     }
     const u = this.selected ? this.unit(this.selected) : undefined;
@@ -674,17 +675,39 @@ export class Controller {
 
   /**
    * そのキャラを選んだときの行動モード。
-   * 戦闘中(敵が誰かの視界にいる)なら最後に選んだモード、非戦闘中は移動。使えないモードなら移動
+   * 1. そのキャラに敵が隣接している → 攻撃
+   * 2. 誰かの視界に敵がいる → 攻撃
+   * 3. 誰の視界にも敵がいない → 全員移動
+   * それ以外(担いでいて攻撃できないなど、上が使えないとき)は、そのキャラが最後に選んだモード。
+   * 最後のモードも使えなければ移動
    */
   private defaultMode(id: string | null): Mode {
     const u = id ? this.unit(id) : undefined;
-    const m = u ? this.lastMode.get(u.id) : undefined;
-    if (!u || !m || !this.foesInSight()) return 'move';
-    const carrying = carryingAfter(u, this.plans[u.id] ?? []);
-    if (carrying) return 'move';
-    const spells: string[] = unitDef(u.defId).spells;
-    if ((m === 'fireball' || m === 'heal' || m === 'revive') && !spells.includes(m)) return 'move';
-    return m;
+    if (!u || u.down) return 'move';
+    const st = this.state;
+    const plan = this.plans[u.id] ?? [];
+    const usable = (m: Mode): boolean => {
+      const carrying = carryingAfter(u, plan);
+      switch (m) {
+        case 'attack':
+        case 'follow':
+        case 'carry':
+          return !carrying;
+        case 'fireball':
+        case 'heal':
+        case 'revive':
+          return !carrying && (unitDef(u.defId).spells as string[]).includes(m);
+        case 'group':
+          return !this.foesInSight();
+        default:
+          return true;
+      }
+    };
+    const adjacentFoe = st.units.some((f) => f.side === 'enemy' && !f.down && adjacent(st.map, u, f));
+    const preferred: Mode = adjacentFoe || this.foesInSight() ? 'attack' : 'group';
+    if (usable(preferred)) return preferred;
+    const last = this.lastMode.get(u.id);
+    return last && usable(last) ? last : 'move';
   }
 
   /** focus=true なら、そのキャラの位置に盤面を寄せる(盤面をタップして選んだときは寄せない) */
@@ -766,8 +789,8 @@ export class Controller {
       else if (m === 'revive' && ally && ally.down) ok = this.append(u, { type: 'spell', spell: 'revive', target: ally.id });
       else if (m === 'fireball' && st.explored[tile.y * st.map.w + tile.x]) ok = this.append(u, { type: 'spell', spell: 'fireball', tile });
       else this.toast(T.err.notTarget);
-      // 予約できたら同じキャラは移動モードに戻す(AP を使い切って次のキャラに移った場合はそのキャラの初期位置のまま)
-      if (ok && this.selected === u.id) this.mode = 'move';
+      // 予約できたら同じキャラは既定のモードに戻す(AP を使い切って次のキャラに移った場合はそのキャラの既定のまま)
+      if (ok && this.selected === u.id) this.mode = this.defaultMode(u.id);
       this.changed();
       return;
     }
