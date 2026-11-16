@@ -6,10 +6,11 @@ import { manhattan } from './map';
 
 /**
  * leaderId のキャラを先頭に、target へ向かう全員の計画を返す。先頭がすでに着いている・行けない場合は null。
- * 後続は先頭に近い順に並び、1 人前の者の出発点へ向かってから同じ経路をなぞる(1 マスずつ遅れてついていく)。
+ * 後続は order(味方の ID の並び)の順に並ぶ。order が無ければ先頭に近い順。
+ * 各自は 1 人前の者の出発点へ向かってから同じ経路をなぞる(1 マスずつ遅れてついていく)。
  * すべての移動に「発見で停止」を付けるので、新しい敵が見えたら止まる。
  */
-export function quickMovePlans(state: GameState, leaderId: string, target: Pos): Plans | null {
+export function quickMovePlans(state: GameState, leaderId: string, target: Pos, order?: string[] | null): Plans | null {
   const { map } = state;
   const party = state.units.filter((u) => u.side === 'party' && !u.down);
   const leader = party.find((u) => u.id === leaderId) ?? party[0];
@@ -23,6 +24,11 @@ export function quickMovePlans(state: GameState, leaderId: string, target: Pos):
 
   const plans: Plans = { [leader.id]: moves(leader, leadPath) };
   const rest = party.filter((u) => u !== leader).sort((a, b) => manhattan(a, leader) - manhattan(b, leader));
+  if (order) {
+    // 指定された順に並べ替える(order に無い者は最後、その中では近い順のまま)
+    const rank = (u: Unit) => (order.includes(u.id) ? order.indexOf(u.id) : order.length);
+    rest.sort((a, b) => rank(a) - rank(b));
+  }
   let prev: { start: Pos; dirs: typeof leadPath } = { start: { x: leader.x, y: leader.y }, dirs: leadPath };
   for (const u of rest) {
     const toPrev = pathTo(map, u, prev.start) ?? [];

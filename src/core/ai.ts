@@ -3,7 +3,7 @@
 import { SPELLS, unitDef } from '../data/units';
 import { RULES, apLeft } from './actions';
 import { hasLos } from './los';
-import { DIR_LIST, dist2, isWalkable, manhattan, samePos, step } from './map';
+import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, samePos, step } from './map';
 import { pathAdjacent, pathTo } from './path';
 import { clearShot } from './reactions';
 import { Rng, hashSeed } from './rng';
@@ -123,8 +123,8 @@ function planOne(state: GameState, e: Unit): Action[] {
   }
 
   // 近接
-  const dist = manhattan(pos, target);
-  if (dist > 1 && dist <= 3 && rng.next() < 0.3) {
+  const dist = chebyshev(pos, target);
+  if (!adjacent(map, pos, target) && dist <= 3 && rng.next() < 0.3) {
     // 近づいてくるのを待って迎え撃つ
     plan.push({ type: 'intercept', ticks: apLeft(plan) });
     return plan;

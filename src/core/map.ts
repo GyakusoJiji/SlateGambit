@@ -49,6 +49,28 @@ export function manhattan(a: Pos, b: Pos): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
+export function chebyshev(a: Pos, b: Pos): number {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+}
+
+/**
+ * 近接攻撃などが届く「隣接」: 上下左右と斜めの 8 マス。
+ * ただし斜めは、間の 2 マス(上下と左右)がどちらも壁なら隣接とみなさない(壁の角の隙間越しには届かない)。
+ * 移動は上下左右だけで、斜めには動けない
+ */
+export function adjacent(map: FloorMap, a: Pos, b: Pos): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return false;
+  if (dx === 0 || dy === 0) return true;
+  return isWalkable(map, a.x + dx, a.y) || isWalkable(map, a.x, a.y + dy);
+}
+
+/** 隣接しているか、同じマスにいる(担ぐ・蘇生の届く範囲) */
+export function nearOrSame(map: FloorMap, a: Pos, b: Pos): boolean {
+  return samePos(a, b) || adjacent(map, a, b);
+}
+
 export function dist2(a: Pos, b: Pos): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;

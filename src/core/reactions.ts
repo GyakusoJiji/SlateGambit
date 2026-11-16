@@ -1,11 +1,11 @@
 // 条件付き行動の発動判定。どちらも「このティックに動いてきた敵」にだけ反応する
 // (その場にとどまる敵には通常の攻撃を使う)。
 // - 警戒射撃(overwatch): 動いて射程・射線・視界の中にいる最も近い敵を撃つ
-// - 迎撃(intercept): 動いて上下左右に隣接した敵を近接攻撃する
+// - 迎撃(intercept): 動いて隣接(斜めを含む)した敵を近接攻撃する
 // 追尾・護衛・敵を見たら停止は移動処理側(resolve.ts)で扱う。
 import { unitDef } from '../data/units';
 import { hasLos, linePoints } from './los';
-import { dist2, manhattan } from './map';
+import { adjacent, dist2 } from './map';
 import type { FloorMap, Pos, Unit } from './types';
 import { unitSees } from './vision';
 
@@ -25,7 +25,7 @@ export function triggerReaction(
 ): Unit | undefined {
   const foes = units.filter((f) => f.side !== u.side && !f.down && moved.has(f.id));
   if (mode === 'intercept') {
-    const adj = foes.filter((f) => manhattan(u, f) === 1);
+    const adj = foes.filter((f) => adjacent(map, u, f));
     adj.sort((a, b) => a.hp - b.hp || a.id.localeCompare(b.id));
     return adj[0];
   }

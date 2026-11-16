@@ -20,8 +20,8 @@ const DRAGON_COST = 7;
  */
 export const DIFFICULTY: Record<Difficulty, { budget: Record<Objective['kind'], number>; group: number; ogres: number }> = {
   easy: { budget: { annihilate: 13, treasure: 19 }, group: 7, ogres: 0 },
-  normal: { budget: { annihilate: 21, treasure: 29 }, group: 9, ogres: 1 },
-  hard: { budget: { annihilate: 31, treasure: 36 }, group: 12, ogres: 2 },
+  normal: { budget: { annihilate: 19, treasure: 27 }, group: 9, ogres: 1 },
+  hard: { budget: { annihilate: 28, treasure: 33 }, group: 12, ogres: 2 },
 };
 
 interface Room {

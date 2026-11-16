@@ -392,3 +392,50 @@ body {
 .result.lost h2 {
   color: var(--danger);
 }
+/* 設定画面の隊列 */
+.sheet .formation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.sheet .formation legend {
+  padding: 0 4px;
+  font-size: 14px;
+}
+.sheet input[type='radio'] {
+  width: 18px;
+  height: 18px;
+}
+.formation ol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.formation ol.off {
+  opacity: 0.5;
+}
+.formation li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+.formation li span {
+  flex: 1;
+}
+.formation .note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.sheet {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}

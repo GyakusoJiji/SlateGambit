@@ -2,7 +2,7 @@
 import { SPELLS, unitDef } from '../data/units';
 import { RULES, expandPlan, restTicks, type Step } from './actions';
 import { hasLos, linePoints } from './los';
-import { DIR_LIST, dist2, isWalkable, manhattan, step, tileAt } from './map';
+import { adjacent, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from './map';
 import { findPath } from './path';
 import { clearShot, triggerReaction } from './reactions';
 import { Rng } from './rng';
@@ -80,10 +80,10 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
         to = step(u, s.action.dir);
       } else if (s.k === 'follow' || s.k === 'escort') {
         const t = byId.get(s.target);
-        if (t && manhattan(u, t) > 1 && !(s.k === 'follow' && t.down)) {
+        if (t && !nearOrSame(map, u, t) && !(s.k === 'follow' && t.down)) {
           // 通れないマス(敵)を避け、空いた隣接マスを目指す。無ければその場で待つ
           const { blocks, taken } = pathRules(units, u, t);
-          const p = findPath(map, u, (q) => manhattan(q, t) === 1 && !taken(q), blocks);
+          const p = findPath(map, u, (q) => adjacent(map, q, t) && !taken(q), blocks);
           if (p && p.length > 0) to = step(u, p[0]);
         }
       } else if (s.k === 'charge') {
@@ -145,7 +145,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       if (s.k === 'carry') {
         const t = byId.get(s.target);
         const taken = units.some((o) => o.carrying === s.target);
-        if (!u.carrying && t && t.down && t.side === u.side && !taken && manhattan(u, t) <= 1) {
+        if (!u.carrying && t && t.down && t.side === u.side && !taken && nearOrSame(map, u, t)) {
           u.carrying = t.id;
           events.push({ tick, type: 'carry', id, target: t.id });
         } else {
@@ -279,12 +279,12 @@ function pathRules(units: Unit[], u: Unit, target: Unit): { blocks: (p: Pos) => 
 }
 
 /**
- * 攻撃が届く位置か(近接は上下左右に隣接、遠隔は射程内で射線が通る)。
+ * 攻撃が届く位置か(近接は斜めを含めて隣接、遠隔は射程内で射線が通る)。
  * units を渡すと、遠隔は味方などが射線上にいない(最初に当たるのが t)ことも条件にする
  */
 export function inReach(map: GameState['map'], u: Unit, from: Pos, t: Unit, units?: Unit[]): boolean {
   const def = unitDef(u.defId);
-  if (def.range <= 1) return manhattan(from, t) === 1;
+  if (def.range <= 1) return adjacent(map, from, t);
   if (dist2(from, t) > def.range * def.range || !hasLos(map, from, t)) return false;
   return !units || clearShot(units, u, from, t);
 }
@@ -544,7 +544,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     const target = byId.get(action.target);
     if (!target || target.down) return fizzle('対象がいない');
     if (def.range <= 1) {
-      if (manhattan(u, target) !== 1) return fizzle('届かない');
+      if (!adjacent(map, u, target)) return fizzle('届かない');
       events.push({ tick, type: 'strike', id: u.id, kind: 'melee', target: target.id, hitId: target.id, end: pos(target), reaction });
       dealDamage(ctx, u, target, def.atk, def.dmgVar);
       return;
@@ -596,7 +596,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   }
   // 蘇生
   if (!target.down) return fizzle('対象が倒れていない');
-  if (manhattan(u, target) > sd.range) return fizzle('届かない');
+  if (!nearOrSame(map, u, target)) return fizzle('届かない');
   events.push({ tick, type: 'strike', id: u.id, kind: 'revive', target: target.id, hitId: target.id, end: pos(target), reaction });
   ctx.revived.add(target.id);
 }

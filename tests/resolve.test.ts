@@ -149,6 +149,28 @@ describe('攻撃', () => {
     expect(u(r.state, 'g1').hp).toBeLessThan(MONSTERS.goblin.maxHp);
   });
 
+  it('近接攻撃は斜めの隣にも届く', () => {
+    const s = game([mk('p1', 'warrior', 2, 2), mk('g1', 'goblin', 3, 3)]);
+    const r = resolveTurn(s, { p1: [{ type: 'attack', target: 'g1' }] });
+    expect(u(r.state, 'g1').hp).toBeLessThan(MONSTERS.goblin.maxHp);
+  });
+
+  it('壁の角の隙間越し(間の 2 マスがどちらも壁)の斜めには届かない', () => {
+    const rows = ['#####', '#.#.#', '##.##', '#...#', '#####'];
+    // (1,1) と (2,2) の間は (2,1)・(1,2) とも壁
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 2)], rows);
+    const r = resolveTurn(s, { p1: [{ type: 'attack', target: 'g1' }] });
+    expect(u(r.state, 'g1').hp).toBe(MONSTERS.goblin.maxHp);
+    expect(r.events.some((e) => e.type === 'fizzle' && e.id === 'p1')).toBe(true);
+  });
+
+  it('移動は上下左右だけで、斜めの敵には隣接マスまで回り込まずに攻撃できる', async () => {
+    const { pathAdjacent } = await import('../src/core/path');
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 4, 3)]);
+    // (1,1) → (3,2) まで 3 歩で斜め隣に着く
+    expect(pathAdjacent(s.map, u(s, 'p1'), u(s, 'g1'))).toHaveLength(3);
+  });
+
   it('構えている間に相手が離れると不発になる(ユニット狙い)', () => {
     const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
     const r = resolveTurn(s, { p1: [{ type: 'attack', target: 'g1' }], g1: moves('E', 2) });
@@ -412,11 +434,19 @@ describe('条件付き行動', () => {
     expect(r.events.some((e) => e.type === 'strike' && e.id === 'p1' && e.reaction)).toBe(true);
   });
 
+  it('迎撃は斜めに隣接してきた敵も攻撃する', () => {
+    const s = game([mk('p1', 'warrior', 3, 3), mk('g1', 'goblin', 6, 2)]);
+    // g1 は (4,2) まで来る(p1 の斜め隣)
+    const r = resolveTurn(s, { p1: [{ type: 'intercept', ticks: 8 }], g1: [...moves('W', 2), { type: 'guard' }] });
+    expect(r.events.some((e) => e.type === 'strike' && e.id === 'p1' && e.reaction)).toBe(true);
+  });
+
   it('追尾は対象に隣接するまで追いかける', () => {
     const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 6, 4)]);
     const r = resolveTurn(s, { p1: [{ type: 'follow', target: 'g1', ticks: 8 }] });
     const p = u(r.state, 'p1');
-    expect(Math.abs(p.x - 6) + Math.abs(p.y - 4)).toBe(1);
+    // 斜めも隣接に含む
+    expect(Math.max(Math.abs(p.x - 6), Math.abs(p.y - 4))).toBe(1);
   });
 
   it('護衛は味方の隣を保つ', () => {
@@ -607,5 +637,19 @@ describe('クイック移動', () => {
     expect(u(r.state, 'p4').x).toBeGreaterThan(1);
     // 着いていれば null
     expect(quickMovePlans(r.state, 'p1', { x: 10, y: 3 })).toBeNull();
+  });
+
+  it('隊列の順を指定すると、その順で後ろに並ぶ', async () => {
+    const { quickMovePlans } = await import('../src/core/quickmove');
+    const s = game([mk('p1', 'warrior', 3, 3), mk('p2', 'thief', 2, 3), mk('p3', 'mage', 1, 3), mk('p4', 'priest', 1, 4)]);
+    // 近い順なら p2 → p3 → p4。指定で p4 → p3 → p2 にする(先頭 p1 は order に入っていても先頭のまま)
+    const plans = quickMovePlans(s, 'p1', { x: 10, y: 3 }, ['p1', 'p4', 'p3', 'p2'])!;
+    const r = resolveTurn(s, plans);
+    const x = (id: string) => u(r.state, id).x;
+    expect(x('p1')).toBe(10);
+    expect(x('p4')).toBeGreaterThan(x('p3'));
+    expect(x('p3')).toBeGreaterThan(x('p2'));
+    const cells = ['p1', 'p2', 'p3', 'p4'].map((id) => `${u(r.state, id).x},${u(r.state, id).y}`);
+    expect(new Set(cells).size).toBe(4);
   });
 });

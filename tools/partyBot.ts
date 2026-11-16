@@ -2,7 +2,7 @@
 // 敵の計画は見ない(プレイヤーと同じく、見えている敵の現在位置だけで判断する)。
 import { RULES, apLeft, fillPlan } from '../src/core/actions';
 import { hasLos, linePoints } from '../src/core/los';
-import { DIR_LIST, dist2, isWalkable, manhattan, step } from '../src/core/map';
+import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step } from '../src/core/map';
 import { findPath, pathAdjacent, pathTo } from '../src/core/path';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
@@ -120,12 +120,13 @@ function nearest(from: Pos, list: Unit[]): Unit {
 function melee(ctx: Ctx): void {
   const f = nearest(ctx.pos, ctx.foes);
   if (!f) return fill(ctx, { type: 'guard' });
-  if (manhattan(ctx.pos, f) > 1) {
-    const path = pathAdjacent(ctx.state.map, ctx.pos, f, occupied(ctx)) ?? [];
+  const map = ctx.state.map;
+  if (!adjacent(map, ctx.pos, f)) {
+    const path = pathAdjacent(map, ctx.pos, f, occupied(ctx)) ?? [];
     moveAlong(ctx, path, RULES.attackCost);
   }
-  if (manhattan(ctx.pos, f) === 1) fill(ctx, { type: 'attack', target: f.id });
-  else if (manhattan(ctx.pos, f) <= 3) ctx.plan.push({ type: 'intercept', ticks: apLeft(ctx.plan) });
+  if (adjacent(map, ctx.pos, f)) fill(ctx, { type: 'attack', target: f.id });
+  else if (chebyshev(ctx.pos, f) <= 3) ctx.plan.push({ type: 'intercept', ticks: apLeft(ctx.plan) });
   fill(ctx, { type: 'guard' });
 }
 
@@ -197,8 +198,8 @@ function priest(ctx: Ctx): void {
   const downed = allies.filter((o) => o.down);
   if (downed.length > 0 && u.mp >= SPELLS.revive.mp) {
     const t = nearest(ctx.pos, downed);
-    if (manhattan(ctx.pos, t) > 1) moveAlong(ctx, pathAdjacent(state.map, ctx.pos, t, occupied(ctx)) ?? [], RULES.spellCost);
-    if (manhattan(ctx.pos, t) <= 1) {
+    if (!nearOrSame(state.map, ctx.pos, t)) moveAlong(ctx, pathAdjacent(state.map, ctx.pos, t, occupied(ctx)) ?? [], RULES.spellCost);
+    if (nearOrSame(state.map, ctx.pos, t)) {
       ctx.plan.push({ type: 'spell', spell: 'revive', target: t.id });
       return retreatOrGuard(ctx);
     }
@@ -216,11 +217,11 @@ function priest(ctx: Ctx): void {
 /** 敵が近ければ 1〜2 歩下がり、残りは防御 */
 function retreatOrGuard(ctx: Ctx): void {
   const f = nearest(ctx.pos, ctx.foes);
-  if (f && manhattan(ctx.pos, f) <= 2 && apLeft(ctx.plan) >= 1) {
+  if (f && chebyshev(ctx.pos, f) <= 2 && apLeft(ctx.plan) >= 1) {
     for (let i = 0; i < 2 && apLeft(ctx.plan) > 0; i++) {
       const d = DIR_LIST.find((d) => {
         const n = step(ctx.pos, d);
-        return isWalkable(ctx.state.map, n.x, n.y) && !occupied(ctx)(n) && manhattan(n, f) > manhattan(ctx.pos, f);
+        return isWalkable(ctx.state.map, n.x, n.y) && !occupied(ctx)(n) && chebyshev(n, f) > chebyshev(ctx.pos, f);
       });
       if (!d) break;
       ctx.plan.push({ type: 'move', dir: d });
@@ -248,7 +249,7 @@ function explore(state: GameState, party: Unit[]): Plans {
   const foe = state.units.find((u) => u.side === 'enemy' && !u.down);
   let goal = state.explored.some((e, i) => !e && map.tiles[(i / map.w) | 0][i % map.w] !== '#')
     ? frontier
-    : (p: Pos) => !!foe && manhattan(p, foe) === 1;
+    : (p: Pos) => !!foe && adjacent(map, p, foe);
   // 宝探し: 見つけた宝へ向かい、拾ったら持ち主を先頭に入口の階段へ戻る
   const obj = state.objective;
   let candidates = party;

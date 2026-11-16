@@ -1,7 +1,7 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
 import { planEnemies, summarizeIntent } from '../core/ai';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../core/actions';
-import { manhattan, samePos, step } from '../core/map';
+import { nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { inReach, resolveTurn } from '../core/resolve';
 import { generateGame } from '../core/generate';
@@ -14,11 +14,14 @@ import { attachInput } from './input';
 import { actButton, actionButtons, eventLog, partyCards, planChips, playbackControls, type Mode } from './panel';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
+import { saveGame } from './save';
 
 interface Settings {
   hints: boolean;
   debugPlans: boolean;
   noFog: boolean;
+  /** 全員移動の隊列(先頭の後ろに並ぶ順。味方の ID)。null なら先頭に近い順 */
+  formation: string[] | null;
 }
 
 const SETTINGS_KEY = 'slate-gambit/settings';
@@ -146,7 +149,7 @@ export class Controller {
     const last = this.lastPlayback?.result.events ?? [];
     if (last.some((e) => e.type === 'damage')) return void this.stopAuto();
     if (this.quick) {
-      const plans = quickMovePlans(this.state, this.quick.leader, this.quick.target);
+      const plans = quickMovePlans(this.state, this.quick.leader, this.quick.target, this.settings.formation);
       if (!plans) return void this.stopAuto(T.toast.arrived);
       this.autoTimer = window.setTimeout(() => {
         if (!this.quick || this.playback) return;
@@ -182,8 +185,21 @@ export class Controller {
 
   private pendingSeed = 0;
 
-  start(seed: number, difficulty: Difficulty = 'normal'): void {
-    this.state = generateGame(seed, difficulty);
+  /** persist=false は難易度選択の後ろに映すだけの仮のゲーム(保存しない) */
+  start(seed: number, difficulty: Difficulty = 'normal', persist = true): void {
+    this.begin(generateGame(seed, difficulty));
+    if (persist) saveGame(this.state);
+  }
+
+  /** 自動保存から続きを始める */
+  resume(state: GameState): void {
+    this.begin(state);
+    this.toast(T.toast.resumed(state.turn));
+  }
+
+  private begin(state: GameState): void {
+    this.stopAuto();
+    this.state = state;
     this.names = displayNames(this.state.units);
     this.playback = null;
     this.lastPlayback = null;
@@ -235,6 +251,8 @@ export class Controller {
     if (fast) this.playback.speed = 4;
     this.lastPlayback = this.playback;
     this.state = result.state;
+    // ターンが終わるたびに自動保存する(決着したら保存を消す)
+    saveGame(this.state);
     this.refresh();
   }
 
@@ -430,7 +448,8 @@ export class Controller {
     </div>`;
   }
 
-  private showSettings(): void {
+  /** seed: シード欄に出す値(並び替えで描き直すとき、入力途中の値を残す) */
+  private showSettings(seed: number | string = this.state.seed): void {
     const s = this.settings;
     this.el.overlay.hidden = false;
     this.el.overlay.innerHTML = `<div class="sheet">
@@ -438,12 +457,52 @@ export class Controller {
       <label><input type="checkbox" data-set="hints" ${s.hints ? 'checked' : ''}> ${T.settings.hints}</label>
       <label><input type="checkbox" data-set="debugPlans" ${s.debugPlans ? 'checked' : ''}> ${T.settings.debugPlans}</label>
       <label><input type="checkbox" data-set="noFog" ${s.noFog ? 'checked' : ''}> ${T.settings.debugNoFog}</label>
-      <label>${T.settings.seed} <input type="number" data-seed value="${this.state.seed}"></label>
+      ${this.formationSection()}
+      <label>${T.settings.seed} <input type="number" data-seed value="${seed}"></label>
       <div class="row">
         <button class="act" data-ov="new">${T.settings.newGame}</button>
         <button class="act primary" data-ov="close">${T.settings.close}</button>
       </div>
     </div>`;
+  }
+
+  /** 設定画面の「隊列」: 近い順(自動)か指定した順か。指定した順は ▲▼ で並べ替える */
+  private formationSection(): string {
+    const order = this.formationOrder();
+    const custom = !!this.settings.formation;
+    const nameOf = (id: string) => this.names.get(id) ?? id;
+    const rows = order
+      .map(
+        (id, i) => `<li><span>${i + 1}. ${nameOf(id)}</span>
+          <button class="act small" data-ov="form-up" data-id="${id}" ${!custom || i === 0 ? 'disabled' : ''} aria-label="${T.formation.up}">▲</button>
+          <button class="act small" data-ov="form-down" data-id="${id}" ${!custom || i === order.length - 1 ? 'disabled' : ''} aria-label="${T.formation.down}">▼</button></li>`,
+      )
+      .join('');
+    return `<fieldset class="formation">
+      <legend>${T.formation.title}</legend>
+      <label><input type="radio" name="formation" data-formation="auto" ${custom ? '' : 'checked'}> ${T.formation.auto}</label>
+      <label><input type="radio" name="formation" data-formation="custom" ${custom ? 'checked' : ''}> ${T.formation.custom}</label>
+      <ol class="${custom ? '' : 'off'}">${rows}</ol>
+      <p class="note">${T.formation.note}</p>
+    </fieldset>`;
+  }
+
+  /** 設定画面に出す隊列の順(自動のときは味方の並びのまま) */
+  private formationOrder(): string[] {
+    const ids = this.party().map((u) => u.id);
+    const f = this.settings.formation;
+    if (!f) return ids;
+    return [...f.filter((id) => ids.includes(id)), ...ids.filter((id) => !f.includes(id))];
+  }
+
+  private moveInFormation(id: string, delta: number): void {
+    const order = this.formationOrder();
+    const i = order.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    this.settings.formation = order;
+    saveSettings(this.settings);
   }
 
   // ---- 入力 ----
@@ -468,6 +527,11 @@ export class Controller {
       return;
     }
     if (b.dataset.ov === 'close') this.el.overlay.hidden = true;
+    if (b.dataset.ov === 'form-up' || b.dataset.ov === 'form-down') {
+      const seed = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]')?.value;
+      this.moveInFormation(b.dataset.id!, b.dataset.ov === 'form-up' ? -1 : 1);
+      this.showSettings(seed);
+    }
     if (b.dataset.ov === 'new') {
       // 設定画面でシードを書き換えた場合だけそのシード、それ以外は毎回新しいマップ
       const input = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]');
@@ -487,7 +551,14 @@ export class Controller {
 
   private onSettingChange(e: Event): void {
     const input = e.target as HTMLInputElement;
-    const k = input.dataset.set as keyof Settings | undefined;
+    if (input.dataset.formation) {
+      this.settings.formation = input.dataset.formation === 'custom' ? this.formationOrder() : null;
+      saveSettings(this.settings);
+      const seed = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]')?.value;
+      this.showSettings(seed);
+      return;
+    }
+    const k = input.dataset.set as 'hints' | 'debugPlans' | 'noFog' | undefined;
     if (!k) return;
     this.settings[k] = input.checked;
     saveSettings(this.settings);
@@ -669,7 +740,7 @@ export class Controller {
     if (u && this.mode === 'group') {
       if (ally && !ally.down && ally.id !== u.id) return this.select(ally.id);
       if (!st.explored[tile.y * st.map.w + tile.x]) return this.toast(T.err.noPath);
-      const plans = quickMovePlans(st, u.id, tile);
+      const plans = quickMovePlans(st, u.id, tile, this.settings.formation);
       if (!plans) return this.toast(T.err.noPath);
       this.quick = { leader: u.id, target: tile };
       this.mode = 'move';
@@ -685,7 +756,7 @@ export class Controller {
       if (m === 'attack' && foe) ok = this.attackOrCharge(u, foe);
       else if (m === 'carry' && ally && ally.down && ally.id !== u.id) {
         const end = simulate(st, u, this.plans[u.id]).end;
-        if (manhattan(end, ally) > 1) {
+        if (!nearOrSame(st.map, end, ally)) {
           this.toast(T.err.notTarget);
         } else ok = this.append(u, { type: 'carry', target: ally.id });
       }
@@ -839,10 +910,13 @@ export function randomSeed(): number {
 }
 
 function loadSettings(): Settings {
-  const def: Settings = { hints: true, debugPlans: false, noFog: false };
+  const def: Settings = { hints: true, debugPlans: false, noFog: false, formation: null };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? { ...def, ...JSON.parse(raw) } : def;
+    const s: Settings = raw ? { ...def, ...JSON.parse(raw) } : def;
+    const f: unknown = s.formation;
+    if (!Array.isArray(f) || !f.every((id) => typeof id === 'string')) s.formation = null;
+    return s;
   } catch {
     return def;
   }
