@@ -8,7 +8,7 @@ import { manhattan } from './map';
  * leaderId のキャラを先頭に、target へ向かう全員の計画を返す。先頭がすでに着いている・行けない場合は null。
  * 後続は order(味方の ID の並び)の順に並ぶ。order が無ければ先頭に近い順。
  * 各自は 1 人前の者の出発点へ向かってから同じ経路をなぞる(1 マスずつ遅れてついていく)。
- * すべての移動に「発見で停止」を付けるので、新しい敵が見えたら止まる。
+ * すべての移動に「敵を見たら停止」を付けるので、新しい敵が見えたら止まる。
  */
 export function quickMovePlans(state: GameState, leaderId: string, target: Pos, order?: string[] | null): Plans | null {
   const { map } = state;

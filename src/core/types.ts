@@ -92,9 +92,7 @@ export type Action =
   | { type: 'wait' }
   | { type: 'spell'; spell: SpellId; target?: string; tile?: Pos }
   | { type: 'overwatch'; ticks: number }
-  | { type: 'intercept'; ticks: number }
-  | { type: 'follow'; target: string; ticks: number }
-  | { type: 'escort'; target: string; ticks: number };
+  | { type: 'intercept'; ticks: number };
 
 export type Plans = Record<string, Action[]>;
 

@@ -1,8 +1,8 @@
-// 条件付き行動の発動判定。どちらも「このティックに動いてきた敵」にだけ反応する
-// (その場にとどまる敵には通常の攻撃を使う)。
-// - 警戒射撃(overwatch): 動いて射程・射線・視界の中にいる最も近い敵を撃つ
-// - 迎撃(intercept): 動いて隣接(斜めを含む)した敵を近接攻撃する
-// 追尾・護衛・敵を見たら停止は移動処理側(resolve.ts)で扱う。
+// 条件付き行動の発動判定。
+// - 警戒射撃(overwatch): このティックに動いて、射程・射線・視界の中にいる最も近い敵を撃つ
+// - 迎撃(intercept): 隣接(斜めを含む)する敵を近接攻撃する。狙いは隣の敵からランダム。
+//   動いてきた敵がいれば即座に、隣に動かない敵しかいなければ通常の攻撃と同じく溜めてから殴る(resolve.ts)
+// 敵を見たら停止は移動処理側(resolve.ts)で扱う。
 import { unitDef } from '../data/units';
 import { hasLos, linePoints } from './los';
 import { adjacent, dist2 } from './map';
@@ -16,19 +16,16 @@ export function clearShot(units: Unit[], shooter: Unit, from: Pos, target: Unit)
   );
 }
 
-export function triggerReaction(
-  map: FloorMap,
-  u: Unit,
-  mode: 'overwatch' | 'intercept',
-  units: Unit[],
-  moved: Set<string>,
-): Unit | undefined {
+/** 迎撃の狙いの候補: 隣接(斜めを含む)する倒れていない敵(ID 順。乱数で選ぶときの並びを固定する) */
+export function interceptCandidates(map: FloorMap, u: Unit, units: Unit[]): Unit[] {
+  return units
+    .filter((f) => f.side !== u.side && !f.down && adjacent(map, u, f))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** 警戒射撃の狙い: このティックに動いた敵のうち、射程・射線・視界の中で最も近い敵 */
+export function overwatchTarget(map: FloorMap, u: Unit, units: Unit[], moved: Set<string>): Unit | undefined {
   const foes = units.filter((f) => f.side !== u.side && !f.down && moved.has(f.id));
-  if (mode === 'intercept') {
-    const adj = foes.filter((f) => adjacent(map, u, f));
-    adj.sort((a, b) => a.hp - b.hp || a.id.localeCompare(b.id));
-    return adj[0];
-  }
   const range = unitDef(u.defId).range;
   // 自動で撃つ条件付き行動は、射線上で最初に当たるのが狙う敵のとき(味方越しでないとき)だけ発動する
   const cands = foes.filter((f) => dist2(u, f) <= range * range && hasLos(map, u, f) && unitSees(map, u, f) && clearShot(units, u, u, f));

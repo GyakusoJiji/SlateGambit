@@ -11,7 +11,7 @@ import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
 import { attachInput } from './input';
-import { actButton, actionButtons, eventLog, partyCards, planChips, playbackControls, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, idleButtons, partyCards, planChips, playbackControls, type Mode } from './panel';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
 import { saveGame } from './save';
@@ -32,7 +32,9 @@ export class Controller {
   private plans: Plans = {};
   private selected: string | null = null;
   private mode: Mode = 'move';
-  private stopFlag = false;
+  /** 1手戻すの長押しで予約を全部取り消したとき、続くクリックを無視する */
+  private longPressed = false;
+  private pressTimer = 0;
   private playback: Playback | null = null;
   private lastPlayback: Playback | null = null;
   private names = new Map<string, string>();
@@ -68,6 +70,20 @@ export class Controller {
       this.dirty = true;
     }).observe(el.canvas);
     el.panel.addEventListener('click', (e) => this.onPanelClick(e));
+    // 1手戻すを長押しすると、予約を全部取り消す
+    el.panel.addEventListener('pointerdown', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act="undo"]');
+      if (!b || b.classList.contains('off') || this.playback) return;
+      this.pressTimer = window.setTimeout(() => {
+        const u = this.selected ? this.unit(this.selected) : undefined;
+        if (!u) return;
+        this.plans[u.id].length = 0;
+        this.longPressed = true;
+        this.toast(T.toast.cleared);
+        this.changed();
+      }, 500);
+    });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel'] as const) el.panel.addEventListener(ev, () => clearTimeout(this.pressTimer));
     el.panel.addEventListener('pointerover', (e) => this.showDesc(e));
     el.panel.addEventListener('pointerout', (e) => this.showDesc(e, true));
     el.topbar.addEventListener('click', (e) => this.onTopbarClick(e));
@@ -241,9 +257,10 @@ export class Controller {
   private execute(fast = false): void {
     // 止まるマスが重なっていれば知らせる(実行はする。解決時に片方が押し戻される)
     if (!fast && this.overlaps().length > 0) this.toast(T.toast.overlap);
-    // 指定されていない残り AP は待機にする(敵が見えないときの待機は休憩になる)
+    // 指定されていない残り AP は、敵が見えていれば防御、見えなければ休憩(待機)にする
+    const combat = this.foesInSight();
     const filled: Plans = {};
-    for (const u of this.party()) if (!u.down) filled[u.id] = fillPlan(this.plans[u.id] ?? []);
+    for (const u of this.party()) if (!u.down) filled[u.id] = fillPlan(this.plans[u.id] ?? [], combat ? 'guard' : 'wait');
     const result = resolveTurn(this.state, { ...this.enemyPlans, ...filled });
     this.playback = new Playback(this.state, result);
     this.userPanned = false;
@@ -403,8 +420,7 @@ export class Controller {
       ? `<b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf, this.foesInSight())}`
       : `<span class="chip empty">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</span>`;
     const promptText = active ? prompt : '';
-    const ACTION_IDS = ['move', 'attack', 'guard', 'wait', 'fireball', 'heal', 'revive', 'overwatch', 'intercept', 'follow', 'escort', 'stop', 'carry', 'drop'];
-    const actions = active ? actionButtons(sel, acts, this.mode, this.stopFlag) : ACTION_IDS.map((id) => actButton(id, { off: true })).join('');
+    const actions = active ? actionButtons(sel, acts, this.mode) : idleButtons();
     const hasPlan = active && acts.length > 0;
     this.el.panel.innerHTML = `
       ${partyCards(this.party(), this.plans, this.selected)}
@@ -413,10 +429,9 @@ export class Controller {
       <div class="acts">
         ${actions}
         ${actButton('undo', { off: !hasPlan })}
-        ${actButton('clear', { off: !hasPlan })}
         ${actButton('rest', { off: this.foesInSight() })}
         ${actButton('group', { on: this.mode === 'group', off: !active || this.foesInSight() })}
-        ${actButton('execute', { cls: 'primary wide' })}
+        ${actButton('execute', { cls: 'primary' })}
       </div>
       ${this.lastPlayback ? eventLog(this.lastPlayback.result.events, nameOf, 3) : '<ul class="log"></ul>'}`;
   }
@@ -638,13 +653,13 @@ export class Controller {
     const list = this.plans[u.id];
     switch (act) {
       case 'undo':
-        list.pop();
+        // 長押しで全部取り消した直後のクリックは無視する
+        if (this.longPressed) this.longPressed = false;
+        else list.pop();
         break;
-      case 'clear':
-        list.length = 0;
-        break;
-      case 'stop':
-        this.stopFlag = !this.stopFlag;
+      case 'watch':
+        // 遠隔の武器なら警戒射撃、近接なら迎撃
+        this.append(u, { type: unitDef(u.defId).range > 1 ? 'overwatch' : 'intercept', ticks: apLeft(list) });
         break;
       case 'guard':
       case 'wait':
@@ -660,8 +675,6 @@ export class Controller {
       case 'fireball':
       case 'heal':
       case 'revive':
-      case 'follow':
-      case 'escort':
       case 'carry':
         this.mode = act;
         this.lastMode.set(u.id, act);
@@ -690,7 +703,6 @@ export class Controller {
       const carrying = carryingAfter(u, plan);
       switch (m) {
         case 'attack':
-        case 'follow':
         case 'carry':
           return !carrying;
         case 'fireball':
@@ -783,8 +795,6 @@ export class Controller {
           this.toast(T.err.notTarget);
         } else ok = this.append(u, { type: 'carry', target: ally.id });
       }
-      else if (m === 'follow' && foe) ok = this.append(u, { type: 'follow', target: foe.id, ticks: apLeft(this.plans[u.id]) });
-      else if (m === 'escort' && ally && ally.id !== u.id) ok = this.append(u, { type: 'escort', target: ally.id, ticks: apLeft(this.plans[u.id]) });
       else if (m === 'heal' && ally && !ally.down) ok = this.append(u, { type: 'spell', spell: 'heal', target: ally.id });
       else if (m === 'revive' && ally && ally.down) ok = this.append(u, { type: 'spell', spell: 'revive', target: ally.id });
       else if (m === 'fireball' && st.explored[tile.y * st.map.w + tile.x]) ok = this.append(u, { type: 'spell', spell: 'fireball', tile });
@@ -812,7 +822,7 @@ export class Controller {
     const room = Math.floor(apLeft(this.plans[u.id]) / (slow ? RULES.carryMoveCost : 1));
     if (room <= 0) return this.toast(T.err.noAp);
     for (const d of path.slice(0, room)) {
-      this.plans[u.id].push({ type: 'move', dir: d, stop: this.stopFlag || undefined, slow: slow || undefined });
+      this.plans[u.id].push({ type: 'move', dir: d, stop: true, slow: slow || undefined });
     }
     this.changed();
     this.advanceIfFull(u);
@@ -896,9 +906,6 @@ function planMarks(st: GameState, u: Unit, actions: Action[], color: string): Ma
     } else if (a.type === 'carry') {
       const t = find(a.target);
       if (t) marks.push({ kind: 'target', at: t, color: '#60d0ff' });
-    } else if (a.type === 'follow' || a.type === 'escort') {
-      const t = find(a.target);
-      if (t) marks.push({ kind: 'path', points: [end, t], color: a.type === 'follow' ? '#ff9050' : '#60d0ff', dashed: true });
     } else if (a.type === 'overwatch' || a.type === 'intercept') {
       marks.push({ kind: 'area', at: end, radius: a.type === 'intercept' ? 1 : 0, color: 'rgba(255,176,32,0.18)' });
     }

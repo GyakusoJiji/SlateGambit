@@ -1,11 +1,14 @@
 // 自動対戦によるバランス検証。`npm run playtest` で実行する。
 //   GAMES=回数(既定 300)
 //   TRACE=シード  … 1 戦の経過をターンごとに表示
+//   VARIANTS=all  … 難易度 × 目的のすべての組み合わせ
+//   VARIANTS=budget BUDGET="normal.annihilate=20,22 hard.treasure=35"
+//                 … 敵の点数の合計を差し替えて比べる(難易度.目的=点数,点数,…)
 import { it } from 'vitest';
 import { RULES } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
-import { generateGame } from '../src/core/generate';
+import { DIFFICULTY, generateGame } from '../src/core/generate';
 import { createTestGame } from '../src/core/scenario';
 import type { Difficulty, GameEvent, GameState, Objective } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
@@ -19,9 +22,37 @@ const TRACE = process.env.TRACE;
 const MAX_TURNS = Number(process.env.MAX_TURNS ?? 150);
 
 /** 比較する調整案。setup で数値を書き換え、終了後に元へ戻す。game は 1 戦の初期状態を作る */
-type Variant = { name: string; setup: () => void; game: (seed: number) => GameState };
+type Variant = { name: string; setup: () => void; game: (seed: number) => GameState; teardown?: () => void };
 const gen = (d: Difficulty, k?: Objective['kind']) => (seed: number) => generateGame(seed, d, k);
-const VARIANTS: Variant[] = (process.env.VARIANTS === 'all'
+const KIND_NAME: Record<Objective['kind'], string> = { annihilate: '全滅', treasure: '宝' };
+/** BUDGET の指定から、点数を差し替えた調整案を作る */
+function budgetVariants(spec: string): Variant[] {
+  const out: Variant[] = [];
+  for (const part of spec.trim().split(/\s+/)) {
+    const [target, values] = part.split('=');
+    const [d, k] = target.split('.') as [Difficulty, Objective['kind']];
+    for (const v of values.split(',').map(Number)) {
+      const name = `${d[0].toUpperCase()}${d.slice(1)} ${KIND_NAME[k]} 点数${v}`;
+      let saved = 0;
+      out.push({
+        name,
+        setup: () => {
+          saved = DIFFICULTY[d].budget[k];
+          DIFFICULTY[d].budget[k] = v;
+        },
+        game: gen(d, k),
+        teardown: () => {
+          DIFFICULTY[d].budget[k] = saved;
+        },
+      });
+    }
+  }
+  return out;
+}
+
+const VARIANTS: Variant[] = (process.env.VARIANTS === 'budget'
+  ? budgetVariants(process.env.BUDGET ?? '')
+  : process.env.VARIANTS === 'all'
   ? [
       { name: 'Easy', setup: () => {}, game: gen('easy') },
       { name: 'Easy 全滅', setup: () => {}, game: gen('easy', 'annihilate') },
@@ -283,6 +314,7 @@ it.runIf(TRACE === undefined)(`調整案の比較(各 ${GAMES} 戦)`, () => {
     out.push(summaryRow(v.name, s, GAMES));
     details.push(`--- ${v.name} ---\n${detail(s, GAMES)}`);
     restoreDefs(original);
+    v.teardown?.();
   }
   console.log([...out, '', ...details].join('\n'));
 });

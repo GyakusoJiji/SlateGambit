@@ -5,7 +5,7 @@ import { T } from '../data/text.ja';
 import { SPELLS, unitDef } from '../data/units';
 import { iconUrl } from './icons';
 
-export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'follow' | 'escort' | 'carry' | 'group';
+export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'carry' | 'group';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -49,17 +49,13 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
       return `${T.act.overwatch}×${a.ticks}`;
     case 'intercept':
       return `${T.act.intercept}×${a.ticks}`;
-    case 'follow':
-      return `${T.act.follow}:${nameOf(a.target)}×${a.ticks}`;
-    case 'escort':
-      return `${T.act.escort}:${nameOf(a.target)}×${a.ticks}`;
   }
 }
 
 /** 連続する移動を 1 つのチップにまとめて表示する */
 export function planChips(actions: Action[], nameOf: (id: string) => string, inCombat: boolean): string {
   const rest = apLeft(actions);
-  const filler = inCombat ? T.act.wait : T.act.rest;
+  const filler = inCombat ? T.act.guard : T.act.wait;
   const tail = rest > 0 ? `<span class="chip empty">${T.restFill(filler, rest, actions.length === 0)}</span>` : '';
   const out: string[] = [];
   let arrows = '';
@@ -76,28 +72,34 @@ export function planChips(actions: Action[], nameOf: (id: string) => string, inC
   return out.join('') + tail;
 }
 
-export function actionButtons(u: Unit, actions: Action[], mode: Mode, stopFlag: boolean): string {
+/** 職業の特技の枠の数(特技が少ない職業は空けておき、ほかのボタンの位置を揃える) */
+const SKILL_SLOTS = 2;
+const GAP = '<span class="act-gap"></span>';
+
+/** キャラを選んでいないときの、全部グレーのボタン */
+export function idleButtons(): string {
+  return [...['move', 'attack', 'guard', 'wait', 'watch'].map((id) => actButton(id, { off: true })), GAP, GAP, actButton('carry', { off: true })].join('');
+}
+
+export function actionButtons(u: Unit, actions: Action[], mode: Mode): string {
   const d = unitDef(u.defId);
   const ap = apLeft(actions);
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
   const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= RULES.spellCost && u.mp >= SPELLS[s].mp;
   // ボタンはどのキャラでも同じ位置に並べ、使えないものはグレーアウトする
+  // 特技の枠には、その職業の魔法だけを出す
+  const skills = d.spells.map((s) => actButton(s, { on: mode === s, off: !spell(s) }));
+  while (skills.length < SKILL_SLOTS) skills.push(GAP);
   const list = [
     actButton('move', { on: mode === 'move', off: ap < (busy ? RULES.carryMoveCost : 1) }),
     actButton('attack', { on: mode === 'attack', off: busy || ap < 1 }),
     actButton('guard', { off: ap < 1 }),
     actButton('wait', { off: ap < 1 }),
-    actButton('fireball', { on: mode === 'fireball', off: !spell('fireball') }),
-    actButton('heal', { on: mode === 'heal', off: !spell('heal') }),
-    actButton('revive', { on: mode === 'revive', off: !spell('revive') }),
-    actButton('overwatch', { off: busy || ap < 1 || d.range <= 1 }),
-    actButton('intercept', { off: busy || ap < 1 }),
-    actButton('follow', { on: mode === 'follow', off: busy || ap < 1 }),
-    actButton('escort', { on: mode === 'escort', off: busy || ap < 1 }),
-    actButton('stop', { on: stopFlag, cls: 'toggle' }),
-    actButton('carry', { on: mode === 'carry', off: busy || ap < 1 }),
-    actButton('drop', { off: !busy || ap < 1 }),
+    actButton('watch', { off: busy || ap < 1 }),
+    ...skills,
+    // 担ぐと降ろすは同じ枠。担いでいる間は降ろす
+    busy ? actButton('drop', { off: ap < 1 }) : actButton('carry', { on: mode === 'carry', off: ap < 1 }),
   ];
   return list.join('');
 }
@@ -106,22 +108,17 @@ export function actionButtons(u: Unit, actions: Action[], mode: Mode, stopFlag: 
 const ICONS: Record<string, string> = {
   move: '👣',
   attack: '⚔️',
-  guard: '🛡️',
-  wait: '⏳',
   fireball: '🔥',
   heal: '💚',
   revive: '✨',
-  overwatch: '🎯',
-  intercept: '⚡',
-  follow: '🐾',
-  escort: '🤝',
-  stop: '✋',
   carry: '🎒',
   drop: '⬇️',
   undo: '↩️',
-  clear: '🗑️',
   rest: '💤',
   group: '🚶',
+  guard: '🛡️',
+  wait: '⏳',
+  watch: '⚡',
   execute: '▶️',
 };
 

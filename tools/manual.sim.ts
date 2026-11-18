@@ -7,7 +7,7 @@
 //   PLAY=show STATE=...
 //
 // コマンド: to X,Y(経路で移動) / atk ID(届かなければ接近攻撃) / chg ID / g(防御) / w(待機) /
-//   fb X,Y / heal ID / rev ID / ow(警戒射撃・残り全部) / ic(迎撃・残り全部) / fol ID / esc ID / carry ID / drop
+//   fb X,Y / heal ID / rev ID / ow(警戒射撃・残り全部) / ic(迎撃・残り全部) / carry ID / drop
 import * as fs from 'node:fs';
 import { it } from 'vitest';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../src/core/actions';
@@ -39,7 +39,9 @@ it.runIf(env.PLAY !== undefined)('手動プレイ', () => {
   } else if (env.PLAY === 'turn') {
     const plans = parseCmd(state, env.CMD ?? '', out);
     const filled: Plans = {};
-    for (const u of state.units) if (u.side === 'party' && !u.down) filled[u.id] = fillPlan(plans[u.id] ?? []);
+    // UI と同じく、敵が見えていれば残りの AP は防御、見えなければ休憩(待機)で埋める
+    const combat = visibleFoes(state.map, state.units, 'party').size > 0;
+    for (const u of state.units) if (u.side === 'party' && !u.down) filled[u.id] = fillPlan(plans[u.id] ?? [], combat ? 'guard' : 'wait');
     const r = resolveTurn(state, { ...planEnemies(state), ...filled });
     out.push(`T${state.turn} ${summarize(r.events, state)}`);
     state = r.state;
@@ -111,12 +113,6 @@ function parseCmd(state: GameState, cmd: string, out: string[]): Plans {
           break;
         case 'ic':
           push({ type: 'intercept', ticks: apLeft(list) });
-          break;
-        case 'fol':
-          push({ type: 'follow', target: arg, ticks: apLeft(list) });
-          break;
-        case 'esc':
-          push({ type: 'escort', target: arg, ticks: apLeft(list) });
           break;
         case 'carry':
           push({ type: 'carry', target: arg });

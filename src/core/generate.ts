@@ -19,9 +19,9 @@ const DRAGON_COST = 7;
  * 自動対戦の勝率が Easy 95% / Normal 75% / Hard 50% 前後になるよう調整する
  */
 export const DIFFICULTY: Record<Difficulty, { budget: Record<Objective['kind'], number>; group: number; ogres: number }> = {
-  easy: { budget: { annihilate: 13, treasure: 19 }, group: 7, ogres: 0 },
-  normal: { budget: { annihilate: 19, treasure: 27 }, group: 9, ogres: 1 },
-  hard: { budget: { annihilate: 28, treasure: 33 }, group: 12, ogres: 2 },
+  easy: { budget: { annihilate: 15, treasure: 19 }, group: 7, ogres: 0 },
+  normal: { budget: { annihilate: 23, treasure: 30 }, group: 9, ogres: 1 },
+  hard: { budget: { annihilate: 31, treasure: 39 }, group: 12, ogres: 2 },
 };
 
 interface Room {

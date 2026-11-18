@@ -4,7 +4,7 @@ import { RULES, expandPlan, restTicks, type Step } from './actions';
 import { hasLos, linePoints } from './los';
 import { adjacent, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from './map';
 import { findPath } from './path';
-import { clearShot, triggerReaction } from './reactions';
+import { clearShot, interceptCandidates, overwatchTarget } from './reactions';
 import { Rng } from './rng';
 import {
   TICKS_PER_TURN,
@@ -78,14 +78,6 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       let to: Pos | null = null;
       if (s.k === 'move') {
         to = step(u, s.action.dir);
-      } else if (s.k === 'follow' || s.k === 'escort') {
-        const t = byId.get(s.target);
-        if (t && !nearOrSame(map, u, t) && !(s.k === 'follow' && t.down)) {
-          // 通れないマス(敵)を避け、空いた隣接マスを目指す。無ければその場で待つ
-          const { blocks, taken } = pathRules(units, u, t);
-          const p = findPath(map, u, (q) => adjacent(map, q, t) && !taken(q), blocks);
-          if (p && p.length > 0) to = step(u, p[0]);
-        }
       } else if (s.k === 'charge') {
         // ここに来るのは届かない場合だけ。届く位置へ 1 マス近づく
         const t = byId.get(s.target)!;
@@ -115,10 +107,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       );
       if (newFoe) {
         const list = steps.get(u.id)!;
-        for (let i = tick; i < list.length; i++) {
-          const k = list[i].k;
-          if (k === 'move' || k === 'follow' || k === 'escort') list[i] = { k: 'guard' };
-        }
+        for (let i = tick; i < list.length; i++) if (list[i].k === 'move') list[i] = { k: 'guard' };
         events.push({ tick, type: 'halt', id: u.id });
       }
     }
@@ -126,8 +115,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     // 同じマスに止まるユニットが重ならないよう整理し、移動のイベントを出す
     // 通り抜けの途中: このティックに移動できて、次のティックも移動する
     const intentById = new Map(intents.map((m) => [m.unit.id, m]));
-    // (追尾・護衛・接近攻撃は止まれないマスを目的地にしないので、途中のマスは通り抜けとして扱う)
-    const MOVING = new Set<Step['k']>(['move', 'follow', 'escort', 'charge']);
+    // (接近攻撃は止まれないマスを目的地にしないので、途中のマスは通り抜けとして扱う)
+    const MOVING = new Set<Step['k']>(['move', 'charge']);
     const continues = (u: Unit) =>
       intentById.get(u.id)?.status === 'ok' && tick < TICKS_PER_TURN && MOVING.has(steps.get(u.id)![tick].k);
     const displaced = settleMoves(intents, units, map, rng, continues);
@@ -164,11 +153,29 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       const u = byId.get(id)!;
       const s = current.get(id);
       if (s?.k !== 'watch') continue;
-      const target = triggerReaction(map, u, s.mode, units, movedNow);
+      const list = steps.get(id)!;
+      let target: Unit | undefined;
+      if (s.mode === 'overwatch') {
+        target = overwatchTarget(map, u, units, movedNow);
+      } else {
+        const cands = interceptCandidates(map, u, units);
+        if (cands.length === 0) continue;
+        if (!cands.some((f) => movedNow.has(f.id))) {
+          // 隣に動かない敵しかいない: 通常の攻撃と同じく、このティックから溜めて最後のティックで殴る。
+          // 残りの迎撃の AP が攻撃のコストに足りなければ何もしない
+          const n = RULES.attackCost;
+          const rest = list.slice(tick, tick + n - 1);
+          if (rest.length < n - 1 || !rest.every((r) => r.k === 'watch' && r.mode === 'intercept')) continue;
+          const action = { type: 'attack', target: cands[rng.int(0, cands.length - 1)].id } as const;
+          for (let i = 0; i < n - 2; i++) list[tick + i] = { k: 'windup', action };
+          list[tick + n - 2] = { k: 'strike', action };
+          continue;
+        }
+        target = cands[rng.int(0, cands.length - 1)];
+      }
       if (!target) continue;
       strikes.push({ unit: u, action: { type: 'attack', target: target.id }, reaction: true });
       // 発動した攻撃の残りコスト(1 ティック)を消費する
-      const list = steps.get(id)!;
       if (tick < list.length) list[tick] = { k: 'recover' };
     }
 
@@ -214,7 +221,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     if (treasure) treasure.push(treasureSnap(state));
   }
 
-  applyRest(state, plans, seenAtStart.party.size === 0, events, frames);
+  applyRest(state, plans, seenAtStart.party.size > 0, events, frames);
   applySpring(state, events, frames);
   applyWakeUp(state, rng, events, frames);
   updateAiMemory(state, attackedBy, events);
@@ -267,7 +274,7 @@ function snapshot(units: Unit[], guard: Set<string>, watching: Set<string>): Uni
 }
 
 /**
- * 追尾・護衛・接近攻撃の経路の条件。
+ * 接近攻撃の経路の条件。
  * blocks: 途中で通れないマス(通り抜け不可の敵がいる)、taken: 止まれないマス(誰かが立っている)
  */
 function pathRules(units: Unit[], u: Unit, target: Unit): { blocks: (p: Pos) => boolean; taken: (p: Pos) => boolean } {
@@ -670,13 +677,18 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>, event
  * 立っている味方は待機したティック数に応じて HP と MP が回復する(8 ティック全部で最大 HP の restHpRatio と restMp)。
  * 気絶者は回復しない。
  */
-function applyRest(state: GameState, plans: Plans, quietAtStart: boolean, events: GameEvent[], frames: UnitSnapshot[][]): void {
+/**
+ * 休憩: ターンの終わりに、立っている味方が休憩(待機)したティック数に応じて HP・MP を回復する。
+ * 敵が見えていても、ダメージを受けていても回復する(休憩は防御しないので、その分ダメージは減らない)。
+ * ただし戦闘中(ターンの初めか終わりに敵が見えている)は、回復量に RULES.combatRestRatio を掛ける
+ */
+function applyRest(state: GameState, plans: Plans, foesAtStart: boolean, events: GameEvent[], frames: UnitSnapshot[][]): void {
   const party = state.units.filter((u) => u.side === 'party' && !u.down);
-  if (!quietAtStart || party.length === 0) return;
-  if (visibleFoes(state.map, state.units, 'party').size > 0) return;
-  if (events.some((e) => e.type === 'damage')) return;
+  if (party.length === 0) return;
+  const combat = foesAtStart || visibleFoes(state.map, state.units, 'party').size > 0;
+  const ratio = combat ? RULES.combatRestRatio : 1;
   for (const u of party) {
-    const k = restTicks(plans[u.id]) / TICKS_PER_TURN;
+    const k = (restTicks(plans[u.id]) / TICKS_PER_TURN) * ratio;
     if (k <= 0) continue;
     const d = unitDef(u.defId);
     const hp = Math.min(d.maxHp - u.hp, Math.max(1, Math.round(d.maxHp * RULES.restHpRatio * k)));

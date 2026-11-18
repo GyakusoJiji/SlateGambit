@@ -26,7 +26,7 @@ export function summarizeIntent(actions: Action[], unit?: Unit): Intent {
   if (unit?.ai?.asleep) return 'sleep';
   if (actions.some((a) => a.type === 'spell' && a.spell === 'breath')) return 'breath';
   if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell' || a.type === 'overwatch' || a.type === 'intercept')) return 'attack';
-  if (actions.some((a) => a.type === 'move' || a.type === 'follow')) return 'move';
+  if (actions.some((a) => a.type === 'move')) return 'move';
   if (actions.some((a) => a.type === 'guard')) return 'guard';
   return 'idle';
 }

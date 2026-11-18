@@ -5,9 +5,11 @@ import { AP_PER_TURN, type Action, type Unit } from './types';
 export const RULES = {
   attackCost: 3,
   spellCost: 3,
-  /** 休憩(敵が見えない状態で全員が待機だけのターン)での回復量 */
+  /** 8 ティック全部休憩したときの回復量(HP は最大値に対する割合) */
   restHpRatio: 0.2,
   restMp: 2,
+  /** 戦闘中(ターンの初めか終わりに敵が見えている)の休憩の回復量の倍率 */
+  combatRestRatio: 0.5,
   /** 敵のいるマスも通り抜けられるか(false なら味方のマスだけ通り抜けられる) */
   passThroughFoes: false,
   /** 弓などの遠隔攻撃で、撃つ瞬間に味方が射線上にいたら撃たない(AP は消費する) */
@@ -45,8 +47,6 @@ export function actionCost(a: Action): number {
       return RULES.spellCost;
     case 'overwatch':
     case 'intercept':
-    case 'follow':
-    case 'escort':
     case 'charge':
       return a.ticks;
   }
@@ -77,9 +77,9 @@ export function apLeft(actions: Action[]): number {
  * 予約の残り AP を待機で埋めた計画を返す(元の配列は変えない)。
  * 戦闘中はただの待機、敵が見えないときの待機は休憩になる(resolve の applyRest)
  */
-export function fillPlan(actions: Action[]): Action[] {
+export function fillPlan(actions: Action[], filler: 'wait' | 'guard' = 'wait'): Action[] {
   const out = [...actions];
-  for (let n = apLeft(out); n > 0; n--) out.push({ type: 'wait' });
+  for (let n = apLeft(out); n > 0; n--) out.push({ type: filler });
   return out;
 }
 
@@ -121,8 +121,6 @@ export type Step =
   | { k: 'guard' }
   | { k: 'wait' }
   | { k: 'watch'; mode: 'overwatch' | 'intercept' }
-  | { k: 'follow'; target: string }
-  | { k: 'escort'; target: string }
   | { k: 'charge'; target: string }
   | { k: 'carry'; target: string }
   | { k: 'drop' }
@@ -162,12 +160,6 @@ export function expandPlan(actions: Action[]): Step[] {
       case 'overwatch':
       case 'intercept':
         for (let i = 0; i < a.ticks; i++) steps.push({ k: 'watch', mode: a.type });
-        break;
-      case 'follow':
-        for (let i = 0; i < a.ticks; i++) steps.push({ k: 'follow', target: a.target });
-        break;
-      case 'escort':
-        for (let i = 0; i < a.ticks; i++) steps.push({ k: 'escort', target: a.target });
         break;
     }
   }

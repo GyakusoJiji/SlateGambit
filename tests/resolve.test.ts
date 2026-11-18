@@ -220,7 +220,8 @@ describe('攻撃', () => {
     try {
       const s = game([mk('p2', 'thief', 1, 1), mk('p1', 'warrior', 3, 1), mk('g1', 'goblin', 6, 1)]);
       const r = resolveTurn(s, { p2: [{ type: 'attack', target: 'g1' }] });
-      expect(u(r.state, 'p1').hp).toBeLessThan(CLASSES.warrior.maxHp);
+      // (予約のない戦士はターンの終わりに休憩で回復するので、HP ではなくダメージで確かめる)
+      expect(r.events.some((e) => e.type === 'damage' && e.id === 'p1')).toBe(true);
     } finally {
       RULES.holdFireOnAlly = true;
     }
@@ -228,9 +229,10 @@ describe('攻撃', () => {
 
   it('火球はマスを狙い、範囲内の味方も巻き込む', () => {
     const s = game([mk('p3', 'mage', 1, 3), mk('p1', 'warrior', 5, 3), mk('g1', 'goblin', 6, 3)]);
-    const r = resolveTurn(s, { p3: [{ type: 'spell', spell: 'fireball', tile: { x: 6, y: 3 } }] });
+    // 残りの AP は防御で埋める(休憩すると MP が回復してしまう)
+    const r = resolveTurn(s, { p3: fillPlan([{ type: 'spell', spell: 'fireball', tile: { x: 6, y: 3 } }], 'guard') });
     expect(u(r.state, 'g1').hp).toBeLessThan(MONSTERS.goblin.maxHp);
-    expect(u(r.state, 'p1').hp).toBeLessThan(CLASSES.warrior.maxHp);
+    expect(r.events.some((e) => e.type === 'damage' && e.id === 'p1')).toBe(true);
     expect(u(r.state, 'p3').mp).toBe(CLASSES.mage.maxMp - SPELLS.fireball.mp);
   });
 
@@ -416,16 +418,44 @@ describe('条件付き行動', () => {
     expect(u(r.state, 'p1').hp).toBe(CLASSES.warrior.maxHp);
   });
 
-  it('警戒射撃・迎撃は動かない敵には反応しない', () => {
-    const s = game([mk('p2', 'thief', 1, 3), mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 4, 3), mk('g2', 'goblin', 2, 1)]);
-    const r = resolveTurn(s, { p2: [{ type: 'overwatch', ticks: 8 }], p1: [{ type: 'intercept', ticks: 8 }] });
-    expect(r.events.some((e) => e.type === 'strike' && e.reaction)).toBe(false);
+  it('警戒射撃は動かない敵には反応しない', () => {
+    const s = game([mk('p2', 'thief', 1, 3), mk('g1', 'goblin', 4, 3)]);
+    const r = resolveTurn(s, { p2: [{ type: 'overwatch', ticks: 8 }] });
+    expect(r.events.some((e) => e.type === 'strike')).toBe(false);
   });
 
-  it('迎撃は隣に居続ける敵には 1 回だけ反応する(動いて来たティックのみ)', () => {
+  it('迎撃は隣で動かない敵を、通常の攻撃と同じく溜めてから攻撃する', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g2', 'goblin', 2, 1)]);
+    const r = resolveTurn(s, { p1: [{ type: 'intercept', ticks: 8 }] });
+    const ticks = r.events.filter((e) => e.type === 'strike' && e.id === 'p1').map((e) => e.tick);
+    // 3 ティックごとに 1 回(8 ティックで 2 回。残り 2 ティックでは足りない)
+    expect(ticks).toEqual([RULES.attackCost, RULES.attackCost * 2]);
+  });
+
+  it('迎撃は残りの AP が攻撃のコストに足りなければ動かない敵を攻撃しない', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g2', 'goblin', 2, 1)]);
+    const r = resolveTurn(s, { p1: [...Array(8 - (RULES.attackCost - 1)).fill({ type: 'wait' }), { type: 'intercept', ticks: RULES.attackCost - 1 }] });
+    expect(r.events.some((e) => e.type === 'strike' && e.id === 'p1')).toBe(false);
+  });
+
+  it('迎撃は隣に来た敵に即座に反応し、その後も隣に居続ければ溜めて攻撃する', () => {
     const s = game([mk('p1', 'warrior', 1, 3), mk('g1', 'goblin', 3, 3)]);
     const r = resolveTurn(s, { p1: [{ type: 'intercept', ticks: 8 }], g1: [...moves('W', 1), { type: 'guard' }, { type: 'guard' }, { type: 'guard' }] });
-    expect(r.events.filter((e) => e.type === 'strike' && e.id === 'p1')).toHaveLength(1);
+    const ticks = r.events.filter((e) => e.type === 'strike' && e.id === 'p1').map((e) => e.tick);
+    // 1: 即座に反応 → 2: 休み → 3〜5: 溜めて攻撃 → 6〜8: 溜めて攻撃
+    expect(ticks).toEqual([1, 5, 8]);
+  });
+
+  it('迎撃は隣の敵からランダムに狙う', () => {
+    const targets = new Set<string>();
+    for (let seed = 1; seed <= 30; seed++) {
+      const s = game([mk('p1', 'warrior', 3, 3), mk('g1', 'goblin', 2, 3), mk('g2', 'goblin', 4, 3)], OPEN, seed);
+      // 敵は防御し続ける(最初の溜めの狙いだけを見る)
+      const r = resolveTurn(s, { p1: [{ type: 'intercept', ticks: 8 }], g1: Array(8).fill({ type: 'guard' }), g2: Array(8).fill({ type: 'guard' }) });
+      const first = r.events.find((e) => e.type === 'strike' && e.id === 'p1');
+      if (first && first.type === 'strike' && first.target) targets.add(first.target);
+    }
+    expect(targets).toEqual(new Set(['g1', 'g2']));
   });
 
   it('迎撃は隣接してきた敵を攻撃する', () => {
@@ -439,22 +469,6 @@ describe('条件付き行動', () => {
     // g1 は (4,2) まで来る(p1 の斜め隣)
     const r = resolveTurn(s, { p1: [{ type: 'intercept', ticks: 8 }], g1: [...moves('W', 2), { type: 'guard' }] });
     expect(r.events.some((e) => e.type === 'strike' && e.id === 'p1' && e.reaction)).toBe(true);
-  });
-
-  it('追尾は対象に隣接するまで追いかける', () => {
-    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 6, 4)]);
-    const r = resolveTurn(s, { p1: [{ type: 'follow', target: 'g1', ticks: 8 }] });
-    const p = u(r.state, 'p1');
-    // 斜めも隣接に含む
-    expect(Math.max(Math.abs(p.x - 6), Math.abs(p.y - 4))).toBe(1);
-  });
-
-  it('護衛は味方の隣を保つ', () => {
-    const s = game([mk('p4', 'priest', 1, 1), mk('p1', 'warrior', 2, 1)]);
-    const r = resolveTurn(s, { p1: moves('E', 5), p4: [{ type: 'escort', target: 'p1', ticks: 8 }] });
-    const a = u(r.state, 'p1');
-    const b = u(r.state, 'p4');
-    expect(Math.abs(a.x - b.x) + Math.abs(a.y - b.y)).toBe(1);
   });
 
   it('敵を見たら停止すると、残りの移動が防御になる', () => {
@@ -518,11 +532,26 @@ describe('休憩', () => {
     expect(u(r.state, 'p4').hp).toBe(10);
   });
 
-  it('敵が見えていると休憩にならない', () => {
+  it('敵が見えていても休憩すれば回復する(回復量は戦闘中の倍率を掛けたもの)', () => {
     const m = mk('p3', 'mage', 1, 1);
     m.hp = 5;
-    const r = resolveTurn(game([m, mk('g1', 'goblin', 4, 1)], rows), {});
-    expect(u(r.state, 'p3').hp).toBeLessThanOrEqual(5);
+    const g = Array(8).fill({ type: 'guard' });
+    const r = resolveTurn(game([m, mk('g1', 'goblin', 4, 1)], rows), { g1: g });
+    expect(u(r.state, 'p3').hp).toBe(5 + Math.round(CLASSES.mage.maxHp * RULES.restHpRatio * RULES.combatRestRatio));
+  });
+
+  it('休憩中は被ダメージが減らず、ダメージを受けても回復はする', () => {
+    const w = mk('p1', 'warrior', 1, 1);
+    w.hp = 30;
+    // ゴブリンは隣から 2 回攻撃する(攻撃の振れ幅があるので、休憩なしの結果と比べる)
+    const atk = [{ type: 'attack', target: 'p1' } as const, { type: 'attack', target: 'p1' } as const];
+    const rest = resolveTurn(game([w, mk('g1', 'goblin', 2, 1)], rows), { g1: atk, p1: Array(8).fill({ type: 'wait' }) });
+    const guard = resolveTurn(game([w, mk('g1', 'goblin', 2, 1)], rows), { g1: atk, p1: Array(8).fill({ type: 'guard' }) });
+    const dmg = (r: typeof rest) => r.events.filter((e) => e.type === 'damage' && e.id === 'p1');
+    expect(dmg(rest).every((e) => e.type === 'damage' && !e.guarded)).toBe(true);
+    expect(dmg(guard).every((e) => e.type === 'damage' && e.guarded)).toBe(true);
+    const taken = dmg(rest).reduce((s, e) => s + (e.type === 'damage' ? e.amount : 0), 0);
+    expect(u(rest.state, 'p1').hp).toBe(30 - taken + Math.round(CLASSES.warrior.maxHp * RULES.restHpRatio * RULES.combatRestRatio));
   });
 });
 
