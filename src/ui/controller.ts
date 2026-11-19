@@ -4,12 +4,14 @@ import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../core/actio
 import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { inReach, resolveTurn } from '../core/resolve';
-import { generateGame } from '../core/generate';
+import { FLOORS, generateGame } from '../core/generate';
+import { currentFloor, findTile, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
 import type { Action, Difficulty, GameState, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
-import { SPELLS, unitDef } from '../data/units';
+import { SPELLS } from '../data/units';
+import { stats } from '../core/stats';
 import { attachInput } from './input';
 import { actButton, actionButtons, eventLog, idleButtons, partyCards, planChips, playbackControls, type Mode } from './panel';
 import { Playback } from './playback';
@@ -175,7 +177,7 @@ export class Controller {
       return;
     }
     // 連続休憩: 立っている全員が全快するまで
-    const tired = this.party().some((u) => !u.down && (u.hp < unitDef(u.defId).maxHp || u.mp < unitDef(u.defId).maxMp));
+    const tired = this.party().some((u) => !u.down && (u.hp < stats(u).maxHp || u.mp < stats(u).maxMp));
     if (!tired) return void this.stopAuto(T.toast.rested);
     this.autoRest--;
     if (this.autoRest <= 0) return void this.stopAuto();
@@ -202,8 +204,9 @@ export class Controller {
   private pendingSeed = 0;
 
   /** persist=false は難易度選択の後ろに映すだけの仮のゲーム(保存しない) */
-  start(seed: number, difficulty: Difficulty = 'normal', persist = true): void {
-    this.begin(generateGame(seed, difficulty));
+  /** startFloor: デバッグ用に途中の階から始める(URL の &floor=) */
+  start(seed: number, difficulty: Difficulty = 'normal', persist = true, startFloor = 1): void {
+    this.begin(generateGame(seed, difficulty, Math.max(1, Math.min(FLOORS, startFloor))));
     if (persist) saveGame(this.state);
   }
 
@@ -274,11 +277,24 @@ export class Controller {
   }
 
   private finishPlayback(): void {
+    const pb = this.playback;
     this.playback = null;
     if (this.replaying) {
       this.replaying = false;
       this.refresh();
       return;
+    }
+    // 階段で別の階へ移った: 新しい階の敵の表示名を足し、パーティを映す
+    const moved = pb?.result.events.find((e) => e.type === 'stairs');
+    if (moved && moved.type === 'stairs') {
+      this.names = new Map([...this.names, ...displayNames(this.state.units)]);
+      // 再生中に追っていたカメラの目標は前の階の座標なので捨てる
+      this.camGoal = null;
+      this.renderer.centerOn(centroid(this.party()));
+      this.toast(T.log.stairs(moved.from, moved.to));
+    } else {
+      const lv = pb?.result.events.filter((e) => e.type === 'levelup') ?? [];
+      if (lv.length > 0) this.toast(lv.map((e) => (e.type === 'levelup' ? T.log.levelup(this.names.get(e.id) ?? e.id, e.level) : '')).join(' '));
     }
     this.beginPlanning();
   }
@@ -320,12 +336,12 @@ export class Controller {
         const u = pb.before.units.find((x) => x.id === s.id)!;
         if (u.side === 'enemy' && visible && !visible[s.y * pb.before.map.w + s.x] && !s.down) continue;
         if (u.side === 'enemy' && visible && s.down && !visible[s.y * pb.before.map.w + s.x]) continue;
-        const d = unitDef(u.defId);
+        const d = stats(u);
         units.push({ id: s.id, icon: d.icon, side: u.side, x: s.fx, y: s.fy, hp: s.hp, maxHp: d.maxHp, down: s.down, guard: s.guard, watch: s.watch, selected: false, carrying: s.carrying });
       }
       const tr = pb.treasure();
       for (const u of units) u.treasure = !!tr && tr.holder === u.id;
-      return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects(), treasureAt: tr?.at, pointers: this.pointers(pb.explored[fi], tr?.at ?? null) };
+      return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects(), treasureAt: tr?.at, pointers: this.pointers(pb.before, pb.explored[fi], tr?.at ?? null) };
     }
 
     const st = this.state;
@@ -335,7 +351,7 @@ export class Controller {
     const units: DisplayUnit[] = st.units
       .filter((u) => u.side === 'party' || seen(u))
       .map((u) => {
-        const d = unitDef(u.defId);
+        const d = stats(u);
         return { id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying, treasure: obj?.kind === 'treasure' && obj.holder === u.id };
       });
 
@@ -353,23 +369,25 @@ export class Controller {
           .filter((u) => u.side === 'enemy' && !u.down && seen(u))
           .map((u) => {
             const plan = this.enemyPlans[u.id] ?? [];
-            // ブレスは着弾予定の範囲も見せる(読んでよければ避けられる)
-            const b = plan.find((a) => a.type === 'spell' && a.spell === 'breath');
-            const area = b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS.breath.radius } : undefined;
+            // ブレス・火球は着弾予定の範囲も見せる(読んでよければ避けられる)
+            const b = plan.find((a) => a.type === 'spell' && !!a.tile);
+            const area = b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS[b.spell].radius } : undefined;
             return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area };
           })
       : [];
-    const treasureAt = obj?.kind === 'treasure' ? obj.at : null;
-    return { map: st.map, explored: st.explored, visible, units, marks, hints, effects: [], treasureAt, pointers: this.pointers(st.explored, treasureAt) };
+    const treasureAt = treasureHere(st);
+    return { map: st.map, explored: st.explored, visible, units, marks, hints, effects: [], treasureAt, pointers: this.pointers(st, st.explored, treasureAt) };
   }
 
-  /** 画面外の目印: 入口の階段、見つけた宝、(誰も映っていなければ)味方 */
-  private pointers(explored: ArrayLike<number>, treasureAt: Pos | null): { at: Pos; color: string; label: string }[] {
-    const st = this.state;
+  /** 画面外の目印: 上り階段(入口)、見つけた下り階段・秘宝、(誰も映っていなければ)味方 */
+  private pointers(st: GameState, explored: ArrayLike<number>, treasureAt: Pos | null): { at: Pos; color: string; label: string }[] {
     const out: { at: Pos; color: string; label: string }[] = [];
-    const si = st.map.tiles.join('').indexOf('S');
-    if (si >= 0) out.push({ at: { x: si % st.map.w, y: Math.floor(si / st.map.w) }, color: '#c8b070', label: T.pointer.stairs });
-    if (treasureAt && explored[treasureAt.y * st.map.w + treasureAt.x]) out.push({ at: treasureAt, color: '#ffd23a', label: T.pointer.treasure });
+    const seen = (p: Pos) => !!explored[p.y * st.map.w + p.x];
+    const up = findTile(st.map, 'S');
+    if (up) out.push({ at: up, color: '#c8b070', label: currentFloor(st) === 1 ? T.pointer.entrance : T.pointer.stairs });
+    const down = findTile(st.map, '>');
+    if (down && seen(down)) out.push({ at: down, color: '#b08cff', label: T.pointer.down });
+    if (treasureAt && seen(treasureAt)) out.push({ at: treasureAt, color: '#ffd23a', label: T.pointer.treasure });
     const party = this.party().filter((u) => !u.down);
     if (party.length > 0 && !party.some((u) => this.renderer.inView(u))) out.push({ at: centroid(party), color: '#5ab0ff', label: T.pointer.party });
     return out;
@@ -380,7 +398,7 @@ export class Controller {
     const st = this.state;
     const o = st.objective;
     const goal = o?.kind === 'treasure' ? T.objectiveShort[o.holder ? 'treasureHeld' : 'treasure'] : T.objectiveShort.annihilate;
-    return `${T.turnShort(st.turn)}·${T.difficulty[st.difficulty ?? 'normal']}·${goal}`;
+    return `${T.floor(currentFloor(st))}·${T.turnShort(st.turn)}·${T.gold(st.gold ?? 0)}·${goal}`;
   }
 
   private updatePanel(): void {
@@ -392,7 +410,7 @@ export class Controller {
 
     const turnEl = this.el.topbar.querySelector<HTMLElement>('.turn')!;
     turnEl.textContent = this.statusLine();
-    turnEl.title = T.objective[this.state.objective?.kind ?? 'annihilate'];
+    turnEl.title = `${T.floorLong(currentFloor(this.state))} · ${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.objective[this.state.objective?.kind ?? 'annihilate']}`;
     const replay = this.el.topbar.querySelector<HTMLButtonElement>('[data-top="replay"]')!;
     replay.disabled = !this.lastPlayback || !!pb;
 
@@ -458,6 +476,8 @@ export class Controller {
     this.el.overlay.innerHTML = `<div class="sheet result ${won ? 'won' : 'lost'}">
       <h2>${won ? (this.state.objective?.kind === 'treasure' ? T.result.wonTreasure : T.result.won) : T.result.lost}</h2>
       <p>${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.turn(this.state.turn - 1)} で決着</p>
+      <p>${T.result.summary(this.state.deepest ?? currentFloor(this.state), T.gold(this.state.gold ?? 0))}</p>
+      <p>${this.party().map((u) => `${u.name} ${T.level(u.level ?? 1)}`).join(' · ')}</p>
       <button class="act primary" data-ov="new">${T.settings.newGame}</button>
       <button class="act" data-ov="close">${T.settings.close}</button>
     </div>`;
@@ -659,7 +679,7 @@ export class Controller {
         break;
       case 'watch':
         // 遠隔の武器なら警戒射撃、近接なら迎撃
-        this.append(u, { type: unitDef(u.defId).range > 1 ? 'overwatch' : 'intercept', ticks: apLeft(list) });
+        this.append(u, { type: stats(u).range > 1 ? 'overwatch' : 'intercept', ticks: apLeft(list) });
         break;
       case 'guard':
       case 'wait':
@@ -708,7 +728,7 @@ export class Controller {
         case 'fireball':
         case 'heal':
         case 'revive':
-          return !carrying && (unitDef(u.defId).spells as string[]).includes(m);
+          return !carrying && (stats(u).spells as string[]).includes(m);
         case 'group':
           return !this.foesInSight();
         default:
@@ -876,7 +896,7 @@ function simulate(st: GameState, u: Unit, actions: Action[]): { path: Pos[]; end
 function planMarks(st: GameState, u: Unit, actions: Action[], color: string): Mark[] {
   const marks: Mark[] = [];
   const { path, end } = simulate(st, u, actions);
-  const icon = unitDef(u.defId).icon;
+  const icon = stats(u).icon;
   if (path.length > 1) {
     marks.push({ kind: 'path', points: path, color });
     marks.push({ kind: 'ghost', at: end, icon });

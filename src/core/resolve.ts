@@ -1,5 +1,7 @@
 // 同時解決エンジン。全ユニットの予約を 1 ティックずつ同時に処理する。
 import { SPELLS, unitDef } from '../data/units';
+import { applyStairs, currentFloor, openChests, treasureHere } from './floors';
+import { gainExp, spellBonus, stats } from './stats';
 import { RULES, expandPlan, restTicks, type Step } from './actions';
 import { hasLos, linePoints } from './los';
 import { adjacent, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from './map';
@@ -54,6 +56,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   /** 接近攻撃で、射程内に入ってから構えたティック数 */
   const chargeWind = new Map<string, number>();
   const treasure = state.objective?.kind === 'treasure' ? [treasureSnap(state)] : undefined;
+  /** ターンの初めに立っていた敵(倒した敵の経験値の計算用) */
+  const foesAtStart = units.filter((u) => u.side === 'enemy' && !u.down);
 
   for (let tick = 1; tick <= TICKS_PER_TURN; tick++) {
     const ti = tick - 1;
@@ -190,7 +194,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
 
     for (const [id, d] of hpDelta) {
       const u = byId.get(id)!;
-      u.hp = Math.max(0, Math.min(unitDef(u.defId).maxHp, u.hp + d));
+      u.hp = Math.max(0, Math.min(stats(u).maxHp, u.hp + d));
     }
     for (const id of revived) {
       const u = byId.get(id)!;
@@ -215,6 +219,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       }
     }
     updateTreasure(state, byId, events, tick);
+    openChests(state, events, tick);
 
     updateExplored(state);
     frames.push(snapshot(units, guard, watching));
@@ -224,16 +229,21 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   applyRest(state, plans, seenAtStart.party.size > 0, events, frames);
   applySpring(state, events, frames);
   applyWakeUp(state, rng, events, frames);
+  applyExp(state, foesAtStart, events, frames);
   updateAiMemory(state, attackedBy, events);
   state.rng = rng.state;
   state.turn += 1;
+  // 地下 1 階の入口に秘宝を持ち帰ったら、階段の判定より勝ちを優先する
   state.status = judge(state);
+  if (state.status === 'playing') applyStairs(state, events);
   return { state, events, frames, treasure };
 }
 
 function treasureSnap(state: GameState): { at: Pos | null; holder?: string } {
   const o = state.objective;
-  return o?.kind === 'treasure' ? { at: o.at && { ...o.at }, holder: o.holder } : { at: null };
+  if (o?.kind !== 'treasure') return { at: null };
+  const at = treasureHere(state);
+  return { at: at && { ...at }, holder: o.holder };
 }
 
 /**
@@ -247,10 +257,11 @@ function updateTreasure(state: GameState, byId: Map<string, Unit>, events: GameE
     const h = byId.get(o.holder)!;
     if (!h.down) return;
     o.at = { x: h.x, y: h.y };
+    o.floor = currentFloor(state);
     o.holder = undefined;
     events.push({ tick, type: 'treasure', id: h.id, got: false, at: { ...o.at } });
   }
-  const at = o.at;
+  const at = treasureHere(state);
   if (!at) return;
   const finder = state.units.find((u) => u.side === 'party' && !u.down && u.x === at.x && u.y === at.y);
   if (!finder) return;
@@ -290,7 +301,7 @@ function pathRules(units: Unit[], u: Unit, target: Unit): { blocks: (p: Pos) => 
  * units を渡すと、遠隔は味方などが射線上にいない(最初に当たるのが t)ことも条件にする
  */
 export function inReach(map: GameState['map'], u: Unit, from: Pos, t: Unit, units?: Unit[]): boolean {
-  const def = unitDef(u.defId);
+  const def = stats(u);
   if (def.range <= 1) return adjacent(map, from, t);
   if (dist2(from, t) > def.range * def.range || !hasLos(map, from, t)) return false;
   return !units || clearShot(units, u, from, t);
@@ -377,7 +388,7 @@ function applyWakeUp(state: GameState, rng: Rng, events: GameEvent[], frames: Un
     u.carriedTurns = (u.carriedTurns ?? 0) + 1;
     if (u.carriedTurns < RULES.carryWakeTurns || rng.next() >= RULES.carryWakeChance) continue;
     u.down = false;
-    u.hp = Math.min(unitDef(u.defId).maxHp, RULES.carryWakeHp);
+    u.hp = Math.min(stats(u).maxHp, RULES.carryWakeHp);
     u.carriedTurns = undefined;
     events.push({ tick: TICKS_PER_TURN, type: 'wake', id: u.id });
     standUp(map, units, u, events, TICKS_PER_TURN);
@@ -395,7 +406,7 @@ function applySpring(state: GameState, events: GameEvent[], frames: UnitSnapshot
   let changed = false;
   for (const u of units) {
     if (u.side !== 'party' || tileAt(map, u.x, u.y) !== 'H') continue;
-    const d = unitDef(u.defId);
+    const d = stats(u);
     if (!u.down && u.hp === d.maxHp && u.mp === d.maxMp) continue;
     const revived = u.down;
     u.down = false;
@@ -525,7 +536,7 @@ interface StrikeCtx {
 }
 
 function rollDamage(ctx: StrikeCtx, base: number, variance: number, target: Unit): { amount: number; guarded: boolean } {
-  const def = unitDef(target.defId).def;
+  const def = stats(target).def;
   let amount = Math.max(1, base + ctx.rng.int(0, variance) - def);
   const guarded = ctx.guard.has(target.id);
   if (guarded) amount = Math.ceil(amount / 2);
@@ -542,7 +553,7 @@ function dealDamage(ctx: StrikeCtx, attacker: Unit, target: Unit, base: number, 
 function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   const { unit: u, action, reaction } = st;
   const { tick, map, units, byId, events } = ctx;
-  const def = unitDef(u.defId);
+  const def = stats(u);
   const fizzle = (reason: string): void => {
     events.push({ tick, type: 'fizzle', id: u.id, reason });
   };
@@ -586,7 +597,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     events.push({ tick, type: 'strike', id: u.id, kind: breath ? 'breath' : 'fireball', tile, end: tile, reaction });
     for (const o of units) {
       if (o.down) continue;
-      if (Math.max(Math.abs(o.x - tile.x), Math.abs(o.y - tile.y)) <= sd.radius) dealDamage(ctx, u, o, sd.power, sd.powerVar);
+      if (Math.max(Math.abs(o.x - tile.x), Math.abs(o.y - tile.y)) <= sd.radius) dealDamage(ctx, u, o, sd.power + spellBonus(u), sd.powerVar);
     }
     return;
   }
@@ -595,7 +606,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   if (sd.target === 'ally') {
     if (target.down) return fizzle('対象が倒れている');
     if (dist2(u, target) > sd.range * sd.range || !hasLos(map, u, target)) return fizzle('届かない');
-    const amount = sd.power + ctx.rng.int(0, sd.powerVar);
+    const amount = sd.power + spellBonus(u) + ctx.rng.int(0, sd.powerVar);
     ctx.hpDelta.set(target.id, (ctx.hpDelta.get(target.id) ?? 0) + amount);
     events.push({ tick, type: 'strike', id: u.id, kind: 'heal', target: target.id, hitId: target.id, end: pos(target), reaction });
     events.push({ tick, type: 'heal', id: target.id, amount });
@@ -690,7 +701,7 @@ function applyRest(state: GameState, plans: Plans, foesAtStart: boolean, events:
   for (const u of party) {
     const k = (restTicks(plans[u.id]) / TICKS_PER_TURN) * ratio;
     if (k <= 0) continue;
-    const d = unitDef(u.defId);
+    const d = stats(u);
     const hp = Math.min(d.maxHp - u.hp, Math.max(1, Math.round(d.maxHp * RULES.restHpRatio * k)));
     const mp = Math.min(d.maxMp - u.mp, Math.round(RULES.restMp * k));
     if (hp <= 0 && mp <= 0) continue;
@@ -707,13 +718,25 @@ function applyRest(state: GameState, plans: Plans, foesAtStart: boolean, events:
   }
 }
 
+/** このターンに倒れた敵の経験値を、パーティ全員に配る。レベルが上がれば最終フレームの HP・MP にも反映する */
+function applyExp(state: GameState, foesAtStart: Unit[], events: GameEvent[], frames: UnitSnapshot[][]): void {
+  const amount = foesAtStart.filter((u) => u.down).reduce((a, u) => a + (unitDef(u.defId).exp ?? 0), 0);
+  if (amount <= 0) return;
+  gainExp(state.units, amount, events);
+  for (const s of frames[frames.length - 1]) {
+    const u = state.units.find((x) => x.id === s.id)!;
+    s.hp = u.hp;
+    s.mp = u.mp;
+  }
+}
+
 function judge(state: GameState): GameState['status'] {
   if (state.units.filter((u) => u.side === 'party').every((u) => u.down)) return 'lost';
   const o = state.objective;
   if (o?.kind === 'treasure') {
-    // 宝を持った味方が、立ったまま入口の階段に戻れば勝ち
+    // 宝を持った味方が、立ったまま地下 1 階の入口の階段に戻れば勝ち
     const h = o.holder ? state.units.find((u) => u.id === o.holder) : undefined;
-    return h && !h.down && tileAt(state.map, h.x, h.y) === 'S' ? 'won' : 'playing';
+    return h && !h.down && currentFloor(state) === 1 && tileAt(state.map, h.x, h.y) === 'S' ? 'won' : 'playing';
   }
   if (state.units.filter((u) => u.side === 'enemy').every((u) => u.down)) return 'won';
   return 'playing';

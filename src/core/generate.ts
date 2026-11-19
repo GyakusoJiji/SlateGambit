@@ -1,28 +1,48 @@
-// ゲームごとのランダムなマップと配置の生成。シードと難易度から決定的に作る。
-// 部屋を置いて通路でつなぎ(必ず全域がつながる)、入口・泉・宝・敵を配置する。
-import { CLASSES, MONSTERS } from '../data/units';
+// ゲームごとのランダムなダンジョン(地下 1〜5 階)と配置の生成。シード・難易度・階から決定的に作る。
+// 部屋を置いて通路でつなぎ(必ず全域がつながる)、上り・下りの階段・泉・宝箱・敵を配置する。
+// 階は初めて訪れたときに作る(floors.ts)。地下 5 階の最も奥の部屋には秘宝と、眠っているドラゴンがいる。
+import { CLASSES, EXP_TABLE, MONSTERS } from '../data/units';
 import { DIR_LIST, isWalkable, manhattan, step } from './map';
 import { Rng, hashSeed } from './rng';
-import type { AiMemory, Difficulty, FloorMap, GameState, Objective, Pos, Unit } from './types';
+import { stats } from './stats';
+import type { AiMemory, Difficulty, FloorMap, GameState, Pos, Unit } from './types';
 import { updateExplored } from './vision';
 
 export const MAP_W = 40;
 export const MAP_H = 30;
+/** 最も深い階。ここに秘宝とドラゴンがいる */
+export const FLOORS = 5;
 
-/** 敵の点数(強さの目安)。ボスのドラゴンは別枠で必ず 1 体置く */
-const COST: Record<string, number> = { goblin: 2, archer: 2, orc: 4, ogre: 7 };
+/**
+ * 敵の出方。cost=点数(強さの目安)、from/to=出てくる階の範囲、weight=出やすさ。
+ * ボスのドラゴンは別枠で、地下 5 階に必ず 1 体置く
+ */
+export const MONSTER_GEN: Record<string, { cost: number; from: number; to?: number; weight: number }> = {
+  slime: { cost: 1, from: 1, to: 2, weight: 3 },
+  bat: { cost: 2, from: 1, to: 3, weight: 3 },
+  goblin: { cost: 2, from: 1, to: 4, weight: 4 },
+  archer: { cost: 2, from: 1, to: 4, weight: 3 },
+  shaman: { cost: 3, from: 2, weight: 2 },
+  orc: { cost: 4, from: 2, weight: 2 },
+  darkelf: { cost: 4, from: 3, weight: 2 },
+  troll: { cost: 5, from: 4, weight: 1.5 },
+  ogre: { cost: 7, from: 3, weight: 1.5 },
+};
 const DRAGON_COST = 7;
 
 /**
- * 難易度ごとの敵の量。budget=目的ごとの敵の点数の合計(ドラゴンの分を含む)、group=1 部屋の点数の上限、
- * ogres=オーガの最大数。全滅はドラゴンを倒す必要があり難しいので、目的ごとに予算を分けている。
- * 自動対戦の勝率が Easy 95% / Normal 75% / Hard 50% 前後になるよう調整する
+ * 難易度ごとの敵の量。budget[階 - 1]=その階の敵の点数の合計(地下 5 階はドラゴンを除く)、
+ * group=1 部屋の点数の上限(深い階ほど 1 ずつ増える)、ogres=1 つの階のオーガの最大数。
+ * 自動対戦の勝率(地下 5 階の秘宝を地上へ持ち帰るまで)が Easy 95% / Normal 75% / Hard 50% 前後になるよう調整する
  */
-export const DIFFICULTY: Record<Difficulty, { budget: Record<Objective['kind'], number>; group: number; ogres: number }> = {
-  easy: { budget: { annihilate: 15, treasure: 19 }, group: 7, ogres: 0 },
-  normal: { budget: { annihilate: 23, treasure: 30 }, group: 9, ogres: 1 },
-  hard: { budget: { annihilate: 31, treasure: 39 }, group: 12, ogres: 2 },
+export const DIFFICULTY: Record<Difficulty, { budget: number[]; group: number; ogres: number }> = {
+  easy: { budget: [8, 11, 14, 17, 14], group: 6, ogres: 0 },
+  normal: { budget: [16, 21, 26, 31, 26], group: 8, ogres: 1 },
+  hard: { budget: [26, 38, 52, 66, 59], group: 14, ogres: 3 },
 };
+
+/** 途中の階から始めるとき(デバッグ・自動対戦用)のパーティのレベル */
+export const START_LEVEL = [1, 2, 3, 4, 5];
 
 interface Room {
   x: number;
@@ -34,52 +54,121 @@ interface Room {
 const center = (r: Room): Pos => ({ x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) });
 const inRoom = (r: Room, p: Pos) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
 
-export function generateGame(seed: number, difficulty: Difficulty = 'normal', objectiveKind?: Objective['kind']): GameState {
-  const rng = new Rng(hashSeed('map', seed));
-  const { tiles, rooms } = carveRooms(rng);
-  const map: FloorMap = { w: MAP_W, h: MAP_H, tiles: tiles.map((r) => r.join('')) };
+export interface GeneratedFloor {
+  map: FloorMap;
+  enemies: Unit[];
+  /** 上り階段(地下 1 階では入口) */
+  up: Pos;
+  /** 下り階段(地下 5 階には無い) */
+  down: Pos | null;
+  /** 秘宝の位置(地下 5 階だけ) */
+  treasureAt: Pos | null;
+}
 
-  // 入口の部屋はランダム。そこからの歩数で、宝(最も遠い部屋)と泉(中ほどの部屋)を決める
-  const startRoom = rooms[rng.int(0, rooms.length - 1)];
-  const entrance = center(startRoom);
-  const dist = bfs(map, entrance);
-  const d = (p: Pos) => dist[p.y * MAP_W + p.x];
-  const others = rooms.filter((r) => r !== startRoom).sort((a, b) => d(center(a)) - d(center(b)));
-  const treasureRoom = others[others.length - 1];
-  const springRoom = others[Math.floor(others.length / 2) - 1] ?? others[0];
-  setTile(map, entrance, 'S');
-  const spring = randomCell(rng, springRoom, map, [center(springRoom)]);
-  setTile(map, spring, 'H');
-
-  const kind = objectiveKind ?? (rng.next() < 0.5 ? 'annihilate' : 'treasure');
-  const treasureAt = center(treasureRoom);
-  const objective: Objective = kind === 'treasure' ? { kind, at: treasureAt } : { kind };
-
-  // パーティは入口の周り
-  const taken = new Set<string>([key(entrance)]);
-  const partyCells = nearestCells(map, entrance, 4, taken);
+/**
+ * 新しいゲーム。startFloor 階の上り階段の周りにパーティを置く。
+ * 地下 1 階以外から始めるときは、その階に見合ったレベルにする(デバッグ・自動対戦用)
+ */
+export function generateGame(seed: number, difficulty: Difficulty = 'normal', startFloor = 1): GameState {
+  const f = generateFloor(seed, difficulty, startFloor);
+  const level = START_LEVEL[startFloor - 1] ?? 1;
   const party: Unit[] = (['warrior', 'thief', 'mage', 'priest'] as const).map((defId, i) => {
     const c = CLASSES[defId];
-    const p = partyCells[i];
-    taken.add(key(p));
-    return { id: `p${i + 1}`, side: 'party', defId, name: c.name, x: p.x, y: p.y, hp: c.maxHp, mp: c.maxMp, down: false };
+    const u: Unit = { id: `p${i + 1}`, side: 'party', defId, name: c.name, x: f.up.x, y: f.up.y, hp: 0, mp: 0, down: false, level, exp: EXP_TABLE[level - 1] };
+    const st = stats(u);
+    u.hp = st.maxHp;
+    u.mp = st.maxMp;
+    return u;
   });
-
-  const enemies = placeEnemies(rng, map, rooms, startRoom, treasureRoom, kind, difficulty, d, taken);
-
   const state: GameState = {
     seed,
     difficulty,
-    objective,
+    objective: { kind: 'treasure', at: f.treasureAt, floor: FLOORS },
     rng: hashSeed('play', seed),
     turn: 1,
-    map,
-    units: [...party, ...enemies],
+    map: f.map,
+    units: [...party, ...f.enemies],
     explored: new Array(MAP_W * MAP_H).fill(0),
     status: 'playing',
+    floor: startFloor,
+    floors: {},
+    gold: 0,
+    deepest: startFloor,
   };
+  placeParty(state, f.up);
   updateExplored(state);
   return state;
+}
+
+/** 1 つの階を作る */
+export function generateFloor(seed: number, difficulty: Difficulty, floor: number): GeneratedFloor {
+  const rng = new Rng(floor === 1 ? hashSeed('map', seed) : hashSeed('map', seed, floor));
+  const { tiles, rooms } = carveRooms(rng);
+  const map: FloorMap = { w: MAP_W, h: MAP_H, tiles: tiles.map((r) => r.join('')) };
+
+  // 上り階段の部屋はランダム。そこからの歩数で、下り階段・秘宝(最も遠い部屋)と泉(中ほどの部屋)を決める
+  const startRoom = rooms[rng.int(0, rooms.length - 1)];
+  const up = center(startRoom);
+  const dist = bfs(map, up);
+  const d = (p: Pos) => dist[p.y * MAP_W + p.x];
+  const others = rooms.filter((r) => r !== startRoom).sort((a, b) => d(center(a)) - d(center(b)));
+  const farRoom = others[others.length - 1];
+  const springRoom = others[Math.floor(others.length / 2) - 1] ?? others[0];
+  setTile(map, up, 'S');
+  const spring = randomCell(rng, springRoom, map, [center(springRoom)]);
+  setTile(map, spring, 'H');
+
+  const last = floor >= FLOORS;
+  const down = last ? null : center(farRoom);
+  if (down) setTile(map, down, '>');
+  const treasureAt = last ? center(farRoom) : null;
+
+  // 宝箱: 上り階段と泉の部屋以外に 2〜3 個
+  const taken = new Set<string>([key(up)]);
+  for (const p of nearestCells(map, up, 4, taken)) taken.add(key(p));
+  if (treasureAt) taken.add(key(treasureAt));
+  const chestRooms = others.filter((r) => r !== springRoom).sort(() => rng.next() - 0.5).slice(0, rng.int(2, 3));
+  for (const r of chestRooms) {
+    const p = randomCell(rng, r, map, [center(r)], taken);
+    if (!p) continue;
+    setTile(map, p, '$');
+    taken.add(key(p));
+  }
+
+  const enemies = placeEnemies(rng, map, rooms, startRoom, farRoom, floor, difficulty, d, taken);
+  return { map, enemies, up, down, treasureAt };
+}
+
+/** 宝箱のゴールド(開ける順番に左右されないよう、場所から決める) */
+export function chestGold(seed: number, floor: number, p: Pos): number {
+  const rng = new Rng(hashSeed('chest', seed, floor, p.x, p.y));
+  return 10 * floor + rng.int(0, 10 * floor);
+}
+
+/**
+ * パーティを at(階段)の周りの空いた床に置く。担がれている気絶者は担いでいる者と同じマスに置く。
+ * 階段の上には置かない(着いてすぐ折り返さないように)
+ */
+export function placeParty(state: GameState, at: Pos): void {
+  const taken = new Set<string>([key(at)]);
+  for (const u of state.units) if (u.side === 'enemy' && !u.down) taken.add(key(u));
+  const party = state.units.filter((u) => u.side === 'party');
+  const carried = new Set(party.filter((u) => u.carrying).map((u) => u.carrying!));
+  const free = party.filter((u) => !carried.has(u.id));
+  const cells = nearestCells(state.map, at, free.length, taken);
+  free.forEach((u, i) => {
+    const p = cells[i] ?? at;
+    u.x = p.x;
+    u.y = p.y;
+  });
+  for (const u of party) {
+    if (!u.carrying) continue;
+    const t = party.find((o) => o.id === u.carrying);
+    if (t) {
+      t.x = u.x;
+      t.y = u.y;
+    }
+  }
 }
 
 // ---- 地形 ----
@@ -209,68 +298,71 @@ function placeEnemies(
   map: FloorMap,
   rooms: Room[],
   startRoom: Room,
-  treasureRoom: Room,
-  kind: Objective['kind'],
+  farRoom: Room,
+  floor: number,
   difficulty: Difficulty,
   d: (p: Pos) => number,
   taken: Set<string>,
 ): Unit[] {
   const cfg = DIFFICULTY[difficulty];
+  const group = cfg.group + floor - 1;
   const units: Unit[] = [];
   const counts: Record<string, number> = {};
+  const PREFIX: Record<string, string> = {
+    slime: 's', bat: 'v', goblin: 'g', archer: 'a', shaman: 'm', orc: 'o', darkelf: 'e', troll: 't', ogre: 'b', dragon: 'd', wyrm: 'd',
+  };
   const spawn = (defId: string, p: Pos, ai: AiMemory = { mode: 'idle' }) => {
     const m = MONSTERS[defId];
     counts[defId] = (counts[defId] ?? 0) + 1;
-    const prefix = { goblin: 'g', archer: 'a', orc: 'o', ogre: 'b', dragon: 'd', wyrm: 'd' }[defId] ?? 'e';
-    units.push({ id: `${prefix}${counts[defId]}`, side: 'enemy', defId, name: m.name, x: p.x, y: p.y, hp: m.maxHp, mp: m.maxMp, down: false, ai });
+    // ID は階をまたいでも重ならないようにする(地下 1 階は g1、地下 2 階は 2g1 など)
+    const id = `${floor > 1 ? floor : ''}${PREFIX[defId] ?? 'x'}${counts[defId]}`;
+    units.push({ id, side: 'enemy', defId, name: m.name, x: p.x, y: p.y, hp: m.maxHp, mp: m.maxMp, down: false, ai });
     taken.add(key(p));
   };
 
-  // 入口から近すぎる部屋には置かない
+  // 上り階段から近すぎる部屋には置かない
   const candidates = rooms.filter((r) => r !== startRoom && d(center(r)) >= 8);
-  let budget = cfg.budget[kind];
+  let budget = cfg.budget[Math.min(floor, cfg.budget.length) - 1];
   let ogres = 0;
+  const kinds = Object.keys(MONSTER_GEN).filter((t) => floor >= MONSTER_GEN[t].from && floor <= (MONSTER_GEN[t].to ?? 99));
   const pickType = (room: number): string | null => {
-    const opts = Object.keys(COST).filter((t) => COST[t] <= room && COST[t] <= budget && (t !== 'ogre' || ogres < cfg.ogres));
+    const opts = kinds.filter((t) => MONSTER_GEN[t].cost <= room && MONSTER_GEN[t].cost <= budget && (t !== 'ogre' || ogres < cfg.ogres));
     if (opts.length === 0) return null;
-    // 弱い敵ほど出やすい
-    const weights = opts.map((t) => ({ goblin: 4, archer: 3, orc: 2, ogre: 1.5 })[t] ?? 1);
+    const weights = opts.map((t) => MONSTER_GEN[t].weight);
     let x = rng.next() * weights.reduce((a, b) => a + b, 0);
     for (let i = 0; i < opts.length; i++) if ((x -= weights[i]) < 0) return opts[i];
     return opts[opts.length - 1];
   };
   const fillRoom = (r: Room, points: number) => {
     let room = Math.min(points, budget);
-    while (room >= 2 && budget >= 2) {
+    while (room >= 1 && budget >= 1) {
       const t = pickType(room);
       if (!t) break;
       const p = randomCell(rng, r, map, [], taken);
       if (!p) break;
       spawn(t, p);
       if (t === 'ogre') ogres++;
-      room -= COST[t];
-      budget -= COST[t];
+      room -= MONSTER_GEN[t].cost;
+      budget -= MONSTER_GEN[t].cost;
     }
   };
 
-  // ボスのドラゴンは入口から最も遠い部屋(宝探しでは宝の部屋)に 1 体。点数は予算から引く。
-  // Easy は若いドラゴン(HP が低い)。宝探しでは眠っていて、こっそり宝を持ち出すこともできる
-  // 宝(部屋の中央)からなるべく離れたマスに置き、起こさずに宝へ近づける余地を残す
-  const lair = farthestCell(treasureRoom, map, center(treasureRoom), taken);
-  if (lair) {
-    spawn(difficulty === 'easy' ? 'wyrm' : 'dragon', lair, { mode: 'idle', asleep: kind === 'treasure' || undefined });
-    budget -= DRAGON_COST;
+  if (floor >= FLOORS) {
+    // ボスのドラゴンは秘宝の部屋に 1 体。眠っていて、こっそり秘宝を持ち出すこともできる。
+    // 秘宝(部屋の中央)からなるべく離れたマスに置き、起こさずに秘宝へ近づける余地を残す。Easy は若いドラゴン
+    const lair = farthestCell(farRoom, map, center(farRoom), taken);
+    if (lair) spawn(difficulty === 'easy' ? 'wyrm' : 'dragon', lair, { mode: 'idle', asleep: true });
+    // ドラゴン以外の番人も置く
+    fillRoom(farRoom, group - DRAGON_COST);
   }
-  // 宝探しでは宝の部屋にドラゴン以外の番人も置く
-  if (kind === 'treasure') fillRoom(treasureRoom, cfg.group - DRAGON_COST);
   const order = [...candidates].sort(() => rng.next() - 0.5);
-  for (let i = 0; budget >= 2 && i < order.length * 3; i++) {
+  for (let i = 0; budget >= 1 && i < order.length * 3; i++) {
     const r = order[i % order.length];
-    fillRoom(r, rng.int(2, cfg.group));
+    fillRoom(r, rng.int(2, group));
   }
 
   // 一部の敵は部屋の間を巡回する
-  const movers = units.filter((u) => u.defId === 'goblin' || u.defId === 'orc');
+  const movers = units.filter((u) => ['goblin', 'orc', 'bat', 'troll'].includes(u.defId));
   for (const u of movers.slice(0, Math.max(1, Math.floor(movers.length / 4)))) {
     const home = rooms.find((r) => inRoom(r, u))!;
     const away = candidates.filter((r) => r !== home)[rng.int(0, Math.max(0, candidates.length - 2))] ?? home;

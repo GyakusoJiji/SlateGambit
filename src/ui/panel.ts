@@ -2,7 +2,8 @@
 import { RULES, apLeft, carryingAfter, planCost } from '../core/actions';
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type SpellId, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
-import { SPELLS, unitDef } from '../data/units';
+import { SPELLS } from '../data/units';
+import { expProgress, stats } from '../core/stats';
 import { iconUrl } from './icons';
 
 export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'carry' | 'group';
@@ -12,14 +13,17 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 export function partyCards(party: Unit[], plans: Record<string, Action[]>, selected: string | null): string {
   return `<div class="cards">${party
     .map((u) => {
-      const d = unitDef(u.defId);
+      const d = stats(u);
       const used = planCost(plans[u.id] ?? []);
       const pips = Array.from({ length: AP_PER_TURN }, (_, i) => `<i class="${i < used ? 'used' : ''}"></i>`).join('');
+      const xp = expProgress(u);
+      const xpTitle = xp.toNext > 0 ? `次のレベルまで ${xp.toNext}` : 'レベル上限';
       return `<button class="card${u.id === selected ? ' sel' : ''}${u.down ? ' down' : ''}" data-sel="${u.id}">
         <img src="${iconUrl(d.icon)}" alt="">
-        <span class="name">${esc(u.name)}${u.down ? `<small>${T.down}${u.carriedTurns ? `·担${u.carriedTurns}` : ''}</small>` : ''}</span>
+        <span class="name"><em class="lv">${T.level(xp.level)}</em>${esc(u.name)}${u.down ? `<small>${T.down}${u.carriedTurns ? `·担${u.carriedTurns}` : ''}</small>` : ''}</span>
         <span class="bar hp"><i style="width:${(u.hp / d.maxHp) * 100}%"></i></span>
         ${d.maxMp > 0 ? `<span class="bar mp"><i style="width:${(u.mp / d.maxMp) * 100}%"></i></span>` : '<span class="bar none"></span>'}
+        <span class="bar xp" title="${xpTitle}"><i style="width:${xp.ratio * 100}%"></i></span>
         <span class="pips">${pips}</span>
       </button>`;
     })
@@ -82,7 +86,7 @@ export function idleButtons(): string {
 }
 
 export function actionButtons(u: Unit, actions: Action[], mode: Mode): string {
-  const d = unitDef(u.defId);
+  const d = stats(u);
   const ap = apLeft(actions);
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
@@ -191,6 +195,18 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'treasure':
         lines.push(e.got ? T.log.treasureGot(nameOf(e.id)) : T.log.treasureDrop(nameOf(e.id)));
+        break;
+      case 'chest':
+        lines.push(T.log.chest(nameOf(e.id), e.gold));
+        break;
+      case 'exp':
+        lines.push(T.log.exp(e.amount));
+        break;
+      case 'levelup':
+        lines.push(T.log.levelup(nameOf(e.id), e.level));
+        break;
+      case 'stairs':
+        lines.push(T.log.stairs(e.from, e.to));
         break;
     }
   }

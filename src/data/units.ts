@@ -17,25 +17,44 @@ export interface UnitDef {
   range: number;
   sight: number;
   spells: SpellId[];
+  /** 倒したときにパーティ全員が得る経験値(モンスターのみ) */
+  exp?: number;
+  /** レベルが 1 上がるごとの成長量(職業のみ) */
+  growth?: { hp: number; mp: number; atk: number };
 }
 
 export const CLASSES: Record<string, UnitDef> = {
-  warrior: { id: 'warrior', name: '戦士', icon: 'warrior', maxHp: 48, maxMp: 0, atk: 7, dmgVar: 3, def: 2, range: 1, sight: 7, spells: [] },
-  thief: { id: 'thief', name: '盗賊', icon: 'thief', maxHp: 30, maxMp: 0, atk: 5, dmgVar: 3, def: 1, range: 6, sight: 8, spells: [] },
-  mage: { id: 'mage', name: '魔法使い', icon: 'mage', maxHp: 24, maxMp: 14, atk: 3, dmgVar: 2, def: 0, range: 6, sight: 7, spells: ['fireball'] },
-  priest: { id: 'priest', name: '僧侶', icon: 'priest', maxHp: 33, maxMp: 14, atk: 4, dmgVar: 2, def: 1, range: 1, sight: 7, spells: ['heal', 'revive'] },
+  warrior: { id: 'warrior', name: '戦士', icon: 'warrior', maxHp: 48, maxMp: 0, atk: 7, dmgVar: 3, def: 2, range: 1, sight: 7, spells: [], growth: { hp: 6, mp: 0, atk: 1 } },
+  thief: { id: 'thief', name: '盗賊', icon: 'thief', maxHp: 30, maxMp: 0, atk: 5, dmgVar: 3, def: 1, range: 6, sight: 8, spells: [], growth: { hp: 4, mp: 0, atk: 1 } },
+  mage: { id: 'mage', name: '魔法使い', icon: 'mage', maxHp: 24, maxMp: 14, atk: 3, dmgVar: 2, def: 0, range: 6, sight: 7, spells: ['fireball'], growth: { hp: 3, mp: 2, atk: 0 } },
+  priest: { id: 'priest', name: '僧侶', icon: 'priest', maxHp: 33, maxMp: 14, atk: 4, dmgVar: 2, def: 1, range: 1, sight: 7, spells: ['heal', 'revive'], growth: { hp: 4, mp: 2, atk: 1 } },
 };
 
 export const MONSTERS: Record<string, UnitDef> = {
-  goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 20, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [] },
-  archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [] },
-  orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [] },
-  ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [] },
-  /** ボス。マップに 1 体、入口から最も遠い部屋にいる。強さはオーガと同じで、炎のブレスを吐く */
-  dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: ['breath'] },
+  slime: { id: 'slime', name: 'スライム', icon: 'slime', maxHp: 12, maxMp: 0, atk: 5, dmgVar: 2, def: 0, range: 1, sight: 5, spells: [], exp: 3 },
+  bat: { id: 'bat', name: '大コウモリ', icon: 'bat', maxHp: 10, maxMp: 0, atk: 6, dmgVar: 2, def: 0, range: 1, sight: 9, spells: [], exp: 4 },
+  goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 20, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [], exp: 6 },
+  archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [], exp: 6 },
+  /** 火球を使う。MP が尽きたら杖で殴る */
+  shaman: { id: 'shaman', name: 'ゴブリン呪術師', icon: 'shaman', maxHp: 16, maxMp: 6, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'], exp: 9 },
+  orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [], exp: 12 },
+  darkelf: { id: 'darkelf', name: 'ダークエルフ', icon: 'darkelf', maxHp: 28, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 7, sight: 8, spells: [], exp: 14 },
+  troll: { id: 'troll', name: 'トロル', icon: 'troll', maxHp: 55, maxMp: 0, atk: 11, dmgVar: 3, def: 2, range: 1, sight: 6, spells: [], exp: 18 },
+  ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [], exp: 24 },
+  /** ボス。地下 5 階の最も奥の部屋で秘宝を守る。炎のブレスを吐く */
+  dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 90, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 80 },
   /** Easy 用のボス(若いドラゴン)。HP だけ低い */
-  wyrm: { id: 'wyrm', name: '若いドラゴン', icon: 'dragon', maxHp: 55, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: ['breath'] },
+  wyrm: { id: 'wyrm', name: '若いドラゴン', icon: 'dragon', maxHp: 70, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 60 },
 };
+
+/**
+ * レベルごとの必要経験値(累計)。EXP_TABLE[n] = レベル n+1 になるのに必要な累計経験値。
+ * 長さ + 1 がレベルの上限
+ */
+export const EXP_TABLE = [0, 20, 50, 95, 155, 235, 335, 460, 610, 790];
+export const MAX_LEVEL = EXP_TABLE.length;
+/** 魔法使い・僧侶の魔法の威力が、レベル 1 つごとに上がる量 */
+export const SPELL_GROWTH = 1;
 
 export interface SpellDef {
   id: SpellId;

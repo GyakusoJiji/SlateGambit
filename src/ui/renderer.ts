@@ -154,7 +154,7 @@ export class Renderer {
     }
 
     const ta = view.treasureAt;
-    if (ta && (!view.visible || view.explored[ta.y * map.w + ta.x] || view.visible[ta.y * map.w + ta.x])) this.drawChest(ta);
+    if (ta && (!view.visible || view.explored[ta.y * map.w + ta.x] || view.visible[ta.y * map.w + ta.x])) this.drawTreasure(ta);
 
     for (const m of view.marks) this.drawMark(m);
     for (const h of view.hints) if (h.area) this.drawDanger(h.area.at, h.area.radius);
@@ -249,8 +249,30 @@ export class Renderer {
       g.fillRect(px + z * 0.32, py + z * 0.4, z * 0.14, z * 0.06);
       g.fillRect(px + z * 0.52, py + z * 0.56, z * 0.14, z * 0.06);
     } else if (t === 'S') {
+      // 上り階段(上ほど細い段)
       g.fillStyle = COLORS.stairs;
       for (let i = 0; i < 4; i++) g.fillRect(px + z * 0.15, py + z * (0.15 + i * 0.19), z * (0.7 - i * 0.15), z * 0.12);
+    } else if (t === '>') {
+      // 下り階段(暗い穴に、奥ほど細くなる段)
+      g.fillStyle = '#06060a';
+      g.fillRect(px + z * 0.1, py + z * 0.1, z * 0.8, z * 0.8);
+      g.fillStyle = COLORS.stairs;
+      for (let i = 0; i < 4; i++) {
+        const w = z * (0.7 - i * 0.15);
+        g.globalAlpha = 1 - i * 0.2;
+        g.fillRect(px + (z - w) / 2, py + z * (0.72 - i * 0.18), w, z * 0.1);
+      }
+      g.globalAlpha = 1;
+    } else if (t === '$' || t === 'c') {
+      // 宝箱(c は開けた後)
+      const open = t === 'c';
+      g.fillStyle = open ? '#4a3418' : '#8a5a20';
+      g.fillRect(px + z * 0.2, py + z * 0.42, z * 0.6, z * 0.36);
+      g.fillStyle = open ? '#5a4020' : '#a8702a';
+      if (open) g.fillRect(px + z * 0.2, py + z * 0.24, z * 0.6, z * 0.1);
+      else g.fillRect(px + z * 0.2, py + z * 0.3, z * 0.6, z * 0.14);
+      g.fillStyle = open ? '#6a6050' : '#e8c060';
+      g.fillRect(px + z * 0.46, py + z * 0.4, z * 0.08, z * 0.1);
     }
   }
 
@@ -298,22 +320,26 @@ export class Renderer {
   }
 
   /** 宝箱 */
-  private drawChest(p: Pos): void {
+  /** 秘宝(光る宝石。ゴールドの宝箱と見分けられるように) */
+  private drawTreasure(p: Pos): void {
     const g = this.ctx;
     const z = this.zoom;
-    const x = this.sx(p.x) - z / 2;
-    const y = this.sy(p.y) - z / 2;
-    g.fillStyle = '#ffd23a33';
+    const cx = this.sx(p.x);
+    const cy = this.sy(p.y);
+    g.fillStyle = '#ffd23a40';
     g.beginPath();
-    g.arc(x + z / 2, y + z / 2, z * 0.48, 0, Math.PI * 2);
+    g.arc(cx, cy, z * 0.48, 0, Math.PI * 2);
     g.fill();
-    g.fillStyle = '#8a5a20';
-    g.fillRect(x + z * 0.18, y + z * 0.36, z * 0.64, z * 0.42);
-    g.fillStyle = '#a8702a';
-    g.fillRect(x + z * 0.18, y + z * 0.26, z * 0.64, z * 0.16);
-    g.fillStyle = '#ffd23a';
-    g.fillRect(x + z * 0.18, y + z * 0.42, z * 0.64, z * 0.06);
-    g.fillRect(x + z * 0.45, y + z * 0.4, z * 0.1, z * 0.14);
+    g.fillStyle = '#ff4fa0';
+    g.beginPath();
+    g.moveTo(cx, cy - z * 0.32);
+    g.lineTo(cx + z * 0.26, cy - z * 0.05);
+    g.lineTo(cx, cy + z * 0.32);
+    g.lineTo(cx - z * 0.26, cy - z * 0.05);
+    g.closePath();
+    g.fill();
+    g.fillStyle = '#ffd0e8';
+    g.fillRect(cx - z * 0.1, cy - z * 0.16, z * 0.08, z * 0.08);
   }
 
   private badge(x: number, y: number, color: string, text: string): void {

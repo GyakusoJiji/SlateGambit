@@ -6,7 +6,13 @@ import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame
 import { findPath, pathAdjacent, pathTo } from '../src/core/path';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
-import { SPELLS, unitDef } from '../src/data/units';
+import { SPELLS } from '../src/data/units';
+import { stats } from '../src/core/stats';
+import { currentFloor, treasureHere } from '../src/core/floors';
+import { FLOORS } from '../src/core/generate';
+
+/** 下り階段を見つけていれば、床のこの割合を探索した時点で降りる(宝箱・経験値と、時間の兼ね合い) */
+export const BOT = { descendAt: 0.7 };
 
 const ORDER = ['warrior', 'thief', 'priest', 'mage'];
 
@@ -31,7 +37,7 @@ export function planParty(state: GameState): Plans {
     }
     // 傷んでいる、または MP が少なければ休憩する(全員待機)
     const tired = party.some((u) => {
-      const d = unitDef(u.defId);
+      const d = stats(u);
       return u.hp / d.maxHp < 0.6 || (d.maxMp > 0 && u.mp / d.maxMp < 0.5);
     });
     // 眠っている敵が見えている間は休憩しても回復しないので、休まずに進む
@@ -131,7 +137,7 @@ function melee(ctx: Ctx): void {
 }
 
 function clearShot(state: GameState, from: Pos, f: Unit, self: Unit, reserved?: Set<string>): boolean {
-  const r = unitDef(self.defId).range;
+  const r = stats(self).range;
   if (dist2(from, f) > r * r || !hasLos(state.map, from, f)) return false;
   return linePoints(from, f).every(
     (p) => (p.x === f.x && p.y === f.y) || (!reserved?.has(key(p)) && !state.units.some((o) => o !== self && !o.down && o.x === p.x && o.y === p.y)),
@@ -205,9 +211,9 @@ function priest(ctx: Ctx): void {
     }
   }
   const hurt = allies
-    .filter((o) => !o.down && o.hp / unitDef(o.defId).maxHp < 0.5)
+    .filter((o) => !o.down && o.hp / stats(o).maxHp < 0.5)
     .filter((o) => dist2(ctx.pos, o) <= SPELLS.heal.range ** 2 && hasLos(state.map, ctx.pos, o))
-    .sort((a, b) => a.hp / unitDef(a.defId).maxHp - b.hp / unitDef(b.defId).maxHp);
+    .sort((a, b) => a.hp / stats(a).maxHp - b.hp / stats(b).maxHp);
   if (hurt.length > 0 && u.mp >= SPELLS.heal.mp) ctx.plan.push({ type: 'spell', spell: 'heal', target: hurt[0].id });
   // 立っている仲間がいなければ、自分で戦うしかない
   if (ctx.plan.length === 0 && allies.every((o) => o.down)) return melee(ctx);
@@ -245,31 +251,45 @@ function explore(state: GameState, party: Unit[]): Plans {
       const n = step(p, d);
       return unexplored(n.x, n.y) && isWalkable(map, n.x, n.y);
     });
+  const tile = (p: Pos) => map.tiles[p.y][p.x];
+  const seen = (p: Pos) => !!state.explored[p.y * map.w + p.x];
+  const floorCells = map.tiles.join('').split('').filter((c) => c !== '#').length;
+  const exploredCells = state.explored.reduce((a, b) => a + b, 0);
+  const anyFrontier = state.explored.some((e, i) => !e && map.tiles[(i / map.w) | 0][i % map.w] !== '#');
   // 全域を探索済みなら、生き残りの敵の隣を目標にする(巡回中の敵を探す代わり)
-  const foe = state.units.find((u) => u.side === 'enemy' && !u.down);
-  let goal = state.explored.some((e, i) => !e && map.tiles[(i / map.w) | 0][i % map.w] !== '#')
-    ? frontier
-    : (p: Pos) => !!foe && adjacent(map, p, foe);
-  // 宝探し: 見つけた宝へ向かい、拾ったら持ち主を先頭に入口の階段へ戻る
-  const obj = state.objective;
+  const foe = state.units.find((u) => u.side === 'enemy' && !u.down && !u.ai?.asleep);
+  let goal: (p: Pos) => boolean = anyFrontier ? frontier : (p: Pos) => !!foe && adjacent(map, p, foe);
   let candidates = party;
-  if (obj?.kind === 'treasure') {
-    const holder = party.find((u) => u.id === obj.holder);
-    const at = obj.at;
-    if (holder) {
-      goal = (p: Pos) => map.tiles[p.y][p.x] === 'S';
-      candidates = [holder];
-    } else if (at && state.explored[at.y * map.w + at.x]) {
-      goal = (p: Pos) => p.x === at.x && p.y === at.y;
-    }
+  /** 目標の階段('S' か '>')。それ以外の階段の上には止まらない(階を移ってしまう)ので、経路でも避ける */
+  let goalStair: string | null = null;
+  const obj = state.objective;
+  const holder = obj?.kind === 'treasure' ? party.find((u) => u.id === obj.holder) : undefined;
+  const treasure = treasureHere(state);
+  const known = (c: string) => {
+    for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) if (map.tiles[y][x] === c && seen({ x, y })) return true;
+    return false;
+  };
+  if (holder) {
+    // 秘宝を持っていれば、持ち主を先頭に上り階段(地下 1 階では入口)へ
+    goal = (p: Pos) => tile(p) === 'S';
+    candidates = [holder];
+    goalStair = 'S';
+  } else if (treasure && seen(treasure)) {
+    goal = (p: Pos) => p.x === treasure.x && p.y === treasure.y;
+  } else if (known('$')) {
+    goal = (p: Pos) => tile(p) === '$' && seen(p);
+  } else if (currentFloor(state) < FLOORS && known('>') && (!anyFrontier || exploredCells / floorCells >= BOT.descendAt)) {
+    goal = (p: Pos) => tile(p) === '>';
+    goalStair = '>';
   }
+  const stairBlock = (p: Pos) => (tile(p) === 'S' || tile(p) === '>') && tile(p) !== goalStair;
 
   // 先頭: 味方を避けた経路が最も短い者
   let leader = candidates[0];
   let best: Dir[] | null = null;
   for (const u of candidates) {
     // 味方のマスは通り抜けられる。止まる位置が重なっても解決時に押し戻されるだけ
-    const p = findPath(map, u, goal, undefined, 5000);
+    const p = findPath(map, u, goal, stairBlock, 5000) ?? findPath(map, u, goal, undefined, 5000);
     if (p && (!best || p.length < best.length)) {
       best = p;
       leader = u;
@@ -282,7 +302,7 @@ function explore(state: GameState, party: Unit[]): Plans {
   const rest = party.filter((u) => u !== leader).sort((a, b) => manhattan(a, leader) - manhattan(b, leader));
   let prev: { start: Pos; dirs: Dir[] } = { start: { x: leader.x, y: leader.y }, dirs: lead };
   for (const u of rest) {
-    const toPrev = pathTo(map, u, prev.start) ?? [];
+    const toPrev = pathTo(map, u, prev.start, stairBlock) ?? pathTo(map, u, prev.start) ?? [];
     const dirs = [...toPrev, ...prev.dirs].slice(0, 8);
     plans[u.id] = dirs.map((d) => ({ type: 'move', dir: d, stop: true }));
     prev = { start: { x: u.x, y: u.y }, dirs };

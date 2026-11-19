@@ -1,48 +1,69 @@
 // 自動対戦によるバランス検証。`npm run playtest` で実行する。
-//   GAMES=回数(既定 300)
-//   TRACE=シード  … 1 戦の経過をターンごとに表示
-//   VARIANTS=all  … 難易度 × 目的のすべての組み合わせ
-//   VARIANTS=budget BUDGET="normal.annihilate=20,22 hard.treasure=35"
-//                 … 敵の点数の合計を差し替えて比べる(難易度.目的=点数,点数,…)
+// 1 戦 = 地下 1 階から潜り、地下 5 階の秘宝を地下 1 階の入口へ持ち帰るまで(または全滅・時間切れ)。
+//   GAMES=回数(既定 100)、MAX_TURNS=1 戦の上限ターン(既定 600)
+//   TRACE=シード DIFF=normal START=1 … 1 戦の経過をターンごとに表示
+//   VARIANTS=all  … 難易度ごとに加えて、途中の階から始める場合
+//   VARIANTS=budget BUDGET="normal.3=20,22 hard.5=30"
+//                 … ある階の敵の点数の合計を差し替えて比べる(難易度.階=点数,点数,…)
+//   VARIANTS=descend … ボットが下り階段へ向かう探索率を変えて比べる
 import { it } from 'vitest';
 import { RULES } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
-import { DIFFICULTY, generateGame } from '../src/core/generate';
+import { DIFFICULTY, FLOORS, generateGame } from '../src/core/generate';
 import { createTestGame } from '../src/core/scenario';
-import type { Difficulty, GameEvent, GameState, Objective } from '../src/core/types';
+import type { Difficulty, GameEvent, GameState } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
-import { planParty } from './partyBot';
+import { stats } from '../src/core/stats';
+import { BOT, planParty } from './partyBot';
 
 declare const process: { env: Record<string, string | undefined> };
 
-const GAMES = Number(process.env.GAMES ?? 300);
+const GAMES = Number(process.env.GAMES ?? 100);
 const TRACE = process.env.TRACE;
-const MAX_TURNS = Number(process.env.MAX_TURNS ?? 150);
+const MAX_TURNS = Number(process.env.MAX_TURNS ?? 600);
 
 /** 比較する調整案。setup で数値を書き換え、終了後に元へ戻す。game は 1 戦の初期状態を作る */
 type Variant = { name: string; setup: () => void; game: (seed: number) => GameState; teardown?: () => void };
-const gen = (d: Difficulty, k?: Objective['kind']) => (seed: number) => generateGame(seed, d, k);
-const KIND_NAME: Record<Objective['kind'], string> = { annihilate: '全滅', treasure: '宝' };
-/** BUDGET の指定から、点数を差し替えた調整案を作る */
+const gen = (d: Difficulty, start = 1) => (seed: number) => generateGame(seed, d, start);
+const cap = (d: string) => d[0].toUpperCase() + d.slice(1);
+/** BUDGET の指定から、ある階の点数を差し替えた調整案を作る */
 function budgetVariants(spec: string): Variant[] {
   const out: Variant[] = [];
   for (const part of spec.trim().split(/\s+/)) {
     const [target, values] = part.split('=');
-    const [d, k] = target.split('.') as [Difficulty, Objective['kind']];
+    const [d, f] = target.split('.') as [Difficulty, string];
+    if (f === undefined) {
+      // 階を省くと全階の点数をまとめて差し替える(例: normal=15/20/25/30/25,16/21/26/31/26)
+      for (const arr of values.split(',').map((v) => v.split('/').map(Number))) {
+        let saved: number[] = [];
+        out.push({
+          name: `${cap(d)} 点数${arr.join('/')}`,
+          setup: () => {
+            saved = [...DIFFICULTY[d].budget];
+            DIFFICULTY[d].budget.splice(0, arr.length, ...arr);
+          },
+          game: gen(d),
+          teardown: () => {
+            DIFFICULTY[d].budget.splice(0, saved.length, ...saved);
+          },
+        });
+      }
+      continue;
+    }
+    const i = Number(f) - 1;
     for (const v of values.split(',').map(Number)) {
-      const name = `${d[0].toUpperCase()}${d.slice(1)} ${KIND_NAME[k]} 点数${v}`;
       let saved = 0;
       out.push({
-        name,
+        name: `${cap(d)} B${f} 点数${v}`,
         setup: () => {
-          saved = DIFFICULTY[d].budget[k];
-          DIFFICULTY[d].budget[k] = v;
+          saved = DIFFICULTY[d].budget[i];
+          DIFFICULTY[d].budget[i] = v;
         },
-        game: gen(d, k),
+        game: gen(d),
         teardown: () => {
-          DIFFICULTY[d].budget[k] = saved;
+          DIFFICULTY[d].budget[i] = saved;
         },
       });
     }
@@ -50,26 +71,38 @@ function budgetVariants(spec: string): Variant[] {
   return out;
 }
 
+const BASE: Variant[] = [
+  { name: 'Easy', setup: () => {}, game: gen('easy') },
+  { name: 'Normal', setup: () => {}, game: gen('normal') },
+  { name: 'Hard', setup: () => {}, game: gen('hard') },
+];
+
 const VARIANTS: Variant[] = (process.env.VARIANTS === 'budget'
   ? budgetVariants(process.env.BUDGET ?? '')
+  : process.env.VARIANTS === 'descend'
+  ? [0.4, 0.7, 1].map((k) => {
+      let saved = 0;
+      return {
+        name: `Normal 探索${Math.round(k * 100)}%で降りる`,
+        setup: () => {
+          saved = BOT.descendAt;
+          BOT.descendAt = k;
+        },
+        game: gen('normal'),
+        teardown: () => {
+          BOT.descendAt = saved;
+        },
+      };
+    })
   : process.env.VARIANTS === 'all'
   ? [
-      { name: 'Easy', setup: () => {}, game: gen('easy') },
-      { name: 'Easy 全滅', setup: () => {}, game: gen('easy', 'annihilate') },
-      { name: 'Easy 宝', setup: () => {}, game: gen('easy', 'treasure') },
-      { name: 'Normal', setup: () => {}, game: gen('normal') },
-      { name: 'Normal 全滅', setup: () => {}, game: gen('normal', 'annihilate') },
-      { name: 'Normal 宝', setup: () => {}, game: gen('normal', 'treasure') },
-      { name: 'Hard', setup: () => {}, game: gen('hard') },
-      { name: 'Hard 全滅', setup: () => {}, game: gen('hard', 'annihilate') },
-      { name: 'Hard 宝', setup: () => {}, game: gen('hard', 'treasure') },
-      { name: '固定マップ(旧)', setup: () => {}, game: createTestGame },
+      ...BASE,
+      { name: 'Normal B3 から', setup: () => {}, game: gen('normal', 3) },
+      { name: 'Normal B5 から', setup: () => {}, game: gen('normal', 5) },
+      { name: 'Hard B5 から', setup: () => {}, game: gen('hard', 5) },
+      { name: '固定マップ(旧・全滅)', setup: () => {}, game: createTestGame },
     ]
-  : [
-      { name: 'Easy', setup: () => {}, game: gen('easy') },
-      { name: 'Normal', setup: () => {}, game: gen('normal') },
-      { name: 'Hard', setup: () => {}, game: gen('hard') },
-    ]) as Variant[];
+  : BASE) as Variant[];
 void strengthen;
 void rest;
 
@@ -134,6 +167,17 @@ interface Stats {
   dragonKilled: number;
   /** 全滅させたユニットの最後の一撃(負けの原因) */
   lastBlow: Record<string, number>;
+  /** 1 戦ごとの最も深い階・ゴールド・終了時の平均レベル */
+  deepest: number[];
+  gold: number[];
+  level: number[];
+  /** 秘宝を拾った戦の数 */
+  gotTreasure: number;
+  /** 全滅した階 */
+  lostFloor: Record<string, number>;
+  /** 各階に初めて着いたときのターンと平均レベル(階 → 値の配列) */
+  arriveTurn: Record<number, number[]>;
+  arriveLevel: Record<number, number[]>;
 }
 
 const add = (o: Record<string, number>, k: string, n = 1) => (o[k] = (o[k] ?? 0) + n);
@@ -167,7 +211,15 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
     dragonFought: 0,
     dragonKilled: 0,
     lastBlow: {},
+    deepest: [],
+    gold: [],
+    level: [],
+    gotTreasure: 0,
+    lostFloor: {},
+    arriveTurn: {},
+    arriveLevel: {},
   };
+  const partyLevel = (st: GameState) => avg(st.units.filter((u) => u.side === 'party').map((u) => u.level ?? 1));
   for (let g = 0; g < games; g++) {
     let state: GameState = makeGame(1000 + g);
     const defOf = new Map(state.units.map((u) => [u.id, u.defId]));
@@ -176,8 +228,10 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
     let longStallCounted = false;
     let dragonHit = false;
     let lastPartyBlow = '';
+    let got = false;
+    const arrived = new Set<number>([state.floor ?? 1]);
     while (state.status === 'playing' && state.turn <= MAX_TURNS) {
-      const hpBefore = new Map(state.units.map((u) => [u.id, u.hp / unitDef(u.defId).maxHp]));
+      const hpBefore = new Map(state.units.map((u) => [u.id, u.hp / stats(u).maxHp]));
       const fight = visibleFoes(state.map, state.units, 'party').size > 0;
       const r = resolveTurn(state, { ...planEnemies(state), ...planParty(state) });
       const lastHit = new Map<string, string>();
@@ -194,9 +248,26 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
       for (const e of r.events) {
         if (e.type === 'damage' && /^(dragon|wyrm)$/.test(defOf.get(e.id)!)) dragonHit = true;
         if (e.type === 'damage' && sideOf.get(e.id) === 'party') lastPartyBlow = defOf.get(e.by)!;
+        if (e.type === 'treasure' && e.got) got = true;
       }
       state = r.state;
+      // 新しい階の敵を表に足す
+      for (const u of state.units) {
+        defOf.set(u.id, u.defId);
+        sideOf.set(u.id, u.side);
+      }
+      const f = state.floor ?? 1;
+      if (!arrived.has(f)) {
+        arrived.add(f);
+        (s.arriveTurn[f] ??= []).push(state.turn - 1);
+        (s.arriveLevel[f] ??= []).push(partyLevel(state));
+      }
     }
+    if (got) s.gotTreasure++;
+    s.deepest.push(state.deepest ?? 1);
+    s.gold.push(state.gold ?? 0);
+    s.level.push(partyLevel(state));
+    if (state.status === 'lost') add(s.lostFloor, `B${state.floor ?? 1}`);
     if (dragonHit) s.dragonFought++;
     if (state.units.some((u) => (u.defId === 'dragon' || u.defId === 'wyrm') && u.down)) s.dragonKilled++;
     if (state.status === 'lost') add(s.lastBlow, lastPartyBlow);
@@ -206,7 +277,7 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
     s.turns.push(state.turn - 1);
     if (res === 'won') {
       const p = state.units.filter((u) => u.side === 'party');
-      s.hpLeftWin.push(p.reduce((a, u) => a + u.hp, 0) / p.reduce((a, u) => a + unitDef(u.defId).maxHp, 0));
+      s.hpLeftWin.push(p.reduce((a, u) => a + u.hp, 0) / p.reduce((a, u) => a + stats(u).maxHp, 0));
     }
 
     function collect(e: GameEvent, lastHit: Map<string, string>, hpBefore: Map<string, number>) {
@@ -270,7 +341,10 @@ function summaryRow(name: string, s: Stats, games: number): string {
     `${(avg(s.hpLeftWin) * 100).toFixed(0)}%`.padStart(5),
     (partyDowns / games).toFixed(2).padStart(5),
     (s.oneTurnKos / games).toFixed(2).padStart(5),
-    `${((s.meleeWhiffs / Math.max(1, s.meleeTries)) * 100).toFixed(0)}%`.padStart(5),
+    avg(s.deepest).toFixed(1).padStart(5),
+    pct(s.gotTreasure),
+    avg(s.level).toFixed(1).padStart(4),
+    Math.round(avg(s.gold)).toString().padStart(5),
   ].join(' ');
 }
 
@@ -291,6 +365,14 @@ function detail(s: Stats, games: number): string {
   lines.push(`ドラゴン: 戦った ${pct(s.dragonFought, games)}、倒した ${pct(s.dragonKilled, games)}。宝を落とした ${(s.treasureDrops / games).toFixed(2)} 回/戦`);
   const lb = Object.entries(s.lastBlow).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${unitDef(k).name} ${v}`).join('、');
   lines.push(`全滅したときの最後の一撃: ${lb || 'なし'}`);
+  const lf = Object.entries(s.lostFloor).sort().map(([k, v]) => `${k} ${v}`).join('、');
+  lines.push(`全滅した階: ${lf || 'なし'}。近接の空振り ${pct(s.meleeWhiffs, s.meleeTries)}`);
+  const arr: string[] = [];
+  for (let f = 2; f <= FLOORS; f++) {
+    const t = s.arriveTurn[f];
+    if (t) arr.push(`B${f} ${pct(t.length, games)}·T${avg(t).toFixed(0)}·Lv${avg(s.arriveLevel[f]).toFixed(1)}`);
+  }
+  lines.push(`各階に着いた割合・ターン・平均レベル: ${arr.join(' / ') || 'なし'}`);
   lines.push('不発(1 戦あたり、多い順):');
   for (const [k, v] of Object.entries(s.fizzles)
     .sort((a, b) => b[1] - a[1])
@@ -305,7 +387,7 @@ it.runIf(TRACE === undefined)(`調整案の比較(各 ${GAMES} 戦)`, () => {
   const original = snapshotDefs();
   const out: string[] = [
     `=== 自動対戦 各 ${GAMES} 戦(上限 ${MAX_TURNS} ターン)===`,
-    `${'調整案'.padEnd(22, '　')} 勝利 全滅 時間  平均T 残HP 気絶/戦 即死/戦 近接空振り`,
+    `${'調整案'.padEnd(22, '　')} 勝利 全滅 時間  平均T 残HP 気絶/戦 即死/戦 最深階 秘宝 Lv  ゴールド`,
   ];
   const details: string[] = [];
   for (const v of VARIANTS) {
@@ -320,10 +402,11 @@ it.runIf(TRACE === undefined)(`調整案の比較(各 ${GAMES} 戦)`, () => {
 });
 
 it.runIf(TRACE !== undefined)('1 戦の経過', () => {
-  let state = generateGame(Number(TRACE), (process.env.DIFF ?? 'normal') as Difficulty);
-  console.log(state.map.tiles.join('\n') + `\n目的: ${state.objective?.kind}`);
+  let state = generateGame(Number(TRACE), (process.env.DIFF ?? 'normal') as Difficulty, Number(process.env.START ?? 1));
+  console.log(state.map.tiles.join('\n'));
   const out: string[] = [];
   while (state.status === 'playing' && state.turn <= MAX_TURNS) {
+    const f = state.floor ?? 1;
     const party = planParty(state);
     const r = resolveTurn(state, { ...planEnemies(state), ...party });
     const pos = state.units.map((u) => `${u.id}${u.down ? 'x' : ''}(${u.x},${u.y})${u.hp}`).join(' ');
@@ -331,9 +414,10 @@ it.runIf(TRACE !== undefined)('1 戦の経過', () => {
       .map(([id, a]) => `${id}:${a.map((x) => x.type[0] + ('dir' in x ? x.dir : '')).join('')}`)
       .join(' ');
     const bumps = r.events.filter((e) => e.type === 'bump').map((e) => e.id).join(',');
-    out.push(`T${state.turn} ${pos}\n    ${plans}  bump:${bumps}`);
+    out.push(`T${state.turn} B${f} ${pos}\n    ${plans}  bump:${bumps}`);
     state = r.state;
+    if ((state.floor ?? 1) !== f) out.push(`--- 地下 ${state.floor} 階へ ---\n${state.map.tiles.join('\n')}`);
   }
-  out.push(`結果: ${state.status}`);
+  out.push(`結果: ${state.status}(最深 B${state.deepest}、${state.gold ?? 0} G)`);
   console.log(out.join('\n'));
 });

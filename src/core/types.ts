@@ -9,8 +9,11 @@ export type Dir = 'N' | 'E' | 'S' | 'W';
 
 export type Side = 'party' | 'enemy';
 
-/** マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'S'=入口階段, 'H'=回復の泉 */
-export type TileChar = '#' | '.' | '+' | 'S' | 'H';
+/**
+ * マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'S'=上り階段(地下 1 階では入口), '>'=下り階段,
+ * 'H'=回復の泉, '$'=宝箱, 'c'=開けた宝箱
+ */
+export type TileChar = '#' | '.' | '+' | 'S' | '>' | 'H' | '$' | 'c';
 
 export interface FloorMap {
   w: number;
@@ -49,6 +52,10 @@ export interface Unit {
   /** 気絶中に、担がれたままターンを終えた連続回数(降ろされると 0 に戻る) */
   carriedTurns?: number;
   ai?: AiMemory;
+  /** レベル(パーティのみ。未指定は 1) */
+  level?: number;
+  /** 累計の経験値(パーティのみ) */
+  exp?: number;
 }
 
 export type GameStatus = 'playing' | 'won' | 'lost';
@@ -57,10 +64,19 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 
 /**
  * ゲームの目的。
- * - annihilate: 敵の全滅
- * - treasure: 宝を拾い、持ったまま入口の階段('S')に戻る。at=床に置かれている位置、holder=持っている味方
+ * - annihilate: 敵の全滅(テスト用の固定マップ)
+ * - treasure: 宝(秘宝)を拾い、持ったまま地下 1 階の入口の階段('S')に戻る。
+ *   at=床に置かれている位置、floor=その階(未指定は今の階)、holder=持っている味方
  */
-export type Objective = { kind: 'annihilate' } | { kind: 'treasure'; at: Pos | null; holder?: string };
+export type Objective = { kind: 'annihilate' } | { kind: 'treasure'; at: Pos | null; floor?: number; holder?: string };
+
+/** 今いない階の状態(戻ったときに再現する) */
+export interface FloorData {
+  map: FloorMap;
+  /** その階の敵 */
+  enemies: Unit[];
+  explored: number[];
+}
 
 export interface GameState {
   seed: number;
@@ -76,6 +92,14 @@ export interface GameState {
   /** パーティが一度でも見たマス(0/1, y*w+x) */
   explored: number[];
   status: GameStatus;
+  /** 今いる階(地下 n 階)。未指定は 1 */
+  floor?: number;
+  /** 今いない、訪れたことのある階の状態 */
+  floors?: Record<number, FloorData>;
+  /** 宝箱から得たゴールドの合計 */
+  gold?: number;
+  /** 訪れた最も深い階 */
+  deepest?: number;
 }
 
 // ---- 行動(予約リストの要素) ----
@@ -131,7 +155,14 @@ export type GameEvent =
   /** 眠っていた敵が目を覚ました */
   | { tick: number; type: 'awaken'; id: string }
   /** 宝を拾った(got=true)/気絶して落とした(got=false) */
-  | { tick: number; type: 'treasure'; id: string; got: boolean; at: Pos };
+  | { tick: number; type: 'treasure'; id: string; got: boolean; at: Pos }
+  /** 宝箱を開けた */
+  | { tick: number; type: 'chest'; id: string; gold: number; at: Pos }
+  /** 敵を倒してパーティ全員が経験値を得た */
+  | { tick: number; type: 'exp'; amount: number }
+  | { tick: number; type: 'levelup'; id: string; level: number }
+  /** 階段で別の階へ移った(id=階段に入った味方) */
+  | { tick: number; type: 'stairs'; id: string; from: number; to: number };
 
 export interface UnitSnapshot {
   id: string;

@@ -4,7 +4,7 @@ import type { GameState } from '../core/types';
 
 const SAVE_KEY = 'slate-gambit/save';
 /** 保存形式の版。GameState の形を互換性なく変えたら上げる(古い保存は読まずに捨てる) */
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
 
 interface SaveData {
   version: number;
@@ -62,6 +62,9 @@ function isGameState(s: unknown): s is GameState {
     g.map.tiles.length === g.map.h &&
     Array.isArray(g.units) &&
     Array.isArray(g.explored) &&
-    g.explored.length === g.map.w * g.map.h
+    g.explored.length === g.map.w * g.map.h &&
+    typeof g.floor === 'number' &&
+    !!g.floors &&
+    typeof g.floors === 'object'
   );
 }

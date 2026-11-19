@@ -136,6 +136,12 @@ export class Playback {
       } else if (e.type === 'treasure') {
         out.push({ kind: 'burst', at: e.at, radius: 0, color: '#ffd23a', alpha });
         out.push({ kind: 'text', at: e.at, text: e.got ? '宝!' : '落とした', color: '#ffd23a', rise: 0.3 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'chest') {
+        out.push({ kind: 'burst', at: e.at, radius: 0, color: '#ffd23a', alpha });
+        out.push({ kind: 'text', at: e.at, text: `+${e.gold}G`, color: '#ffd23a', rise: 0.3 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'levelup') {
+        out.push({ kind: 'burst', at: posOf(e.id), radius: 0, color: '#fff080', alpha });
+        out.push({ kind: 'text', at: posOf(e.id), text: 'Lv UP!', color: '#fff080', rise: 0.5 + k * 0.6, alpha: 1 });
       } else if (e.type === 'halt') {
         out.push({ kind: 'text', at: posOf(e.id), text: '!', color: '#ffd24d', rise: 0.5, alpha: 1 });
       }

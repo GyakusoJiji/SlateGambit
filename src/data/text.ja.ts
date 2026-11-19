@@ -5,6 +5,10 @@ export const T = {
   turn: (n: number) => `ターン ${n}`,
   /** 上部バー用の短い表示 */
   turnShort: (n: number) => `T${n}`,
+  floor: (n: number) => `B${n}F`,
+  floorLong: (n: number) => `地下 ${n} 階`,
+  gold: (n: number) => `${n.toLocaleString()} G`,
+  level: (n: number) => `Lv${n}`,
   ap: 'AP',
   hp: 'HP',
   mp: 'MP',
@@ -84,8 +88,9 @@ export const T = {
 
   result: {
     won: '勝利! 敵を全滅させた',
-    wonTreasure: '勝利! 宝を持ち帰った',
+    wonTreasure: '勝利! 秘宝を地上へ持ち帰った',
     lost: '全滅した…',
+    summary: (deepest: number, gold: string) => `最も深く潜った階: 地下 ${deepest} 階 · 手に入れたゴールド: ${gold}`,
   },
 
   log: {
@@ -106,9 +111,13 @@ export const T = {
     drop: (a: string, b: string) => `${a} が ${b} を降ろした`,
     wake: (a: string) => `${a} は担がれている間に意識を取り戻した`,
     spring: (a: string, revived: boolean) => (revived ? `${a} は泉の力で起き上がった` : `${a} は泉で全回復した`),
-    treasureGot: (a: string) => `${a} が宝を手に入れた! 入口の階段へ戻ろう`,
-    treasureDrop: (a: string) => `${a} が宝を落とした`,
+    treasureGot: (a: string) => `${a} が秘宝を手に入れた! 地下 1 階の入口へ戻ろう`,
+    treasureDrop: (a: string) => `${a} が秘宝を落とした`,
     awaken: (a: string) => `${a} が目を覚ました!`,
+    chest: (a: string, gold: number) => `${a} が宝箱を開けた(+${gold} G)`,
+    exp: (n: number) => `全員が経験値 ${n} を得た`,
+    levelup: (a: string, lv: number) => `${a} はレベル ${lv} に上がった!`,
+    stairs: (from: number, to: number) => (to > from ? `地下 ${to} 階へ降りた` : `地下 ${to} 階へ上った`),
   },
 
   difficulty: {
@@ -120,23 +129,23 @@ export const T = {
     easy: '敵が少なめ。まずはここから',
     normal: '敵が多く、オーガも出る',
     hard: '大部屋に敵が固まり、オーガが 2 体まで出る',
-    boss: 'どの難易度でも、最も奥の部屋にボスのドラゴンが待つ',
+    boss: 'どの難易度でも、地下 5 階の最も奥でボスのドラゴンが秘宝を守っている',
   } as Record<string, string>,
 
   objective: {
     annihilate: '敵を全滅させる',
-    treasure: '宝を見つけて入口の階段に持ち帰る',
+    treasure: '地下 5 階の秘宝を見つけ、地下 1 階の入口の階段まで持ち帰る',
   } as Record<string, string>,
   /** トップバー用の短い表示 */
   objectiveShort: {
     annihilate: '敵を全滅',
-    treasure: '宝探し',
-    treasureHeld: '宝を階段へ!',
+    treasure: '秘宝を探す',
+    treasureHeld: '秘宝を地上へ!',
   } as Record<string, string>,
 
   start: {
     title: '難易度を選んでください',
-    note: 'マップと目的(敵の全滅か宝探し)は毎回ランダムに決まります',
+    note: '地下 5 階まであるダンジョンは毎回ランダムに作られます。階段に誰か 1 人が入ると全員で別の階へ移ります。宝箱でゴールドを集め、敵を倒して経験値をためるとレベルが上がります',
   },
 
   toast: {
@@ -159,8 +168,10 @@ export const T = {
   },
 
   pointer: {
-    stairs: '階段',
-    treasure: '宝',
+    stairs: '上り階段',
+    entrance: '入口',
+    down: '下り階段',
+    treasure: '秘宝',
     party: '味方',
   },
 

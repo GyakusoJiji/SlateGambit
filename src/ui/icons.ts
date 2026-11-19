@@ -43,6 +43,26 @@ const ICONS: Record<string, Icon> = {
     palette: { Q: '#b0603a', K: '#ffd040', T: '#f4f0e0' },
     rows: ['.QQQQQQ.', 'QQKQQKQQ', 'QQQQQQQQ', 'QQTTTTQQ', 'QQQQQQQQ', 'QQQQQQQQ', 'QQQ..QQQ', 'QQ....QQ'],
   },
+  slime: {
+    palette: { B: '#4a9ef0', W: '#c8e8ff', K: DARK },
+    rows: ['........', '........', '...BB...', '..BWBB..', '.BKBBKB.', '.BBBBBB.', 'BBBBBBBB', '.BBBBBB.'],
+  },
+  bat: {
+    palette: { B: '#6a5070', R: '#ff3b3b' },
+    rows: ['........', 'B..BB..B', 'BB.BB.BB', 'BBBRRBBB', 'BBBBBBBB', '.B.BB.B.', '...BB...', '........'],
+  },
+  shaman: {
+    palette: { P: '#8040b0', G: '#6aa84f', R: '#ffd040', W: WOOD, K: '#ff7a20' },
+    rows: ['..PPP..K', '.PPPPP.W', '.GRGRG.W', '..GGGG.W', '.PPPPPPW', 'PPPPPP.W', '.PPPP..W', '..G..G..'],
+  },
+  darkelf: {
+    palette: { D: '#6a5a8a', H: '#e8e8f0', K: '#ff5050', B: WOOD, C: '#2a2a40' },
+    rows: ['..HHHH..', '.HDDDDH.', '.HKDDKH.', 'H.DDDD.B', '.CCCCCBB', 'CCCCCC.B', '.CCCC..B', '.C....C.'],
+  },
+  troll: {
+    palette: { T: '#4a7a6a', K: '#ffd040', W: '#f4f0e0', L: BOOT },
+    rows: ['..TTTT..', '.TKTTKT.', '.TTTTTT.', 'TTWTTWTT', 'TTTTTTTT', 'TTTTTTTT', '.TT..TT.', '.LL..LL.'],
+  },
   dragon: {
     palette: { D: '#c8302c', W: '#7a1a40', K: '#ffe040', T: '#f4f0e0' },
     rows: ['.T....T.', '.DDDDDD.', 'DDKDDKDD', 'WDDTTDDW', 'WWDDDDWW', 'W.DDDD.W', '..DDDD..', '.DD..DD.'],

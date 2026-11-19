@@ -164,6 +164,18 @@ body {
 .bar.none {
   visibility: hidden;
 }
+.bar.xp {
+  height: 3px;
+}
+.bar.xp i {
+  background: #e8c040;
+}
+.card .name .lv {
+  margin-right: 3px;
+  font-style: normal;
+  font-size: 10px;
+  color: #e8c040;
+}
 .pips {
   display: flex;
   gap: 2px;

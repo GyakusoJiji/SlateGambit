@@ -1,6 +1,7 @@
 // 敵の計画生成。各敵は自分の視界と記憶だけを使って判断する。
 // 判断の揺らぎは (seed, turn, id) から作る決定的な乱数で行うため、同じ状態からは同じ計画になる。
-import { SPELLS, unitDef } from '../data/units';
+import { SPELLS } from '../data/units';
+import { stats } from './stats';
 import { RULES, apLeft } from './actions';
 import { hasLos } from './los';
 import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, samePos, step } from './map';
@@ -34,7 +35,7 @@ export function summarizeIntent(actions: Action[], unit?: Unit): Intent {
 function planOne(state: GameState, e: Unit): Action[] {
   const rng = new Rng(hashSeed(state.seed, state.turn, e.id));
   const { map, units } = state;
-  const def = unitDef(e.defId);
+  const def = stats(e);
   const targets = units.filter((p) => p.side === 'party' && !p.down && unitSees(map, e, p));
   const plan: Action[] = [];
 
@@ -55,7 +56,7 @@ function planOne(state: GameState, e: Unit): Action[] {
   }
 
   // 狙う相手: 近さだけでなく、弱っている相手を優先する(距離 + HP 割合 × 4 が小さい順)
-  const score = (p: Unit) => manhattan(e, p) + 4 * (p.hp / unitDef(p.defId).maxHp);
+  const score = (p: Unit) => manhattan(e, p) + 4 * (p.hp / stats(p).maxHp);
   targets.sort((a, b) => score(a) - score(b) || a.id.localeCompare(b.id));
   const target = targets[0];
   const hpRatio = e.hp / def.maxHp;
@@ -82,10 +83,20 @@ function planOne(state: GameState, e: Unit): Action[] {
 
   // 炎のブレス(ドラゴン): 間隔が空いていれば、味方を最も多く巻き込むマスへ吐き、残りは接近攻撃
   if (def.spells.includes('breath') && state.turn - (e.ai?.breathTurn ?? -99) >= RULES.breathEvery) {
-    const tile = breathTile(state, e, targets);
+    const tile = areaTile(state, e, targets, 'breath');
     if (tile) {
       plan.push({ type: 'spell', spell: 'breath', tile });
       plan.push({ type: 'charge', target: target.id, ticks: apLeft(plan) });
+      return plan;
+    }
+  }
+
+  // 火球(呪術師): MP があれば、味方を最も多く巻き込むマスへ撃ち、残りは守りを固める
+  if (def.spells.includes('fireball') && e.mp >= SPELLS.fireball.mp) {
+    const tile = areaTile(state, e, targets, 'fireball');
+    if (tile) {
+      plan.push({ type: 'spell', spell: 'fireball', tile });
+      while (apLeft(plan) > 0) plan.push({ type: 'guard' });
       return plan;
     }
   }
@@ -141,11 +152,11 @@ function planOne(state: GameState, e: Unit): Action[] {
 }
 
 /**
- * ブレスを吐くマス: 見えている味方の今の位置を中心候補にし、巻き込む味方の数が最も多いマス。
- * 自分や仲間の敵を巻き込むマスは選ばない
+ * マス狙いの範囲魔法(炎のブレス・火球)を撃つマス: 見えている味方の今の位置を中心候補にし、
+ * 巻き込む味方の数が最も多いマス。自分や仲間の敵を巻き込むマスは選ばない
  */
-function breathTile(state: GameState, e: Unit, targets: Unit[]): Pos | null {
-  const sd = SPELLS.breath;
+function areaTile(state: GameState, e: Unit, targets: Unit[], spell: 'breath' | 'fireball'): Pos | null {
+  const sd = SPELLS[spell];
   const inArea = (c: Pos, p: Pos) => Math.max(Math.abs(c.x - p.x), Math.abs(c.y - p.y)) <= sd.radius;
   let best: Pos | null = null;
   let bestHits = 0;

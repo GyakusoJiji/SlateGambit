@@ -18,7 +18,7 @@ import { inReach, resolveTurn } from '../src/core/resolve';
 import { createTestGame } from '../src/core/scenario';
 import type { Action, GameEvent, GameState, Plans, Pos, Unit } from '../src/core/types';
 import { sideVisibleMask, visibleFoes } from '../src/core/vision';
-import { unitDef } from '../src/data/units';
+import { stats } from '../src/core/stats';
 import { planParty } from './partyBot';
 
 declare const process: { env: Record<string, string | undefined> };
@@ -178,12 +178,12 @@ function view(state: GameState): string {
   const enemyPlans = planEnemies(state);
   const info = [
     ...party.map((u) => {
-      const d = unitDef(u.defId);
+      const d = stats(u);
       return `${u.id} ${LETTER[u.defId]} (${u.x},${u.y}) HP${u.hp}/${d.maxHp}${d.maxMp ? ` MP${u.mp}` : ''}${u.down ? ' 気絶' : ''}${u.carrying ? ` 担:${u.carrying}` : ''}`;
     }),
     ...seenFoes
       .filter((u) => !u.down)
-      .map((u) => `${u.id} ${LETTER[u.defId]} (${u.x},${u.y}) HP${u.hp}/${unitDef(u.defId).maxHp} 予兆:${summarizeIntent(enemyPlans[u.id] ?? [])}`),
+      .map((u) => `${u.id} ${LETTER[u.defId]} (${u.x},${u.y}) HP${u.hp}/${stats(u).maxHp} 予兆:${summarizeIntent(enemyPlans[u.id] ?? [])}`),
   ];
   const remain = units.filter((u) => u.side === 'enemy' && !u.down).length;
   return `ターン ${state.turn} 状態:${state.status} 残り敵:${remain}\n${rows.join('\n')}\n${info.join('\n')}`;
