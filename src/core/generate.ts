@@ -35,10 +35,11 @@ const DRAGON_COST = 7;
  * group=1 部屋の点数の上限(深い階ほど 1 ずつ増える)、ogres=1 つの階のオーガの最大数。
  * 自動対戦の勝率(地下 5 階の秘宝を地上へ持ち帰るまで)が Easy 95% / Normal 75% / Hard 50% 前後になるよう調整する
  */
-export const DIFFICULTY: Record<Difficulty, { budget: number[]; group: number; ogres: number }> = {
-  easy: { budget: [8, 11, 14, 17, 14], group: 6, ogres: 0 },
-  normal: { budget: [16, 21, 26, 31, 26], group: 8, ogres: 1 },
-  hard: { budget: [26, 38, 52, 66, 59], group: 14, ogres: 3 },
+export const DIFFICULTY: Record<Difficulty, { budget: number[]; group: number; ogres: number; wander: number }> = {
+  // wander: 休憩の物音で敵が現れる確率の倍率(RULES.wanderChance に掛ける)
+  easy: { budget: [8, 11, 14, 17, 14], group: 6, ogres: 0, wander: 0.4 },
+  normal: { budget: [16, 21, 26, 31, 26], group: 11, ogres: 1, wander: 1 },
+  hard: { budget: [25, 36, 50, 63, 56], group: 14, ogres: 3, wander: 1 },
 };
 
 /** 途中の階から始めるとき(デバッグ・自動対戦用)のパーティのレベル */

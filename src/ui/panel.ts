@@ -6,7 +6,7 @@ import { SPELLS } from '../data/units';
 import { expProgress, stats } from '../core/stats';
 import { iconUrl } from './icons';
 
-export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'carry' | 'group';
+export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'smite' | 'trip' | 'power' | 'carry' | 'group';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -36,7 +36,9 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
     case 'move':
       return arrow[a.dir] + (a.stop ? '!' : '') + (a.slow ? '⁺' : '');
     case 'attack':
-      return `${T.act.attack}:${nameOf(a.target)}`;
+      return `${a.power ? SPELLS.power.name : T.act.attack}:${nameOf(a.target)}`;
+    case 'cover':
+      return SPELLS.cover.name;
     case 'charge':
       return `${T.act.charge}:${nameOf(a.target)}×${a.ticks}`;
     case 'carry':
@@ -77,12 +79,12 @@ export function planChips(actions: Action[], nameOf: (id: string) => string, inC
 }
 
 /** 職業の特技の枠の数(特技が少ない職業は空けておき、ほかのボタンの位置を揃える) */
-const SKILL_SLOTS = 2;
+const SKILL_SLOTS = 3;
 const GAP = '<span class="act-gap"></span>';
 
 /** キャラを選んでいないときの、全部グレーのボタン */
 export function idleButtons(): string {
-  return [...['move', 'attack', 'guard', 'wait', 'watch'].map((id) => actButton(id, { off: true })), GAP, GAP, actButton('carry', { off: true })].join('');
+  return [...['move', 'attack', 'guard', 'wait', 'watch'].map((id) => actButton(id, { off: true })), GAP, GAP, GAP, actButton('carry', { off: true })].join('');
 }
 
 export function actionButtons(u: Unit, actions: Action[], mode: Mode): string {
@@ -90,7 +92,8 @@ export function actionButtons(u: Unit, actions: Action[], mode: Mode): string {
   const ap = apLeft(actions);
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
-  const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= RULES.spellCost && u.mp >= SPELLS[s].mp;
+  const need = (s: SpellId) => (s === 'power' ? RULES.powerCost : s === 'cover' ? RULES.coverCost : RULES.spellCost);
+  const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= need(s) && u.mp >= SPELLS[s].mp;
   // ボタンはどのキャラでも同じ位置に並べ、使えないものはグレーアウトする
   // 特技の枠には、その職業の魔法だけを出す
   const skills = d.spells.map((s) => actButton(s, { on: mode === s, off: !spell(s) }));
@@ -115,6 +118,10 @@ const ICONS: Record<string, string> = {
   fireball: '🔥',
   heal: '💚',
   revive: '✨',
+  smite: '☀️',
+  trip: '🦵',
+  cover: '🧱',
+  power: '💥',
   carry: '🎒',
   drop: '⬇️',
   undo: '↩️',
@@ -132,7 +139,7 @@ const ICONS: Record<string, string> = {
  */
 export function actButton(id: string, opts: { on?: boolean; off?: boolean; cls?: string } = {}): string {
   const label = id in SPELLS ? SPELLS[id as SpellId].name : (T.act as Record<string, string>)[id];
-  const mp = id in SPELLS ? `<small>${SPELLS[id as SpellId].mp}</small>` : '';
+  const mp = id in SPELLS && SPELLS[id as SpellId].mp > 0 ? `<small>${SPELLS[id as SpellId].mp}</small>` : '';
   const cls = ['act', opts.on ? 'on' : '', opts.off ? 'off' : '', opts.cls ?? ''].filter(Boolean).join(' ');
   return `<button data-act="${id}" data-label="${label}" class="${cls}"${opts.off ? ' aria-disabled="true"' : ''}><span class="ic">${ICONS[id] ?? ''}</span>${label}${mp}</button>`;
 }
@@ -153,9 +160,18 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
   for (const e of events) {
     switch (e.type) {
       case 'damage': {
-        lines.push(T.log.attack(nameOf(e.by), nameOf(e.id), e.amount, e.guarded));
+        lines.push(T.log.attack(nameOf(e.by), nameOf(e.id), e.amount, e.guarded) + (e.flank ? T.log.flank : ''));
         break;
       }
+      case 'cover':
+        lines.push(T.log.cover(nameOf(e.id), nameOf(e.for)));
+        break;
+      case 'stun':
+        lines.push(T.log.stun(nameOf(e.id)));
+        break;
+      case 'wander':
+        lines.push(T.log.wander);
+        break;
       case 'heal':
         lines.push(T.log.heal(nameOf(e.id), e.amount));
         break;

@@ -159,8 +159,9 @@ export class Renderer {
     for (const m of view.marks) this.drawMark(m);
     for (const h of view.hints) if (h.area) this.drawDanger(h.area.at, h.area.radius);
 
-    // 気絶したユニットを先に、立っているユニットを後に描く
-    const sorted = [...view.units].sort((a, b) => Number(b.down) - Number(a.down));
+    // 倒れた敵 → 気絶した味方 → 立っているユニットの順に描く(味方が水たまりに隠れて担げなくならないように)
+    const rank = (u: DisplayUnit) => (!u.down ? 2 : u.side === 'enemy' ? 0 : 1);
+    const sorted = [...view.units].sort((a, b) => rank(a) - rank(b));
     for (const u of sorted) this.drawUnit(u);
 
     for (const h of view.hints) this.drawHint(h.at, h.intent);
@@ -289,19 +290,25 @@ export class Renderer {
       g.strokeRect(cx - z / 2 + 1, cy - z / 2 + 1, z - 2, z - 2);
     }
     g.save();
-    if (u.down) {
-      g.globalAlpha = 0.45;
-      g.translate(cx, cy);
-      g.rotate(Math.PI / 2);
-      g.translate(-cx, -cy);
+    // 倒れた敵は種類に関係なく泥の水たまりで表す(横倒しにせず、足元のリングも付けない)
+    const puddle = u.down && u.side === 'enemy';
+    if (puddle) {
+      g.globalAlpha = 0.85;
+    } else {
+      if (u.down) {
+        g.globalAlpha = 0.45;
+        g.translate(cx, cy);
+        g.rotate(Math.PI / 2);
+        g.translate(-cx, -cy);
+      }
+      // 足元の陣営リング
+      g.fillStyle = ring + '55';
+      g.beginPath();
+      g.ellipse(cx, cy + z * 0.32, z * 0.36, z * 0.12, 0, 0, Math.PI * 2);
+      g.fill();
     }
-    // 足元の陣営リング
-    g.fillStyle = ring + '55';
-    g.beginPath();
-    g.ellipse(cx, cy + z * 0.32, z * 0.36, z * 0.12, 0, 0, Math.PI * 2);
-    g.fill();
     const s = Math.floor(z * 0.8);
-    g.drawImage(iconCanvas(u.icon), Math.round(cx - s / 2), Math.round(cy - s / 2 - z * 0.04), s, s);
+    g.drawImage(iconCanvas(puddle ? 'puddle' : u.icon), Math.round(cx - s / 2), Math.round(cy - s / 2 - z * 0.04), s, s);
     g.restore();
 
     if (!u.down) {

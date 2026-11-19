@@ -24,10 +24,10 @@ export interface UnitDef {
 }
 
 export const CLASSES: Record<string, UnitDef> = {
-  warrior: { id: 'warrior', name: '戦士', icon: 'warrior', maxHp: 48, maxMp: 0, atk: 7, dmgVar: 3, def: 2, range: 1, sight: 7, spells: [], growth: { hp: 6, mp: 0, atk: 1 } },
-  thief: { id: 'thief', name: '盗賊', icon: 'thief', maxHp: 30, maxMp: 0, atk: 5, dmgVar: 3, def: 1, range: 6, sight: 8, spells: [], growth: { hp: 4, mp: 0, atk: 1 } },
+  warrior: { id: 'warrior', name: '戦士', icon: 'warrior', maxHp: 48, maxMp: 0, atk: 7, dmgVar: 3, def: 2, range: 1, sight: 7, spells: ['cover', 'power'], growth: { hp: 6, mp: 0, atk: 1 } },
+  thief: { id: 'thief', name: '盗賊', icon: 'thief', maxHp: 30, maxMp: 8, atk: 5, dmgVar: 3, def: 1, range: 6, sight: 8, spells: ['trip', 'power'], growth: { hp: 4, mp: 1, atk: 1 } },
   mage: { id: 'mage', name: '魔法使い', icon: 'mage', maxHp: 24, maxMp: 14, atk: 3, dmgVar: 2, def: 0, range: 6, sight: 7, spells: ['fireball'], growth: { hp: 3, mp: 2, atk: 0 } },
-  priest: { id: 'priest', name: '僧侶', icon: 'priest', maxHp: 33, maxMp: 14, atk: 4, dmgVar: 2, def: 1, range: 1, sight: 7, spells: ['heal', 'revive'], growth: { hp: 4, mp: 2, atk: 1 } },
+  priest: { id: 'priest', name: '僧侶', icon: 'priest', maxHp: 33, maxMp: 14, atk: 4, dmgVar: 2, def: 1, range: 1, sight: 7, spells: ['heal', 'revive', 'smite'], growth: { hp: 4, mp: 2, atk: 1 } },
 };
 
 export const MONSTERS: Record<string, UnitDef> = {
@@ -44,7 +44,7 @@ export const MONSTERS: Record<string, UnitDef> = {
   /** ボス。地下 5 階の最も奥の部屋で秘宝を守る。炎のブレスを吐く */
   dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 90, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 80 },
   /** Easy 用のボス(若いドラゴン)。HP だけ低い */
-  wyrm: { id: 'wyrm', name: '若いドラゴン', icon: 'dragon', maxHp: 70, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 60 },
+  wyrm: { id: 'wyrm', name: '若いドラゴン', icon: 'dragon', maxHp: 55, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 60 },
 };
 
 /**
@@ -61,18 +61,28 @@ export interface SpellDef {
   name: string;
   mp: number;
   range: number;
-  /** 'tile'=マス狙い, 'ally'=味方(生存), 'downed'=気絶した味方 */
-  target: 'tile' | 'ally' | 'downed';
+  /** 'tile'=マス狙い, 'ally'=味方(生存), 'downed'=気絶した味方, 'foe'=敵 1 体, 'self'=自分(対象を選ばない) */
+  target: 'tile' | 'ally' | 'downed' | 'foe' | 'self';
   power: number;
   powerVar: number;
   /** 範囲(チェビシェフ距離) */
   radius: number;
+  /** true なら、範囲内の敵だけに当たる(味方は巻き込まない) */
+  foesOnly?: boolean;
 }
 
 export const SPELLS: Record<SpellId, SpellDef> = {
   fireball: { id: 'fireball', name: '火球', mp: 3, range: 6, target: 'tile', power: 8, powerVar: 4, radius: 1 },
   heal: { id: 'heal', name: '回復', mp: 3, range: 4, target: 'ally', power: 10, powerVar: 3, radius: 0 },
   revive: { id: 'revive', name: '蘇生', mp: 6, range: 1, target: 'downed', power: 8, powerVar: 0, radius: 0 },
+  /** 僧侶の聖光。範囲内の敵だけに当たる小さな攻撃魔法 */
+  smite: { id: 'smite', name: '聖光', mp: 3, range: 5, target: 'tile', power: 5, powerVar: 3, radius: 1, foesOnly: true },
+  /** 盗賊の足払い。敵 1 体を数ティック動けなくする(ダメージは無い) */
+  trip: { id: 'trip', name: '足払い', mp: 2, range: 5, target: 'foe', power: 0, powerVar: 0, radius: 0 },
+  /** 戦士のかばう。MP は使わない。3 ティックの間防御し、隣の味方への単体攻撃を代わりに受ける */
+  cover: { id: 'cover', name: 'かばう', mp: 0, range: 0, target: 'self', power: 0, powerVar: 0, radius: 0 },
+  /** 強攻撃。通常攻撃より AP を多く使い、ダメージが増える(戦士・盗賊) */
+  power: { id: 'power', name: '強攻撃', mp: 0, range: 0, target: 'foe', power: 0, powerVar: 0, radius: 0 },
   /** ドラゴンの炎のブレス。火球と同じく 3×3 のマス狙い。2 ターンに 1 回(RULES.breathEvery) */
   breath: { id: 'breath', name: '炎のブレス', mp: 0, range: 4, target: 'tile', power: 10, powerVar: 4, radius: 1 },
 };

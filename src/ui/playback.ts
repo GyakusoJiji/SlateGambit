@@ -110,13 +110,19 @@ export class Playback {
         if (e.kind === 'ranged') out.push({ kind: 'line', from, to: e.end, color: '#ffe080', alpha });
         if (e.kind === 'melee') out.push({ kind: 'slash', at: e.end, alpha });
         if (e.kind === 'fireball') out.push({ kind: 'burst', at: e.end, radius: 1, color: '#ff7a20', alpha });
+        if (e.kind === 'smite') out.push({ kind: 'burst', at: e.end, radius: 1, color: '#fff0a0', alpha });
+        if (e.kind === 'trip') out.push({ kind: 'line', from, to: e.end, color: '#b0e0ff', alpha });
         if (e.kind === 'breath') {
           out.push({ kind: 'line', from, to: e.end, color: '#ff5020', alpha });
           out.push({ kind: 'burst', at: e.end, radius: 1, color: '#ff3a10', alpha });
         }
         if (e.kind === 'heal' || e.kind === 'revive') out.push({ kind: 'burst', at: e.end, radius: 0, color: '#60ff90', alpha });
       } else if (e.type === 'damage') {
-        out.push({ kind: 'text', at: posOf(e.id), text: `-${e.amount}`, color: e.guarded ? '#9fd0ff' : '#ff6060', rise: 0.3 + k * 0.5, alpha: 1 });
+        out.push({ kind: 'text', at: posOf(e.id), text: `-${e.amount}${e.flank ? '!' : ''}`, color: e.guarded ? '#9fd0ff' : '#ff6060', rise: 0.3 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'cover') {
+        out.push({ kind: 'text', at: posOf(e.id), text: 'かばう', color: '#9fd0ff', rise: 0.6 + k * 0.4, alpha: 1 });
+      } else if (e.type === 'stun') {
+        out.push({ kind: 'text', at: posOf(e.id), text: '足止め', color: '#b0e0ff', rise: 0.6 + k * 0.4, alpha: 1 });
       } else if (e.type === 'heal') {
         out.push({ kind: 'text', at: posOf(e.id), text: `+${e.amount}`, color: '#70ff90', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'fizzle') {

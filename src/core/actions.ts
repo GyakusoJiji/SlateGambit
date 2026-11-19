@@ -5,6 +5,22 @@ import { AP_PER_TURN, type Action, type Unit } from './types';
 export const RULES = {
   attackCost: 3,
   spellCost: 3,
+  /** 強攻撃の AP と、ダメージの倍率 */
+  powerCost: 5,
+  powerMult: 1.5,
+  /** かばうの AP(その間、防御もする) */
+  coverCost: 3,
+  /** 足払いで動けなくなるティック数 */
+  stunTicks: 2,
+  /** 挟み撃ち(対象の反対側に味方がいる近接攻撃)のダメージ倍率。1 で無効 */
+  flankMult: 1.25,
+  /** 狙った敵が先に倒れていたら、届く別の敵に狙いを移す */
+  retarget: true,
+  /** 休憩(HP・MP が減っている状態での)のたびに、遠くから敵が現れる確率。0 で無効 */
+  wanderChance: 0.15,
+  /** 現れる敵の点数(+階)と、パーティからの最低距離(マンハッタン) */
+  wanderBudget: 2,
+  wanderDistance: 14,
   /** 8 ティック全部休憩したときの回復量(HP は最大値に対する割合) */
   restHpRatio: 0.2,
   restMp: 2,
@@ -42,7 +58,9 @@ export function actionCost(a: Action): number {
     case 'drop':
       return 1;
     case 'attack':
-      return RULES.attackCost;
+      return a.power ? RULES.powerCost : RULES.attackCost;
+    case 'cover':
+      return RULES.coverCost;
     case 'spell':
       return RULES.spellCost;
     case 'overwatch':
@@ -104,6 +122,8 @@ export function canAppend(unit: Unit, actions: Action[], action: Action): string
     if (planMp(actions) + SPELLS[action.spell].mp > unit.mp) return 'MP が足りない';
   }
   if (action.type === 'overwatch' && def.range <= 1) return '遠隔攻撃を持たない';
+  if (action.type === 'cover' && !def.spells.includes('cover')) return 'かばうは使えない';
+  if (action.type === 'attack' && action.power && !def.spells.includes('power')) return '強攻撃は使えない';
   const carrying = carryingAfter(unit, actions);
   if (carrying && !WHILE_CARRYING.has(action.type)) return '担いでいる間はできない';
   if (!carrying && action.type === 'drop') return '誰も担いでいない';
@@ -119,6 +139,9 @@ export type Step =
   | { k: 'windup'; action: Action }
   | { k: 'strike'; action: Extract<Action, { type: 'attack' | 'spell' }> }
   | { k: 'guard' }
+  | { k: 'cover' }
+  /** 足払いで動けない */
+  | { k: 'stun' }
   | { k: 'wait' }
   | { k: 'watch'; mode: 'overwatch' | 'intercept' }
   | { k: 'charge'; target: string }
@@ -146,6 +169,9 @@ export function expandPlan(actions: Action[]): Step[] {
         break;
       case 'guard':
         steps.push({ k: 'guard' });
+        break;
+      case 'cover':
+        for (let i = 0; i < RULES.coverCost; i++) steps.push({ k: 'cover' });
         break;
       case 'wait':
         steps.push({ k: 'wait' });

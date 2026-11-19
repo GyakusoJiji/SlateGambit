@@ -690,9 +690,15 @@ export class Controller {
       case 'intercept':
         this.append(u, { type: act, ticks: apLeft(list) });
         break;
+      case 'cover':
+        this.append(u, { type: 'cover' });
+        break;
       case 'move':
       case 'attack':
       case 'fireball':
+      case 'smite':
+      case 'trip':
+      case 'power':
       case 'heal':
       case 'revive':
       case 'carry':
@@ -726,6 +732,9 @@ export class Controller {
         case 'carry':
           return !carrying;
         case 'fireball':
+        case 'smite':
+        case 'trip':
+        case 'power':
         case 'heal':
         case 'revive':
           return !carrying && (stats(u).spells as string[]).includes(m);
@@ -817,7 +826,13 @@ export class Controller {
       }
       else if (m === 'heal' && ally && !ally.down) ok = this.append(u, { type: 'spell', spell: 'heal', target: ally.id });
       else if (m === 'revive' && ally && ally.down) ok = this.append(u, { type: 'spell', spell: 'revive', target: ally.id });
-      else if (m === 'fireball' && st.explored[tile.y * st.map.w + tile.x]) ok = this.append(u, { type: 'spell', spell: 'fireball', tile });
+      else if ((m === 'fireball' || m === 'smite') && st.explored[tile.y * st.map.w + tile.x]) ok = this.append(u, { type: 'spell', spell: m, tile });
+      else if (m === 'trip' && foe) ok = this.append(u, { type: 'spell', spell: 'trip', target: foe.id });
+      else if (m === 'power' && foe) {
+        const end = simulate(st, u, this.plans[u.id]).end;
+        if (inReach(st.map, u, end, foe, st.units)) ok = this.append(u, { type: 'attack', target: foe.id, power: true });
+        else this.toast(T.err.powerReach);
+      }
       else this.toast(T.err.notTarget);
       // 予約できたら同じキャラは既定のモードに戻す(AP を使い切って次のキャラに移った場合はそのキャラの既定のまま)
       if (ok && this.selected === u.id) this.mode = this.defaultMode(u.id);
@@ -903,8 +918,8 @@ function planMarks(st: GameState, u: Unit, actions: Action[], color: string): Ma
   }
   const find = (id: string) => st.units.find((x) => x.id === id);
   for (const a of actions) {
-    if (a.type === 'attack') {
-      const t = find(a.target);
+    if (a.type === 'attack' || (a.type === 'spell' && a.spell === 'trip')) {
+      const t = find(a.target!);
       if (t) {
         marks.push({ kind: 'target', at: t, color: '#ff5050' });
         marks.push({ kind: 'link', from: end, to: t, color: '#ff505099' });

@@ -22,7 +22,8 @@ export interface FloorMap {
   tiles: string[];
 }
 
-export type SpellId = 'fireball' | 'heal' | 'revive' | 'breath';
+/** 魔法と特技。cover・power は魔法ではないが、特技のボタンとして同じ枠に並べる */
+export type SpellId = 'fireball' | 'heal' | 'revive' | 'breath' | 'smite' | 'trip' | 'cover' | 'power';
 
 export interface AiMemory {
   mode: 'idle' | 'patrol';
@@ -107,7 +108,10 @@ export interface GameState {
 export type Action =
   /** slow: 担いでいる間の移動(1 マス 2 AP) */
   | { type: 'move'; dir: Dir; stop?: boolean; slow?: boolean }
-  | { type: 'attack'; target: string }
+  /** power: 強攻撃(AP を多く使い、ダメージが増える) */
+  | { type: 'attack'; target: string; power?: boolean }
+  /** かばう: 3 ティックの間防御し、隣の味方への単体攻撃を代わりに受ける */
+  | { type: 'cover' }
   /** 接近攻撃: 届かなければ近づき、届けば構えて攻撃する。残り AP をすべて使い、続けて攻撃する */
   | { type: 'charge'; target: string; ticks: number }
   | { type: 'carry'; target: string }
@@ -122,7 +126,7 @@ export type Plans = Record<string, Action[]>;
 
 // ---- 解決結果 ----
 
-export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | 'revive';
+export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | 'revive' | 'smite' | 'trip';
 
 export type GameEvent =
   | { tick: number; type: 'move'; id: string; from: Pos; to: Pos }
@@ -142,7 +146,13 @@ export type GameEvent =
       reaction?: boolean;
     }
   | { tick: number; type: 'fizzle'; id: string; reason: string }
-  | { tick: number; type: 'damage'; id: string; amount: number; by: string; guarded: boolean }
+  | { tick: number; type: 'damage'; id: string; amount: number; by: string; guarded: boolean; flank?: boolean }
+  /** id が、攻撃されそうだった for の代わりに攻撃を受けた */
+  | { tick: number; type: 'cover'; id: string; for: string }
+  /** 足払いで、id が数ティック動けなくなった */
+  | { tick: number; type: 'stun'; id: string; ticks: number }
+  /** 休憩の物音で、遠くから敵が現れた(位置は教えない) */
+  | { tick: number; type: 'wander'; count: number }
   | { tick: number; type: 'heal'; id: string; amount: number }
   | { tick: number; type: 'down'; id: string }
   | { tick: number; type: 'revive'; id: string }

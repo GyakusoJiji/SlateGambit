@@ -7,7 +7,6 @@
 //                 … ある階の敵の点数の合計を差し替えて比べる(難易度.階=点数,点数,…)
 //   VARIANTS=descend … ボットが下り階段へ向かう探索率を変えて比べる
 import { it } from 'vitest';
-import { RULES } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
 import { DIFFICULTY, FLOORS, generateGame } from '../src/core/generate';
@@ -16,6 +15,7 @@ import type { Difficulty, GameEvent, GameState } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
 import { stats } from '../src/core/stats';
+import { RULES } from '../src/core/actions';
 import { BOT, planParty } from './partyBot';
 
 declare const process: { env: Record<string, string | undefined> };
@@ -77,7 +77,47 @@ const BASE: Variant[] = [
   { name: 'Hard', setup: () => {}, game: gen('hard') },
 ];
 
-const VARIANTS: Variant[] = (process.env.VARIANTS === 'budget'
+/** 新ルールを 1 つずつ足して比べる(DIFF で難易度を選ぶ。既定 normal) */
+function featureVariants(d: Difficulty): Variant[] {
+  const none = { retarget: false, flankMult: 1, wanderChance: 0 };
+  const off = { cover: false, power: false, trip: false, smite: false };
+  const on = { cover: true, power: true, trip: true, smite: true };
+  const mk = (name: string, rules: Partial<typeof RULES>, use: Partial<typeof BOT.use>): Variant => {
+    let savedRules: typeof RULES;
+    let savedUse: typeof BOT.use;
+    return {
+      name: `${cap(d)} ${name}`,
+      setup: () => {
+        savedRules = { ...RULES };
+        savedUse = { ...BOT.use };
+        Object.assign(RULES, none, rules);
+        Object.assign(BOT.use, off, use);
+      },
+      game: gen(d),
+      teardown: () => {
+        Object.assign(RULES, savedRules);
+        Object.assign(BOT.use, savedUse);
+      },
+    };
+  };
+  const f = { retarget: true };
+  const ff = { retarget: true, flankMult: 1.25 };
+  return [
+    mk('0 追加なし', {}, {}),
+    mk('1 狙い移し', f, {}),
+    mk('2 +挟み撃ち', ff, {}),
+    mk('3 +特技(全部)', ff, on),
+    mk('3a  特技:かばう', ff, { cover: true }),
+    mk('3b  特技:強攻撃', ff, { power: true }),
+    mk('3c  特技:足払い', ff, { trip: true }),
+    mk('3d  特技:聖光', ff, { smite: true }),
+    mk('5 +休憩の物音', { ...ff, wanderChance: 0.07 }, on),
+  ];
+}
+
+const VARIANTS: Variant[] = (process.env.VARIANTS === 'feat'
+  ? featureVariants((process.env.DIFF ?? 'normal') as Difficulty)
+  : process.env.VARIANTS === 'budget'
   ? budgetVariants(process.env.BUDGET ?? '')
   : process.env.VARIANTS === 'descend'
   ? [0.4, 0.7, 1].map((k) => {

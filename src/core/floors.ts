@@ -1,7 +1,10 @@
 // 階の移動。誰か 1 人が階段に入ると、パーティ全員(気絶者を含む)がその階へ移る。
 // 今の階の地形・敵・探索済み範囲は state.floors に退避し、戻ってきたときにそのまま再現する。
-import { chestGold, FLOORS, generateFloor, placeParty } from './generate';
-import { tileAt } from './map';
+import { MONSTERS } from '../data/units';
+import { RULES } from './actions';
+import { chestGold, DIFFICULTY, FLOORS, generateFloor, MONSTER_GEN, placeParty } from './generate';
+import { chebyshev, manhattan, tileAt } from './map';
+import type { Rng } from './rng';
 import { TICKS_PER_TURN, type GameEvent, type GameState, type Pos } from './types';
 import { updateExplored } from './vision';
 
@@ -86,4 +89,63 @@ export function openChests(state: GameState, events: GameEvent[], tick: number):
     state.gold = (state.gold ?? 0) + gold;
     events.push({ tick, type: 'chest', id: u.id, gold, at });
   }
+}
+
+/**
+ * 休憩の物音: 戦闘中でなく、休憩で実際に回復したターンに、一定の確率で遠くから敵が現れる。
+ * 現れた敵は、すでにパーティの居場所へ向かっている(警戒状態)。休憩するほど危険が近づく。
+ * 確率は、その階の休憩に使った割合(休憩のティック数 ÷ 全ティック)に比例する
+ */
+export function applyWander(state: GameState, rng: Rng, restShare: number, events: GameEvent[]): void {
+  if (RULES.wanderChance <= 0 || restShare <= 0) return;
+  if (!events.some((e) => e.type === 'rest' && (e.hp > 0 || e.mp > 0))) return;
+  const k = DIFFICULTY[state.difficulty ?? 'normal'].wander;
+  if (rng.next() >= RULES.wanderChance * k * restShare) return;
+  const floor = currentFloor(state);
+  const party = state.units.filter((u) => u.side === 'party' && !u.down);
+  if (party.length === 0) return;
+  const { map } = state;
+  const taken = new Set(state.units.filter((u) => !u.down).map((u) => `${u.x},${u.y}`));
+  const far: Pos[] = [];
+  for (let y = 0; y < map.h; y++) {
+    for (let x = 0; x < map.w; x++) {
+      if (tileAt(map, x, y) !== '.' || taken.has(`${x},${y}`)) continue;
+      if (party.every((p) => manhattan(p, { x, y }) >= RULES.wanderDistance)) far.push({ x, y });
+    }
+  }
+  if (far.length === 0) return;
+  const kinds = Object.keys(MONSTER_GEN).filter((t) => floor >= MONSTER_GEN[t].from && floor <= (MONSTER_GEN[t].to ?? 99) && t !== 'ogre');
+  let budget = RULES.wanderBudget + floor;
+  const origin = far[rng.int(0, far.length - 1)];
+  const target = party.sort((a, b) => manhattan(a, origin) - manhattan(b, origin))[0];
+  let count = 0;
+  while (budget >= 1) {
+    const opts = kinds.filter((t) => MONSTER_GEN[t].cost <= budget);
+    if (opts.length === 0) break;
+    const weights = opts.map((t) => MONSTER_GEN[t].weight);
+    let x = rng.next() * weights.reduce((a, b) => a + b, 0);
+    let t = opts[opts.length - 1];
+    for (let i = 0; i < opts.length; i++) if ((x -= weights[i]) < 0) { t = opts[i]; break; }
+    // 最初の位置の近く(2 マス以内)の空いた床に置く
+    const near = far.filter((p) => !taken.has(`${p.x},${p.y}`) && chebyshev(p, origin) <= 2);
+    if (near.length === 0) break;
+    const p = near[rng.int(0, near.length - 1)];
+    const m = MONSTERS[t];
+    count++;
+    state.units.push({
+      id: `${floor > 1 ? floor : ''}w${state.turn}_${count}`,
+      side: 'enemy',
+      defId: t,
+      name: m.name,
+      x: p.x,
+      y: p.y,
+      hp: m.maxHp,
+      mp: m.maxMp,
+      down: false,
+      ai: { mode: 'idle', alerted: true, lastSeen: { x: target.x, y: target.y } },
+    });
+    taken.add(`${p.x},${p.y}`);
+    budget -= MONSTER_GEN[t].cost;
+  }
+  if (count > 0) events.push({ tick: TICKS_PER_TURN, type: 'wander', count });
 }

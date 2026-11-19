@@ -63,6 +63,11 @@ const ICONS: Record<string, Icon> = {
     palette: { T: '#4a7a6a', K: '#ffd040', W: '#f4f0e0', L: BOOT },
     rows: ['..TTTT..', '.TKTTKT.', '.TTTTTT.', 'TTWTTWTT', 'TTTTTTTT', 'TTTTTTTT', '.TT..TT.', '.LL..LL.'],
   },
+  // 倒した敵の跡(どの敵も共通)。高さ 3 ドットの平たい赤茶色の泥の水たまりで、水面の照り返しが少し見える
+  puddle: {
+    palette: { M: '#7a3e2c', D: '#52261a', H: '#b8887a' },
+    rows: ['........', '........', '........', '........', '........', '..MMMM..', 'MMHHMMMM', '.MMMDMM.'],
+  },
   dragon: {
     palette: { D: '#c8302c', W: '#7a1a40', K: '#ffe040', T: '#f4f0e0' },
     rows: ['.T....T.', '.DDDDDD.', 'DDKDDKDD', 'WDDTTDDW', 'WWDDDDWW', 'W.DDDD.W', '..DDDD..', '.DD..DD.'],

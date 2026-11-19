@@ -12,7 +12,11 @@ import { currentFloor, treasureHere } from '../src/core/floors';
 import { FLOORS } from '../src/core/generate';
 
 /** 下り階段を見つけていれば、床のこの割合を探索した時点で降りる(宝箱・経験値と、時間の兼ね合い) */
-export const BOT = { descendAt: 0.7 };
+export const BOT = {
+  descendAt: 0.7,
+  /** 特技を使うか(比較用に個別に切れる) */
+  use: { cover: true, power: true, trip: true, smite: true },
+};
 
 const ORDER = ['warrior', 'thief', 'priest', 'mage'];
 
@@ -127,12 +131,25 @@ function melee(ctx: Ctx): void {
   const f = nearest(ctx.pos, ctx.foes);
   if (!f) return fill(ctx, { type: 'guard' });
   const map = ctx.state.map;
-  if (!adjacent(map, ctx.pos, f)) {
+  const canSkill = ctx.u.defId === 'warrior';
+  // かばう: 隣に傷んだ仲間がいて、その仲間の近くに敵がいるなら、まず庇う
+  if (BOT.use.cover && canSkill) {
+    const friend = ctx.state.units.find(
+      (o) => o.side === 'party' && !o.down && o !== ctx.u && adjacent(map, ctx.pos, o) && o.hp / stats(o).maxHp < 0.7 && ctx.foes.some((e) => chebyshev(e, o) <= 2),
+    );
+    if (friend) ctx.plan.push({ type: 'cover' });
+  }
+  if (!adjacent(map, ctx.pos, f) && !ctx.plan.some((a) => a.type === 'cover')) {
     const path = pathAdjacent(map, ctx.pos, f, occupied(ctx)) ?? [];
     moveAlong(ctx, path, RULES.attackCost);
   }
-  if (adjacent(map, ctx.pos, f)) fill(ctx, { type: 'attack', target: f.id });
-  else if (chebyshev(ctx.pos, f) <= 3) ctx.plan.push({ type: 'intercept', ticks: apLeft(ctx.plan) });
+  if (adjacent(map, ctx.pos, f)) {
+    // 敵の体力が多いなら、強攻撃(5AP)+通常攻撃で押し切る
+    if (BOT.use.power && canSkill && apLeft(ctx.plan) >= RULES.powerCost && f.hp > stats(ctx.u).atk * 2) {
+      ctx.plan.push({ type: 'attack', target: f.id, power: true });
+    }
+    fill(ctx, { type: 'attack', target: f.id });
+  } else if (chebyshev(ctx.pos, f) <= 3 && apLeft(ctx.plan) >= 1) ctx.plan.push({ type: 'intercept', ticks: apLeft(ctx.plan) });
   fill(ctx, { type: 'guard' });
 }
 
@@ -146,6 +163,16 @@ function clearShot(state: GameState, from: Pos, f: Unit, self: Unit, reserved?: 
 
 function archer(ctx: Ctx): void {
   const { state, u } = ctx;
+  // 足払い: 仲間に近づいている敵を 1 体止める(止めている間に仲間が攻撃できる)
+  if (BOT.use.trip && u.defId === 'thief' && u.mp >= SPELLS.trip.mp && ctx.foes.length >= 2) {
+    const allies = state.units.filter((o) => o.side === 'party' && !o.down);
+    const reach = (f: Unit) => dist2(ctx.pos, f) <= SPELLS.trip.range ** 2 && hasLos(state.map, ctx.pos, f);
+    const t = ctx.foes
+      .filter(reach)
+      .filter((f) => allies.some((o) => chebyshev(o, f) <= 3))
+      .sort((a, b) => stats(b).maxHp - stats(a).maxHp)[0];
+    if (t) ctx.plan.push({ type: 'spell', spell: 'trip', target: t.id });
+  }
   const shootable = ctx.foes.filter((f) => clearShot(state, ctx.pos, f, u, ctx.reserved));
   if (shootable.length === 0) {
     // 射線の通るマスへ向かう(撃つ分の AP は残す)
@@ -215,6 +242,16 @@ function priest(ctx: Ctx): void {
     .filter((o) => dist2(ctx.pos, o) <= SPELLS.heal.range ** 2 && hasLos(state.map, ctx.pos, o))
     .sort((a, b) => a.hp / stats(a).maxHp - b.hp / stats(b).maxHp);
   if (hurt.length > 0 && u.mp >= SPELLS.heal.mp) ctx.plan.push({ type: 'spell', spell: 'heal', target: hurt[0].id });
+  else if (BOT.use.smite && u.defId === 'priest' && u.mp >= SPELLS.smite.mp + SPELLS.heal.mp && ctx.foes.length > 0) {
+    // 聖光: 敵が 2 体以上固まっている所へ(MP に余裕があれば 1 体でも)。回復の分の MP は残す
+    const sm = SPELLS.smite;
+    const near = (t: Pos, p: Pos) => chebyshev(t, p) <= sm.radius;
+    const best = ctx.foes
+      .filter((f) => dist2(ctx.pos, f) <= sm.range ** 2 && hasLos(state.map, ctx.pos, f))
+      .map((f) => ({ f, n: ctx.foes.filter((o) => near(f, o)).length }))
+      .sort((a, b) => b.n - a.n)[0];
+    if (best && (best.n >= 2 || u.mp >= 10)) ctx.plan.push({ type: 'spell', spell: 'smite', tile: { x: best.f.x, y: best.f.y } });
+  }
   // 立っている仲間がいなければ、自分で戦うしかない
   if (ctx.plan.length === 0 && allies.every((o) => o.down)) return melee(ctx);
   retreatOrGuard(ctx);

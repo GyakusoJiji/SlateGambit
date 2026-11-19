@@ -1,6 +1,6 @@
 // 同時解決エンジン。全ユニットの予約を 1 ティックずつ同時に処理する。
 import { SPELLS, unitDef } from '../data/units';
-import { applyStairs, currentFloor, openChests, treasureHere } from './floors';
+import { applyStairs, applyWander, currentFloor, openChests, treasureHere } from './floors';
 import { gainExp, spellBonus, stats } from './stats';
 import { RULES, expandPlan, restTicks, type Step } from './actions';
 import { hasLos, linePoints } from './los';
@@ -49,6 +49,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   };
   const events: GameEvent[] = [];
   const guard = new Set<string>();
+  const cover = new Set<string>();
   const watching = new Set<string>();
   const frames: UnitSnapshot[][] = [snapshot(units, guard, watching)];
   /** このターンに攻撃してきた相手(AI の警戒用) */
@@ -62,6 +63,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   for (let tick = 1; tick <= TICKS_PER_TURN; tick++) {
     const ti = tick - 1;
     guard.clear();
+    cover.clear();
     watching.clear();
 
     // ① 防御・構えの更新(接近攻撃は、届くなら構え/攻撃、届かなければ移動に読み替える)
@@ -71,7 +73,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       let s = steps.get(u.id)![ti];
       if (s.k === 'charge') s = chargeStep(map, u, byId.get(s.target), s, chargeWind, units);
       current.set(u.id, s);
-      if (s.k === 'guard') guard.add(u.id);
+      if (s.k === 'guard' || s.k === 'cover') guard.add(u.id);
+      if (s.k === 'cover') cover.add(u.id);
       if (s.k === 'watch') watching.add(u.id);
     }
 
@@ -189,8 +192,26 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     }
     const hpDelta = new Map<string, number>();
     const revived = new Set<string>();
-    const ctx: StrikeCtx = { tick, turn: state.turn, map, units, byId, rng, guard, events, hpDelta, revived, attackedBy };
+    const stuns: string[] = [];
+    const ctx: StrikeCtx = { tick, turn: state.turn, map, units, byId, rng, guard, cover, events, hpDelta, revived, attackedBy, stuns };
     for (const st of strikes) performStrike(ctx, st);
+    // 足払い: 次のティックから数ティック、予約していた行動が消える(構えや移動も中断される)
+    for (const id of stuns) {
+      const list = steps.get(id)!;
+      for (let i = tick; i < Math.min(list.length, tick + RULES.stunTicks); i++) {
+        const cur = list[i];
+        list[i] = { k: 'stun' };
+        // 構えの途中で止められた攻撃・魔法は、残りの構えと最後の一撃ごと取り消す
+        if (cur.k === 'windup') {
+          for (let j = i + 1; j < list.length; j++) {
+            const nx = list[j];
+            if ((nx.k !== 'windup' && nx.k !== 'strike') || nx.action !== cur.action) break;
+            list[j] = { k: 'stun' };
+            if (nx.k === 'strike') break;
+          }
+        }
+      }
+    }
 
     for (const [id, d] of hpDelta) {
       const u = byId.get(id)!;
@@ -227,6 +248,12 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   }
 
   applyRest(state, plans, seenAtStart.party.size > 0, events, frames);
+  {
+    const stand = state.units.filter((u) => u.side === 'party' && !u.down);
+    const share = stand.reduce((t, u) => t + restTicks(plans[u.id]) / TICKS_PER_TURN, 0) / Math.max(1, stand.length);
+    const inCombat = seenAtStart.party.size > 0 || visibleFoes(state.map, state.units, 'party').size > 0;
+    if (!inCombat) applyWander(state, rng, share, events);
+  }
   applySpring(state, events, frames);
   applyWakeUp(state, rng, events, frames);
   applyExp(state, foesAtStart, events, frames);
@@ -529,24 +556,45 @@ interface StrikeCtx {
   byId: Map<string, Unit>;
   rng: Rng;
   guard: Set<string>;
+  /** このティックにかばっている者 */
+  cover: Set<string>;
   events: GameEvent[];
   hpDelta: Map<string, number>;
   revived: Set<string>;
   attackedBy: Map<string, string>;
+  /** このティックに足払いを受けた者 */
+  stuns: string[];
 }
 
-function rollDamage(ctx: StrikeCtx, base: number, variance: number, target: Unit): { amount: number; guarded: boolean } {
+function rollDamage(ctx: StrikeCtx, base: number, variance: number, target: Unit, mult = 1): { amount: number; guarded: boolean } {
   const def = stats(target).def;
-  let amount = Math.max(1, base + ctx.rng.int(0, variance) - def);
+  let amount = Math.max(1, Math.round((base + ctx.rng.int(0, variance)) * mult) - def);
   const guarded = ctx.guard.has(target.id);
   if (guarded) amount = Math.ceil(amount / 2);
   return { amount, guarded };
 }
 
-function dealDamage(ctx: StrikeCtx, attacker: Unit, target: Unit, base: number, variance: number): void {
-  const { amount, guarded } = rollDamage(ctx, base, variance, target);
+interface DamageOpts {
+  /** ダメージの倍率(強攻撃) */
+  mult?: number;
+  /** 近接攻撃。かばいで対象が替わった後の相手で、挟み撃ちを判定する */
+  melee?: boolean;
+  /** 単体攻撃なら、隣でかばっている味方が代わりに受ける */
+  single?: boolean;
+}
+
+function dealDamage(ctx: StrikeCtx, attacker: Unit, target: Unit, base: number, variance: number, opts: DamageOpts = {}): void {
+  if (opts.single) {
+    const c = ctx.units.find((o) => o !== target && !o.down && o.side === target.side && ctx.cover.has(o.id) && adjacent(ctx.map, o, target));
+    if (c) {
+      ctx.events.push({ tick: ctx.tick, type: 'cover', id: c.id, for: target.id });
+      target = c;
+    }
+  }
+  const flank = !!opts.melee && RULES.flankMult !== 1 && flanked(ctx.map, ctx.units, attacker, target);
+  const { amount, guarded } = rollDamage(ctx, base, variance, target, (opts.mult ?? 1) * (flank ? RULES.flankMult : 1));
   ctx.hpDelta.set(target.id, (ctx.hpDelta.get(target.id) ?? 0) - amount);
-  ctx.events.push({ tick: ctx.tick, type: 'damage', id: target.id, amount, by: attacker.id, guarded });
+  ctx.events.push({ tick: ctx.tick, type: 'damage', id: target.id, amount, by: attacker.id, guarded, ...(flank ? { flank: true } : {}) });
   ctx.attackedBy.set(target.id, attacker.id);
 }
 
@@ -559,12 +607,15 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   };
 
   if (action.type === 'attack') {
-    const target = byId.get(action.target);
+    let target = byId.get(action.target);
+    // 狙った敵が先に倒れていたら、届く別の敵に狙いを移す(反応の攻撃は除く)
+    if ((!target || target.down) && RULES.retarget && !reaction) target = nextTarget(ctx, u, def.range);
     if (!target || target.down) return fizzle('対象がいない');
+    const power = action.power ? RULES.powerMult : 1;
     if (def.range <= 1) {
       if (!adjacent(map, u, target)) return fizzle('届かない');
       events.push({ tick, type: 'strike', id: u.id, kind: 'melee', target: target.id, hitId: target.id, end: pos(target), reaction });
-      dealDamage(ctx, u, target, def.atk, def.dmgVar);
+      dealDamage(ctx, u, target, def.atk, def.dmgVar, { mult: power, single: true, melee: true });
       return;
     }
     if (dist2(u, target) > def.range * def.range || !hasLos(map, u, target)) return fizzle('射線が通らない');
@@ -581,7 +632,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     }
     if (RULES.holdFireOnAlly && hit && hit !== target && hit.side === u.side) return fizzle('味方が射線上にいる');
     events.push({ tick, type: 'strike', id: u.id, kind: 'ranged', target: target.id, hitId: hit?.id, end, reaction });
-    if (hit) dealDamage(ctx, u, hit, def.atk, def.dmgVar);
+    if (hit) dealDamage(ctx, u, hit, def.atk, def.dmgVar, { mult: power, single: true });
     return;
   }
 
@@ -594,15 +645,26 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     if (dist2(u, tile) > sd.range * sd.range || !hasLos(map, u, tile)) return fizzle('射線が通らない');
     const breath = action.spell === 'breath';
     if (breath && u.ai) u.ai.breathTurn = ctx.turn;
-    events.push({ tick, type: 'strike', id: u.id, kind: breath ? 'breath' : 'fireball', tile, end: tile, reaction });
+    const kind = breath ? 'breath' : action.spell === 'smite' ? 'smite' : 'fireball';
+    events.push({ tick, type: 'strike', id: u.id, kind, tile, end: tile, reaction });
     for (const o of units) {
-      if (o.down) continue;
+      if (o.down || (sd.foesOnly && o.side === u.side)) continue;
       if (Math.max(Math.abs(o.x - tile.x), Math.abs(o.y - tile.y)) <= sd.radius) dealDamage(ctx, u, o, sd.power + spellBonus(u), sd.powerVar);
     }
     return;
   }
   const target = action.target ? byId.get(action.target) : undefined;
   if (!target) return fizzle('対象がいない');
+  if (sd.target === 'foe') {
+    // 足払い: 敵 1 体を数ティック動けなくする
+    if (target.down || target.side === u.side) return fizzle('対象がいない');
+    if (dist2(u, target) > sd.range * sd.range || !hasLos(map, u, target)) return fizzle('射線が通らない');
+    events.push({ tick, type: 'strike', id: u.id, kind: 'trip', target: target.id, hitId: target.id, end: pos(target), reaction });
+    events.push({ tick, type: 'stun', id: target.id, ticks: RULES.stunTicks });
+    ctx.stuns.push(target.id);
+    ctx.attackedBy.set(target.id, u.id);
+    return;
+  }
   if (sd.target === 'ally') {
     if (target.down) return fizzle('対象が倒れている');
     if (dist2(u, target) > sd.range * sd.range || !hasLos(map, u, target)) return fizzle('届かない');
@@ -617,6 +679,25 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   if (!nearOrSame(map, u, target)) return fizzle('届かない');
   events.push({ tick, type: 'strike', id: u.id, kind: 'revive', target: target.id, hitId: target.id, end: pos(target), reaction });
   ctx.revived.add(target.id);
+}
+
+/** 狙いが倒れたときに移る先: 届く敵のうち最も近い者 */
+function nextTarget(ctx: StrikeCtx, u: Unit, range: number): Unit | undefined {
+  const reach = (f: Unit) => (range <= 1 ? adjacent(ctx.map, u, f) : dist2(u, f) <= range * range && hasLos(ctx.map, u, f));
+  return ctx.units
+    .filter((f) => f.side !== u.side && !f.down && reach(f))
+    .sort((a, b) => dist2(u, a) - dist2(u, b) || a.id.localeCompare(b.id))[0];
+}
+
+/** 挟み撃ち: 対象を挟んで反対側(正面・斜め前)に、攻撃者の味方がいる */
+function flanked(map: GameState['map'], units: Unit[], a: Unit, t: Unit): boolean {
+  return units.some((o) => {
+    // 味方も対象に攻撃が届く位置(壁の角越しでない隣接)にいること
+    if (o === a || o.down || o.side !== a.side || !adjacent(map, o, t)) return false;
+    const dx = o.x - t.x;
+    const dy = o.y - t.y;
+    return Math.max(Math.abs(dx), Math.abs(dy)) === 1 && dx * (a.x - t.x) + dy * (a.y - t.y) < 0;
+  });
 }
 
 function pos(p: Pos): Pos {
