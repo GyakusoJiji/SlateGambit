@@ -25,6 +25,7 @@ export const MONSTER_GEN: Record<string, { cost: number; from: number; to?: numb
   shaman: { cost: 3, from: 2, weight: 2 },
   orc: { cost: 4, from: 2, weight: 2 },
   darkelf: { cost: 4, from: 3, weight: 2 },
+  warlock: { cost: 5, from: 3, weight: 1 },
   troll: { cost: 5, from: 4, weight: 1.5 },
   ogre: { cost: 7, from: 3, weight: 1.5 },
 };
@@ -310,7 +311,7 @@ function placeEnemies(
   const units: Unit[] = [];
   const counts: Record<string, number> = {};
   const PREFIX: Record<string, string> = {
-    slime: 's', bat: 'v', goblin: 'g', archer: 'a', shaman: 'm', orc: 'o', darkelf: 'e', troll: 't', ogre: 'b', dragon: 'd', wyrm: 'd',
+    slime: 's', bat: 'v', goblin: 'g', archer: 'a', shaman: 'm', orc: 'o', darkelf: 'e', troll: 't', ogre: 'b', dragon: 'd', wyrm: 'd', warlock: 'k',
   };
   const spawn = (defId: string, p: Pos, ai: AiMemory = { mode: 'idle' }) => {
     const m = MONSTERS[defId];

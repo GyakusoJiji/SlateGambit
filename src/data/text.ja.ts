@@ -127,6 +127,7 @@ export const T = {
     flank: '(挟み撃ち)',
     cover: (a: string, b: string) => `${a} が ${b} をかばった`,
     stun: (a: string) => `${a} は足を払われて動けない`,
+    interrupt: (a: string, spell?: string) => `${a} の${spell ? `${spell}の詠唱` : '構え'}が止まった!`,
     wander: '遠くから物音が近づいてくる…',
     chest: (a: string, gold: number) => `${a} が宝箱を開けた(+${gold} G)`,
     exp: (n: number) => `全員が経験値 ${n} を得た`,
@@ -147,7 +148,9 @@ export const T = {
       heal: '回復',
       revive: '蘇生',
       trip: '足払い',
+      hellfire: '業火',
     } as Record<string, string>,
+    interrupted: (spell?: string) => `(${spell ? `${spell}の詠唱` : '構え'}を止めた)`,
     hit: (b: string, n: number, killed: boolean) => `${b}に ${n}${killed ? '(撃破)' : ''}`,
     missed: (label: string) => `${label}: 外れた`,
     area: (label: string, foes: number, total: number, kills: number, allies: number) =>

@@ -1,6 +1,6 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
 import { planEnemies, summarizeIntent } from '../core/ai';
-import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../core/actions';
+import { RULES, apLeft, canAppend, carryingAfter, fillPlan, planCost } from '../core/actions';
 import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
@@ -412,9 +412,11 @@ export class Controller {
           .filter((u) => u.side === 'enemy' && !u.down && seen(u))
           .map((u) => {
             const plan = this.enemyPlans[u.id] ?? [];
-            // ブレス・火球は着弾予定の範囲も見せる(読んでよければ避けられる)
-            const b = plan.find((a) => a.type === 'spell' && !!a.tile);
-            const area = b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS[b.spell].radius } : undefined;
+            // ブレス・火球・業火は着弾予定の範囲と、発動するティックも見せる(読んでよければ避けられる・止められる)
+            const bi = plan.findIndex((a) => a.type === 'spell' && !!a.tile);
+            const b = plan[bi];
+            const area =
+              b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS[b.spell].radius, tick: planCost(plan.slice(0, bi + 1)) } : undefined;
             return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area };
           })
       : [];

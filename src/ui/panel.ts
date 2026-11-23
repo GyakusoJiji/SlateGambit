@@ -1,5 +1,5 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
-import { RULES, apLeft, carryingAfter, planCost } from '../core/actions';
+import { RULES, apLeft, carryingAfter, planCost, spellCost } from '../core/actions';
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type SpellId, type StrikeKind, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { SPELLS } from '../data/units';
@@ -95,7 +95,7 @@ export function actionButtons(u: Unit, actions: Action[], mode: Mode): string {
   const ap = apLeft(actions);
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
-  const need = (s: SpellId) => (s === 'power' ? RULES.powerCost : s === 'cover' ? RULES.coverCost : RULES.spellCost);
+  const need = (s: SpellId) => (s === 'power' ? RULES.powerCost : s === 'cover' ? RULES.coverCost : spellCost(s));
   const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= need(s) && u.mp >= SPELLS[s].mp;
   // ボタンはどのキャラでも同じ位置に並べ、使えないものはグレーアウトする
   // 特技の枠には、その職業の魔法だけを出す
@@ -173,7 +173,7 @@ export function levelUpNote(events: GameEvent[], nameOf: (id: string) => string,
 }
 
 /** 範囲魔法の種類 */
-const AREA_KINDS = new Set<StrikeKind>(['fireball', 'smite', 'breath']);
+const AREA_KINDS = new Set<StrikeKind>(['fireball', 'smite', 'breath', 'hellfire']);
 
 export function eventLog(events: GameEvent[], nameOf: (id: string) => string, limit = 6): string {
   const lines: string[] = [];
@@ -191,6 +191,9 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'stun':
         lines.push(T.log.stun(nameOf(e.id)));
+        break;
+      case 'interrupt':
+        lines.push(T.log.interrupt(nameOf(e.id), e.spell && SPELLS[e.spell].name));
         break;
       case 'wander':
         lines.push(T.log.wander);
@@ -332,7 +335,8 @@ function strikeSummary(
       return `${label}: ${dmg.map((d) => T.sum.hit(nameOf(d.id), d.amount, killed(d.id))).join('、')}`;
     case 'fireball':
     case 'smite':
-    case 'breath': {
+    case 'breath':
+    case 'hellfire': {
       const foes = dmg.filter((d) => sideOf.get(d.id) !== side);
       const allies = dmg.filter((d) => sideOf.get(d.id) === side);
       const total = foes.reduce((t, d) => t + d.amount, 0);
@@ -343,8 +347,12 @@ function strikeSummary(
       const h = after.find((e) => e.type === 'heal');
       return h && h.type === 'heal' ? `${label}: ${nameOf(h.id)} +${h.amount}` : label;
     }
-    default:
-      return s.target ? `${label}: ${nameOf(s.target)}` : label;
+    default: {
+      // 足払いで構え・詠唱を止めたら、それも添える
+      const stop = s.kind === 'trip' ? events.find((e) => e.type === 'interrupt' && e.id === s.target && e.tick === s.tick) : undefined;
+      const tail = stop && stop.type === 'interrupt' ? T.sum.interrupted(stop.spell && SPELLS[stop.spell].name) : '';
+      return s.target ? `${label}: ${nameOf(s.target)}${tail}` : label;
+    }
   }
 }
 

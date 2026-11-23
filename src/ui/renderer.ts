@@ -43,7 +43,8 @@ export interface View {
   units: DisplayUnit[];
   marks: Mark[];
   /** 敵の予兆。area はブレスなど範囲攻撃の着弾予定(中心と半径) */
-  hints: { at: Pos; intent: Intent; area?: { at: Pos; radius: number } }[];
+  /** 敵の予兆。area は範囲魔法の着弾範囲と、発動するティック */
+  hints: { at: Pos; intent: Intent; area?: { at: Pos; radius: number; tick?: number } }[];
   effects: Effect[];
   /** 床に置かれている宝の位置(宝探しのとき) */
   treasureAt?: Pos | null;
@@ -157,7 +158,7 @@ export class Renderer {
     if (ta && (!view.visible || view.explored[ta.y * map.w + ta.x] || view.visible[ta.y * map.w + ta.x])) this.drawTreasure(ta);
 
     for (const m of view.marks) this.drawMark(m);
-    for (const h of view.hints) if (h.area) this.drawDanger(h.area.at, h.area.radius);
+    for (const h of view.hints) if (h.area) this.drawDanger(h.area.at, h.area.radius, h.area.tick);
 
     // 倒れた敵 → 気絶した味方 → 立っているユニットの順に描く(味方が水たまりに隠れて担げなくならないように)
     const rank = (u: DisplayUnit) => (!u.down ? 2 : u.side === 'enemy' ? 0 : 1);
@@ -364,7 +365,8 @@ export class Renderer {
   }
 
   /** 範囲攻撃の着弾予定(点線で囲んだ赤い範囲) */
-  private drawDanger(c: Pos, radius: number): void {
+  /** 範囲魔法の着弾範囲。tick があれば、発動するティックを範囲の左上に出す(例「5」= 5 ティック目) */
+  private drawDanger(c: Pos, radius: number, tick?: number): void {
     const g = this.ctx;
     const z = this.zoom;
     const x = this.sx(c.x - radius) - z / 2;
@@ -377,6 +379,18 @@ export class Renderer {
     g.setLineDash([z * 0.18, z * 0.12]);
     g.strokeRect(x + 1, y + 1, s - 2, s - 2);
     g.setLineDash([]);
+    if (tick !== undefined) {
+      const r = Math.max(7, z * 0.28);
+      g.fillStyle = '#ff7a20';
+      g.beginPath();
+      g.arc(x + r + 2, y + r + 2, r, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#000';
+      g.font = `bold ${Math.round(r * 1.3)}px sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(String(tick), x + r + 2, y + r + 3);
+    }
   }
 
   private drawHint(at: Pos, intent: Intent): void {
@@ -387,6 +401,7 @@ export class Renderer {
       idle: ['#9a9aa8', '…'],
       sleep: ['#8a8ad0', 'z'],
       breath: ['#ff7a20', '炎'],
+      cast: ['#ff3a80', '詠'],
     };
     const [color, text] = map[intent];
     this.badge(this.sx(at.x) - this.zoom * 0.3, this.sy(at.y) - this.zoom * 0.32, color, text);

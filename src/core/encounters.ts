@@ -22,6 +22,7 @@ const ENEMY_MARKS: Record<string, string> = {
   e: 'darkelf',
   t: 'troll',
   b: 'bat',
+  k: 'warlock',
 };
 
 export interface EncounterDef {
@@ -49,6 +50,23 @@ const HALL = (marks: Record<string, string>): string[] =>
   ].map((r) => r.replace(/[PQRTUVXYZ]/g, (c) => marks[c] ?? '.'));
 
 export const ENCOUNTERS: EncounterDef[] = [
+  {
+    id: 'caster',
+    title: '詠唱を止めろ',
+    desc: 'オーク 2 体・ゴブリン・骸骨弓兵の奥で、呪術師長が 5 ティック目に 5×5 を焼く業火を唱える。逃げるか、足払いで止めるか、先に倒すか',
+    rows: [
+      '######################',
+      '#....................#',
+      '#..........#.....a...#',
+      '#1.........o......k..#',
+      '#2........g..........#',
+      '#3.........o.........#',
+      '#4.........#.........#',
+      '#....................#',
+      '######################',
+    ],
+    objective: { kind: 'annihilate' },
+  },
   {
     id: 'melee',
     title: '編成の比較 A: 前衛だけ',

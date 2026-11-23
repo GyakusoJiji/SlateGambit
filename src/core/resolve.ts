@@ -206,9 +206,15 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     // 足払い: 次のティックから数ティック、予約していた行動が消える(構えや移動も中断される)
     for (const id of stuns) {
       const list = steps.get(id)!;
+      let interrupted = false;
       for (let i = tick; i < Math.min(list.length, tick + RULES.stunTicks); i++) {
         const cur = list[i];
         list[i] = { k: 'stun' };
+        // 構えていた攻撃・魔法が取り消されたことを残す(足払いで何を防げたかが分かるように)
+        if (!interrupted && (cur.k === 'windup' || cur.k === 'strike') && (cur.action.type === 'attack' || cur.action.type === 'spell')) {
+          interrupted = true;
+          events.push({ tick, type: 'interrupt', id, ...(cur.action.type === 'spell' ? { spell: cur.action.spell } : {}) });
+        }
         // 構えの途中で止められた攻撃・魔法は、残りの構えと最後の一撃ごと取り消す
         if (cur.k === 'windup') {
           for (let j = i + 1; j < list.length; j++) {
@@ -710,7 +716,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     if (far) return fizzle(far);
     const breath = action.spell === 'breath';
     if (breath && u.ai) u.ai.breathTurn = ctx.turn;
-    const kind = breath ? 'breath' : action.spell === 'smite' ? 'smite' : 'fireball';
+    const kind = breath ? 'breath' : action.spell === 'smite' || action.spell === 'hellfire' ? action.spell : 'fireball';
     events.push({ tick, type: 'strike', id: u.id, kind, tile, end: tile, reaction });
     for (const o of units) {
       if (o.down || (sd.foesOnly && o.side === u.side)) continue;

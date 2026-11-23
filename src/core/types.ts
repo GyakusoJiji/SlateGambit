@@ -23,7 +23,7 @@ export interface FloorMap {
 }
 
 /** 魔法と特技。cover・power は魔法ではないが、特技のボタンとして同じ枠に並べる */
-export type SpellId = 'fireball' | 'heal' | 'revive' | 'breath' | 'smite' | 'trip' | 'cover' | 'power';
+export type SpellId = 'fireball' | 'heal' | 'revive' | 'breath' | 'smite' | 'trip' | 'cover' | 'power' | 'hellfire';
 
 export interface AiMemory {
   mode: 'idle' | 'patrol';
@@ -134,7 +134,7 @@ export type Plans = Record<string, Action[]>;
 
 // ---- 解決結果 ----
 
-export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | 'revive' | 'smite' | 'trip';
+export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | 'revive' | 'smite' | 'trip' | 'hellfire';
 
 export type GameEvent =
   | { tick: number; type: 'move'; id: string; from: Pos; to: Pos }
@@ -159,6 +159,8 @@ export type GameEvent =
   | { tick: number; type: 'cover'; id: string; for: string }
   /** 足払いで、id が数ティック動けなくなった */
   | { tick: number; type: 'stun'; id: string; ticks: number }
+  /** 足払いで、id の構えていた攻撃・魔法(詠唱)が取り消された */
+  | { tick: number; type: 'interrupt'; id: string; spell?: SpellId }
   /** 休憩の物音で、遠くから敵が現れた(位置は教えない) */
   | { tick: number; type: 'wander'; count: number }
   | { tick: number; type: 'heal'; id: string; amount: number }

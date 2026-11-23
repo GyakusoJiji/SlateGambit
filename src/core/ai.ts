@@ -11,7 +11,7 @@ import { Rng, hashSeed } from './rng';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from './types';
 import { unitSees } from './vision';
 
-export type Intent = 'attack' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath';
+export type Intent = 'attack' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath' | 'cast';
 
 export function planEnemies(state: GameState): Plans {
   const plans: Plans = {};
@@ -26,6 +26,7 @@ export function planEnemies(state: GameState): Plans {
 export function summarizeIntent(actions: Action[], unit?: Unit): Intent {
   if (unit?.ai?.asleep) return 'sleep';
   if (actions.some((a) => a.type === 'spell' && a.spell === 'breath')) return 'breath';
+  if (actions.some((a) => a.type === 'spell' && a.spell === 'hellfire')) return 'cast';
   if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell' || a.type === 'overwatch' || a.type === 'intercept')) return 'attack';
   if (actions.some((a) => a.type === 'move')) return 'move';
   if (actions.some((a) => a.type === 'guard')) return 'guard';
@@ -87,6 +88,16 @@ function planOne(state: GameState, e: Unit): Action[] {
     if (tile) {
       plan.push({ type: 'spell', spell: 'breath', tile });
       plan.push({ type: 'charge', target: target.id, ticks: apLeft(plan) });
+      return plan;
+    }
+  }
+
+  // 業火(呪術師長): MP があれば、味方を最も多く巻き込むマスへ長い詠唱を始め、残りは守りを固める
+  if (def.spells.includes('hellfire') && e.mp >= SPELLS.hellfire.mp) {
+    const tile = areaTile(state, e, targets, 'hellfire');
+    if (tile) {
+      plan.push({ type: 'spell', spell: 'hellfire', tile });
+      while (apLeft(plan) > 0) plan.push({ type: 'guard' });
       return plan;
     }
   }
@@ -155,7 +166,7 @@ function planOne(state: GameState, e: Unit): Action[] {
  * マス狙いの範囲魔法(炎のブレス・火球)を撃つマス: 見えている味方の今の位置を中心候補にし、
  * 巻き込む味方の数が最も多いマス。自分や仲間の敵を巻き込むマスは選ばない
  */
-function areaTile(state: GameState, e: Unit, targets: Unit[], spell: 'breath' | 'fireball'): Pos | null {
+function areaTile(state: GameState, e: Unit, targets: Unit[], spell: 'breath' | 'fireball' | 'hellfire'): Pos | null {
   const sd = SPELLS[spell];
   const inArea = (c: Pos, p: Pos) => Math.max(Math.abs(c.x - p.x), Math.abs(c.y - p.y)) <= sd.radius;
   let best: Pos | null = null;

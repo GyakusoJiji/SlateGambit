@@ -1,5 +1,5 @@
 import { SPELLS, unitDef } from '../data/units';
-import { AP_PER_TURN, type Action, type Unit } from './types';
+import { AP_PER_TURN, type Action, type SpellId, type Unit } from './types';
 
 /** 行動コストなどの調整用の値(自動対戦で比較できるよう書き換え可能にしてある) */
 export const RULES = {
@@ -48,6 +48,11 @@ export const RULES = {
   wakeRange: 3,
 };
 
+/** 魔法の AP(業火のような遅い大技は多い) */
+export function spellCost(id: SpellId): number {
+  return SPELLS[id].cost ?? RULES.spellCost;
+}
+
 export function actionCost(a: Action): number {
   switch (a.type) {
     case 'move':
@@ -64,7 +69,7 @@ export function actionCost(a: Action): number {
     case 'cover':
       return RULES.coverCost;
     case 'spell':
-      return RULES.spellCost;
+      return spellCost(a.spell);
     case 'overwatch':
     case 'intercept':
     case 'charge':

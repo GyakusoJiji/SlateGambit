@@ -39,6 +39,8 @@ export const MONSTERS: Record<string, UnitDef> = {
   shaman: { id: 'shaman', name: 'ゴブリン呪術師', icon: 'shaman', maxHp: 16, maxMp: 6, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'], exp: 9 },
   orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [], exp: 12 },
   darkelf: { id: 'darkelf', name: 'ダークエルフ', icon: 'darkelf', maxHp: 28, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 7, sight: 8, spells: [], exp: 14 },
+  /** 業火(5 ティック詠唱の大技)を使う。打たれ弱い */
+  warlock: { id: 'warlock', name: '呪術師長', icon: 'warlock', maxHp: 22, maxMp: 8, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['hellfire'], exp: 14 },
   troll: { id: 'troll', name: 'トロル', icon: 'troll', maxHp: 55, maxMp: 0, atk: 11, dmgVar: 3, def: 2, range: 1, sight: 6, spells: [], exp: 18 },
   ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [], exp: 24 },
   /** ボス。地下 5 階の最も奥の部屋で秘宝を守る。炎のブレスを吐く */
@@ -69,6 +71,8 @@ export interface SpellDef {
   radius: number;
   /** true なら、範囲内の敵だけに当たる(味方は巻き込まない) */
   foesOnly?: boolean;
+  /** AP(未指定は RULES.spellCost)。最後のティックで発動し、それまでは詠唱(構え) */
+  cost?: number;
 }
 
 export const SPELLS: Record<SpellId, SpellDef> = {
@@ -85,6 +89,11 @@ export const SPELLS: Record<SpellId, SpellDef> = {
   power: { id: 'power', name: '強攻撃', mp: 0, range: 0, target: 'foe', power: 0, powerVar: 0, radius: 0 },
   /** ドラゴンの炎のブレス。火球と同じく 3×3 のマス狙い。2 ターンに 1 回(RULES.breathEvery) */
   breath: { id: 'breath', name: '炎のブレス', mp: 0, range: 4, target: 'tile', power: 10, powerVar: 4, radius: 1 },
+  /**
+   * 呪術師長の業火。5 ティック詠唱して 5×5 を焼く遅い大技。着弾範囲と発動のティックは予兆で見える。
+   * 逃げる・足払いで詠唱を止める・先に倒す、のどれかで対処する
+   */
+  hellfire: { id: 'hellfire', name: '業火', mp: 4, range: 6, target: 'tile', power: 12, powerVar: 4, radius: 2, cost: 5 },
 };
 
 export function unitDef(defId: string): UnitDef {

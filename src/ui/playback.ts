@@ -111,6 +111,7 @@ export class Playback {
         if (e.kind === 'melee') out.push({ kind: 'slash', at: e.end, alpha });
         if (e.kind === 'fireball') out.push({ kind: 'burst', at: e.end, radius: 1, color: '#ff7a20', alpha });
         if (e.kind === 'smite') out.push({ kind: 'burst', at: e.end, radius: 1, color: '#fff0a0', alpha });
+        if (e.kind === 'hellfire') out.push({ kind: 'burst', at: e.end, radius: 2, color: '#ff3020', alpha });
         if (e.kind === 'trip') out.push({ kind: 'line', from, to: e.end, color: '#b0e0ff', alpha });
         if (e.kind === 'breath') {
           out.push({ kind: 'line', from, to: e.end, color: '#ff5020', alpha });
@@ -123,6 +124,8 @@ export class Playback {
         out.push({ kind: 'text', at: posOf(e.id), text: 'かばう', color: '#9fd0ff', rise: 0.6 + k * 0.4, alpha: 1 });
       } else if (e.type === 'stun') {
         out.push({ kind: 'text', at: posOf(e.id), text: '足止め', color: '#b0e0ff', rise: 0.6 + k * 0.4, alpha: 1 });
+      } else if (e.type === 'interrupt') {
+        out.push({ kind: 'text', at: posOf(e.id), text: '詠唱中断', color: '#ffe060', rise: 0.9 + k * 0.4, alpha: 1 });
       } else if (e.type === 'heal') {
         out.push({ kind: 'text', at: posOf(e.id), text: `+${e.amount}`, color: '#70ff90', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'fizzle') {
