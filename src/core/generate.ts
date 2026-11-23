@@ -31,6 +31,14 @@ export const MONSTER_GEN: Record<string, { cost: number; from: number; to?: numb
 };
 const DRAGON_COST = 7;
 
+/** 後衛(射撃・魔法)の敵。編成では部屋の奥に置く */
+export const BACK_LINE = new Set(['archer', 'shaman', 'darkelf', 'warlock']);
+/** 生成の調整用の値(自動対戦で比べられるよう書き換え可能にしてある) */
+export const GEN = {
+  /** 部屋の敵を「前衛+後衛」の編成で置く割合(前衛は入口側、後衛は奥) */
+  formationRate: 0.6,
+};
+
 /**
  * 難易度ごとの敵の量。budget[階 - 1]=その階の敵の点数の合計(地下 5 階はドラゴンを除く)、
  * group=1 部屋の点数の上限(深い階ほど 1 ずつ増える)、ogres=1 つの階のオーガの最大数。
@@ -327,25 +335,45 @@ function placeEnemies(
   let budget = cfg.budget[Math.min(floor, cfg.budget.length) - 1];
   let ogres = 0;
   const kinds = Object.keys(MONSTER_GEN).filter((t) => floor >= MONSTER_GEN[t].from && floor <= (MONSTER_GEN[t].to ?? 99));
-  const pickType = (room: number): string | null => {
-    const opts = kinds.filter((t) => MONSTER_GEN[t].cost <= room && MONSTER_GEN[t].cost <= budget && (t !== 'ogre' || ogres < cfg.ogres));
+  const pickType = (room: number, pool?: (t: string) => boolean): string | null => {
+    const opts = kinds.filter((t) => MONSTER_GEN[t].cost <= room && MONSTER_GEN[t].cost <= budget && (t !== 'ogre' || ogres < cfg.ogres) && (!pool || pool(t)));
     if (opts.length === 0) return null;
     const weights = opts.map((t) => MONSTER_GEN[t].weight);
     let x = rng.next() * weights.reduce((a, b) => a + b, 0);
     for (let i = 0; i < opts.length; i++) if ((x -= weights[i]) < 0) return opts[i];
     return opts[opts.length - 1];
   };
+  const place = (t: string, p: Pos) => {
+    spawn(t, p);
+    if (t === 'ogre') ogres++;
+    budget -= MONSTER_GEN[t].cost;
+  };
   const fillRoom = (r: Room, points: number) => {
     let room = Math.min(points, budget);
+    // 編成: 後衛を 1 体、部屋の最も奥(上り階段からの歩数が最も多いマス)に置き、残りは前衛を入口側に並べる
+    if (rng.next() < GEN.formationRate) {
+      const back = pickType(room - 2, (t) => BACK_LINE.has(t));
+      const p = back && extremeCell(r, map, d, taken, 'far');
+      if (back && p) {
+        place(back, p);
+        room -= MONSTER_GEN[back].cost;
+        while (room >= 1 && budget >= 1) {
+          const t = pickType(room, (x) => !BACK_LINE.has(x));
+          const q = t && extremeCell(r, map, d, taken, 'near');
+          if (!t || !q) break;
+          place(t, q);
+          room -= MONSTER_GEN[t].cost;
+        }
+        return;
+      }
+    }
     while (room >= 1 && budget >= 1) {
       const t = pickType(room);
       if (!t) break;
       const p = randomCell(rng, r, map, [], taken);
       if (!p) break;
-      spawn(t, p);
-      if (t === 'ogre') ogres++;
+      place(t, p);
       room -= MONSTER_GEN[t].cost;
-      budget -= MONSTER_GEN[t].cost;
     }
   };
 
@@ -371,6 +399,18 @@ function placeEnemies(
     u.ai = { mode: 'patrol', patrol: [{ x: u.x, y: u.y }, center(away)], patrolIndex: 1 };
   }
   return units;
+}
+
+/** 部屋の中の空いた床のうち、上り階段からの歩数 d が最も少ない('near')/多い('far')マス */
+function extremeCell(r: Room, map: FloorMap, d: (p: Pos) => number, taken: Set<string>, which: 'near' | 'far'): Pos | null {
+  let best: Pos | null = null;
+  for (let y = r.y; y < r.y + r.h; y++)
+    for (let x = r.x; x < r.x + r.w; x++) {
+      const p = { x, y };
+      if (map.tiles[y][x] !== '.' || taken.has(key(p)) || d(p) < 0) continue;
+      if (!best || (which === 'near' ? d(p) < d(best) : d(p) > d(best))) best = p;
+    }
+  return best;
 }
 
 /** 部屋の中で from から最も遠い(マンハッタン距離)空いた床 */

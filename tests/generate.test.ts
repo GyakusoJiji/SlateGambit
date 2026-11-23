@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { changeFloor, findTile } from '../src/core/floors';
-import { FLOORS, generateFloor, generateGame, MAP_H, MAP_W } from '../src/core/generate';
+import { BACK_LINE, FLOORS, GEN, generateFloor, generateGame, MAP_H, MAP_W } from '../src/core/generate';
 import { DIR_LIST, isWalkable, step, tileAt } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
 import { quickMovePlans } from '../src/core/quickmove';
@@ -125,6 +125,49 @@ describe('マップ生成', () => {
     expect(w.hp).toBe(stats(w).maxHp);
     expect(s.objective).toMatchObject({ kind: 'treasure', floor: 5 });
     expect((s.objective as { at: Pos }).at).not.toBeNull();
+  });
+});
+
+describe('敵の編成', () => {
+  /** 後衛の近く(3 マス以内)にいる前衛のうち、後衛より上り階段からの歩数が少ない者の割合 */
+  function frontRatio(): number {
+    let pairs = 0;
+    let ordered = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const f = generateFloor(seed, 'normal', 3);
+      const dist = new Map<string, number>([[`${f.up.x},${f.up.y}`, 0]]);
+      const q = [f.up];
+      for (let i = 0; i < q.length; i++) {
+        for (const d of DIR_LIST) {
+          const n = step(q[i], d);
+          const k = `${n.x},${n.y}`;
+          if (dist.has(k) || !isWalkable(f.map, n.x, n.y)) continue;
+          dist.set(k, dist.get(`${q[i].x},${q[i].y}`)! + 1);
+          q.push(n);
+        }
+      }
+      const dd = (p: Pos) => dist.get(`${p.x},${p.y}`)!;
+      for (const b of f.enemies.filter((e) => BACK_LINE.has(e.defId))) {
+        for (const fr of f.enemies.filter((e) => !BACK_LINE.has(e.defId) && Math.max(Math.abs(e.x - b.x), Math.abs(e.y - b.y)) <= 3)) {
+          pairs++;
+          if (dd(fr) < dd(b)) ordered++;
+        }
+      }
+    }
+    return ordered / pairs;
+  }
+
+  it('編成を入れると、後衛の近くの前衛が入口(上り階段)側に並ぶことが、ばらばらに置くときより多い', () => {
+    const saved = GEN.formationRate;
+    try {
+      GEN.formationRate = 0;
+      const random = frontRatio();
+      GEN.formationRate = 1;
+      const formed = frontRatio();
+      expect(formed).toBeGreaterThan(random + 0.15);
+    } finally {
+      GEN.formationRate = saved;
+    }
   });
 });
 
