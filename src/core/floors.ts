@@ -1,4 +1,4 @@
-// 階の移動。誰か 1 人が階段に入ると、パーティ全員(気絶者を含む)がその階へ移る。
+// 階の移動。階段を行き先に選んだ誰か 1 人が階段でターンを終えると、パーティ全員(気絶者を含む)がその階へ移る。
 // 今の階の地形・敵・探索済み範囲は state.floors に退避し、戻ってきたときにそのまま再現する。
 import { MONSTERS } from '../data/units';
 import { RULES } from './actions';
@@ -28,16 +28,24 @@ export function findTile(map: GameState['map'], c: string): Pos | null {
 }
 
 /**
- * ターンの終わりの階段の判定。立っている味方が下り階段('>')にいれば下の階へ、
- * 上り階段('S')にいれば上の階へ移る。地下 1 階の 'S' は地上への出口なので移らない(秘宝を持っていれば勝ち)。
- * 移ったら true
+ * p の階段を使ったときに移る先の階。下り階段('>')なら下の階、上り階段('S')なら上の階。
+ * 階段でない、または地下 1 階の 'S'(地上への出口。秘宝を持っていれば勝ち)なら null
  */
-export function applyStairs(state: GameState, events: GameEvent[]): boolean {
+export function stairsDest(state: GameState, p: Pos): number | null {
+  const cur = currentFloor(state);
+  const t = tileAt(state.map, p.x, p.y);
+  return t === '>' && cur < FLOORS ? cur + 1 : t === 'S' && cur > 1 ? cur - 1 : null;
+}
+
+/**
+ * ターンの終わりの階段の判定。階段を使う予約(users)をした立っている味方が階段の上にいれば、全員で移る。
+ * 階段を通り過ぎた・たまたま止まっただけの味方では移らない。移ったら true
+ */
+export function applyStairs(state: GameState, events: GameEvent[], users: ReadonlySet<string>): boolean {
   const cur = currentFloor(state);
   for (const u of state.units) {
-    if (u.side !== 'party' || u.down) continue;
-    const t = tileAt(state.map, u.x, u.y);
-    const to = t === '>' && cur < FLOORS ? cur + 1 : t === 'S' && cur > 1 ? cur - 1 : null;
+    if (u.side !== 'party' || u.down || !users.has(u.id)) continue;
+    const to = stairsDest(state, u);
     if (to === null) continue;
     events.push({ tick: TICKS_PER_TURN, type: 'stairs', id: u.id, from: cur, to });
     changeFloor(state, to);

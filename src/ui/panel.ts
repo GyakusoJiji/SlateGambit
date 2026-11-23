@@ -45,6 +45,8 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
       return `${T.act.carry}:${nameOf(a.target)}`;
     case 'drop':
       return T.act.drop;
+    case 'stairs':
+      return T.act.stairs;
     case 'guard':
       return T.act.guard;
     case 'wait':
@@ -154,9 +156,26 @@ export function playbackControls(paused: boolean, speed: number, tick: number): 
   </div>`;
 }
 
+/**
+ * レベルアップをまとめた 1 行(無ければ空)。同じレベルに上がった者は名前を並べ、
+ * partySize 人全員が同じレベルに上がったら「全員」とする
+ */
+export function levelUpNote(events: GameEvent[], nameOf: (id: string) => string, partySize = 0): string {
+  const byLevel = new Map<number, string[]>();
+  for (const e of events) if (e.type === 'levelup') byLevel.set(e.level, [...(byLevel.get(e.level) ?? []), e.id]);
+  if (byLevel.size === 0) return '';
+  if (byLevel.size === 1) {
+    const [[lv, ids]] = [...byLevel];
+    if (partySize > 1 && ids.length === partySize) return T.log.levelupAll(lv);
+  }
+  return [...byLevel].map(([lv, ids]) => T.log.levelup(ids.map(nameOf).join('・'), lv)).join(' ');
+}
+
 export function eventLog(events: GameEvent[], nameOf: (id: string) => string, limit = 6): string {
   const lines: string[] = [];
   const rests: string[] = [];
+  /** レベルアップは全員分を 1 行にまとめる(直前の戦闘の経過を押し出さないため) */
+  let levelups = false;
   for (const e of events) {
     switch (e.type) {
       case 'damage': {
@@ -219,7 +238,8 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         lines.push(T.log.exp(e.amount));
         break;
       case 'levelup':
-        lines.push(T.log.levelup(nameOf(e.id), e.level));
+        if (!levelups) lines.push(levelUpNote(events, nameOf));
+        levelups = true;
         break;
       case 'stairs':
         lines.push(T.log.stairs(e.from, e.to));

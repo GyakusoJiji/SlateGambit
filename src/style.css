@@ -87,7 +87,13 @@ body {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s;
-  white-space: nowrap;
+  /* 長い通知は画面内で折り返す(はみ出すと横スクロールバーが出て盤面の幅が変わる) */
+  width: max-content;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 #toast.show {
   opacity: 1;

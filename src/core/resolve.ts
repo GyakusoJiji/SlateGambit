@@ -262,7 +262,10 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   state.turn += 1;
   // 地下 1 階の入口に秘宝を持ち帰ったら、階段の判定より勝ちを優先する
   state.status = judge(state);
-  if (state.status === 'playing') applyStairs(state, events);
+  if (state.status === 'playing') {
+    const users = new Set(Object.keys(plans).filter((id) => plans[id]?.some((a) => a.type === 'stairs')));
+    applyStairs(state, events, users);
+  }
   return { state, events, frames, treasure };
 }
 

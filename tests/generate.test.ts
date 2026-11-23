@@ -3,6 +3,7 @@ import { changeFloor, findTile } from '../src/core/floors';
 import { FLOORS, generateFloor, generateGame, MAP_H, MAP_W } from '../src/core/generate';
 import { DIR_LIST, isWalkable, step, tileAt } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
+import { quickMovePlans } from '../src/core/quickmove';
 import { stats } from '../src/core/stats';
 import type { FloorMap, GameState, Pos } from '../src/core/types';
 
@@ -140,7 +141,7 @@ describe('階段', () => {
     const b = besideOf(s, down);
     w.x = b.at.x;
     w.y = b.at.y;
-    const r = resolveTurn(s, { p1: [{ type: 'move', dir: b.dir }] });
+    const r = resolveTurn(s, { p1: [{ type: 'move', dir: b.dir }, { type: 'stairs' }] });
     expect(r.events.some((e) => e.type === 'stairs' && e.from === 1 && e.to === 2)).toBe(true);
     const n = r.state;
     expect(n.floor).toBe(2);
@@ -175,7 +176,7 @@ describe('階段', () => {
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const up = findTile(s.map, 'S')!;
     const k = walkerOnto(s, up);
-    const r = resolveTurn(s, { [k.id]: [{ type: 'move', dir: k.dir }] });
+    const r = resolveTurn(s, { [k.id]: [{ type: 'move', dir: k.dir }, { type: 'stairs' }] });
     const n = r.state;
     expect(n.floor).toBe(1);
     const back = n.units.find((u) => u.id === e1.id)!;
@@ -194,10 +195,43 @@ describe('階段', () => {
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const up = findTile(s.map, 'S')!;
     const k = walkerOnto(s, up);
-    const r = resolveTurn(s, { [k.id]: [{ type: 'move', dir: k.dir }] });
+    const r = resolveTurn(s, { [k.id]: [{ type: 'move', dir: k.dir }, { type: 'stairs' }] });
     expect(r.state.floor).toBe(1);
     expect(r.state.status).toBe('playing');
     expect(r.events.some((e) => e.type === 'stairs')).toBe(false);
+  });
+
+  it('階段を使う予約が無ければ、階段の上でターンを終えても移らない(通り道の階段)', () => {
+    const s = generateGame(11, 'easy');
+    for (const u of s.units) if (u.side === 'enemy') u.down = true;
+    const down = findTile(s.map, '>')!;
+    const k = walkerOnto(s, down);
+    const r = resolveTurn(s, { [k.id]: [{ type: 'move', dir: k.dir }] });
+    const me = r.state.units.find((u) => u.id === k.id)!;
+    expect([me.x, me.y]).toEqual([down.x, down.y]);
+    expect(r.state.floor ?? 1).toBe(1);
+    expect(r.events.some((e) => e.type === 'stairs')).toBe(false);
+  });
+
+  it('全員移動で階段を行き先にすると、先頭だけが階段を使い、着いたターンに移る', () => {
+    const s = generateGame(11, 'easy');
+    for (const u of s.units) if (u.side === 'enemy') u.down = true;
+    const down = findTile(s.map, '>')!;
+    const b = besideOf(s, down);
+    const w = s.units[0];
+    w.x = b.at.x;
+    w.y = b.at.y;
+    const plans = quickMovePlans(s, w.id, down)!;
+    expect(plans[w.id].at(-1)).toEqual({ type: 'stairs' });
+    for (const [id, list] of Object.entries(plans)) if (id !== w.id) expect(list.some((a) => a.type === 'stairs')).toBe(false);
+    expect(resolveTurn(s, plans).state.floor).toBe(2);
+    // 先頭がすでに階段の上にいれば、階段を使うだけ
+    w.x = down.x;
+    w.y = down.y;
+    expect(quickMovePlans(s, w.id, down)).toEqual({ [w.id]: [{ type: 'stairs' }] });
+    // 行き先が階段でなければ、誰も階段を使わない
+    const plain = quickMovePlans(s, w.id, b.at)!;
+    expect(Object.values(plain).flat().some((a) => a.type === 'stairs')).toBe(false);
   });
 });
 
@@ -242,7 +276,7 @@ describe('秘宝', () => {
     const p1 = () => st.units.find((u) => u.id === 'p1')!;
     p1().x = nb.at.x;
     p1().y = nb.at.y;
-    r = resolveTurn(st, { p1: [{ type: 'move', dir: nb.dir }] });
+    r = resolveTurn(st, { p1: [{ type: 'move', dir: nb.dir }, { type: 'stairs' }] });
     expect(r.state.status).toBe('playing');
     expect(r.state.floor).toBe(4);
 

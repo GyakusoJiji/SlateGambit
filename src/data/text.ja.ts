@@ -29,6 +29,7 @@ export const T = {
     charge: '接近攻撃',
     carry: '担ぐ',
     drop: '降ろす',
+    stairs: '階段を使う',
     undo: '1手戻す',
     execute: '実行',
     rest: '全員休憩',
@@ -128,6 +129,7 @@ export const T = {
     chest: (a: string, gold: number) => `${a} が宝箱を開けた(+${gold} G)`,
     exp: (n: number) => `全員が経験値 ${n} を得た`,
     levelup: (a: string, lv: number) => `${a} はレベル ${lv} に上がった!`,
+    levelupAll: (lv: number) => `全員がレベル ${lv} に上がった!`,
     stairs: (from: number, to: number) => (to > from ? `地下 ${to} 階へ降りた` : `地下 ${to} 階へ上った`),
   },
 
@@ -156,7 +158,7 @@ export const T = {
 
   start: {
     title: '難易度を選んでください',
-    note: '地下 5 階まであるダンジョンは毎回ランダムに作られます。階段に誰か 1 人が入ると全員で別の階へ移ります。宝箱でゴールドを集め、敵を倒して経験値をためるとレベルが上がります',
+    note: '地下 5 階まであるダンジョンは毎回ランダムに作られます。階段を行き先に選んで誰か 1 人が着くと、全員で別の階へ移ります(通り過ぎるだけなら移りません)。宝箱でゴールドを集め、敵を倒して経験値をためるとレベルが上がります',
   },
 
   toast: {
@@ -167,6 +169,7 @@ export const T = {
     resumed: (turn: number) => `前回の続き(ターン ${turn})から再開した`,
     stopped: '自動の操作を止めた',
     cleared: '予約をすべて取り消した',
+    stairsLater: '階段に着くのは次のターン以降。着いたらもう一度階段をタップ',
   },
 
   formation: {

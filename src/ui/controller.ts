@@ -5,7 +5,7 @@ import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { inReach, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
-import { currentFloor, findTile, treasureHere } from '../core/floors';
+import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
 import type { Action, Difficulty, GameState, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
@@ -13,7 +13,7 @@ import { T } from '../data/text.ja';
 import { SPELLS } from '../data/units';
 import { stats } from '../core/stats';
 import { attachInput } from './input';
-import { actButton, actionButtons, eventLog, idleButtons, partyCards, planChips, playbackControls, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, type Mode } from './panel';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
 import { saveGame } from './save';
@@ -285,17 +285,21 @@ export class Controller {
       return;
     }
     // 階段で別の階へ移った: 新しい階の敵の表示名を足し、パーティを映す
-    const moved = pb?.result.events.find((e) => e.type === 'stairs');
+    const events = pb?.result.events ?? [];
+    const notes: string[] = [];
+    const moved = events.find((e) => e.type === 'stairs');
     if (moved && moved.type === 'stairs') {
       this.names = new Map([...this.names, ...displayNames(this.state.units)]);
       // 再生中に追っていたカメラの目標は前の階の座標なので捨てる
       this.camGoal = null;
       this.renderer.centerOn(centroid(this.party()));
-      this.toast(T.log.stairs(moved.from, moved.to));
-    } else {
-      const lv = pb?.result.events.filter((e) => e.type === 'levelup') ?? [];
-      if (lv.length > 0) this.toast(lv.map((e) => (e.type === 'levelup' ? T.log.levelup(this.names.get(e.id) ?? e.id, e.level) : '')).join(' '));
+      // 全員移動の行き先は前の階の座標なので、ここで止める
+      this.stopAuto();
+      notes.push(T.log.stairs(moved.from, moved.to));
     }
+    const lv = levelUpNote(events, (id) => this.names.get(id) ?? id, this.party().length);
+    if (lv) notes.push(lv);
+    if (notes.length > 0) this.toast(notes.join('\n'));
     this.beginPlanning();
   }
 
@@ -464,7 +468,8 @@ export class Controller {
     this.el.toast.textContent = msg;
     this.el.toast.classList.add('show');
     clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => this.el.toast.classList.remove('show'), 1600);
+    // 長い通知(2 行など)は読み切れるよう長めに出す
+    this.toastTimer = window.setTimeout(() => this.el.toast.classList.remove('show'), Math.max(1600, msg.length * 70));
   }
 
   private showResult(): void {
@@ -849,15 +854,27 @@ export class Controller {
       return;
     }
     if (!st.explored[tile.y * st.map.w + tile.x]) return this.toast(T.err.noPath);
-    const from = simulate(st, u, this.plans[u.id]).end;
+    const list = this.plans[u.id];
+    const from = simulate(st, u, list).end;
+    // 階段を行き先に選んだら、着いたターンの終わりに階段を使う(通り過ぎるだけなら使わない)
+    const stairs = stairsDest(st, tile) !== null && !list.some((a) => a.type === 'stairs');
     const path = pathTo(st.map, from, tile);
+    if (path && path.length === 0 && stairs) {
+      list.push({ type: 'stairs' });
+      this.changed();
+      return;
+    }
     if (!path || path.length === 0) return this.toast(T.err.noPath);
     // 担いでいる間は 1 マス 2 AP
-    const slow = carryingAfter(u, this.plans[u.id]);
-    const room = Math.floor(apLeft(this.plans[u.id]) / (slow ? RULES.carryMoveCost : 1));
+    const slow = carryingAfter(u, list);
+    const room = Math.floor(apLeft(list) / (slow ? RULES.carryMoveCost : 1));
     if (room <= 0) return this.toast(T.err.noAp);
     for (const d of path.slice(0, room)) {
-      this.plans[u.id].push({ type: 'move', dir: d, stop: true, slow: slow || undefined });
+      list.push({ type: 'move', dir: d, stop: true, slow: slow || undefined });
+    }
+    if (stairs) {
+      if (path.length <= room) list.push({ type: 'stairs' });
+      else this.toast(T.toast.stairsLater);
     }
     this.changed();
     this.advanceIfFull(u);

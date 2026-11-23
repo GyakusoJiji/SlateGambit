@@ -116,6 +116,8 @@ export type Action =
   | { type: 'charge'; target: string; ticks: number }
   | { type: 'carry'; target: string }
   | { type: 'drop' }
+  /** 階段を使う(0 AP)。ターンの終わりに階段の上にいれば、全員で別の階へ移る。行き先に階段を選んだときだけ予約する */
+  | { type: 'stairs' }
   | { type: 'guard' }
   | { type: 'wait' }
   | { type: 'spell'; spell: SpellId; target?: string; tile?: Pos }

@@ -7,7 +7,7 @@
 //   PLAY=show STATE=...
 //
 // コマンド: to X,Y(経路で移動) / atk ID(届かなければ接近攻撃) / chg ID / g(防御) / w(待機) /
-//   fb X,Y / heal ID / rev ID / ow(警戒射撃・残り全部) / ic(迎撃・残り全部) / carry ID / drop
+//   fb X,Y / heal ID / rev ID / ow(警戒射撃・残り全部) / ic(迎撃・残り全部) / carry ID / drop / st(階段を使う)
 import * as fs from 'node:fs';
 import { it } from 'vitest';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../src/core/actions';
@@ -119,6 +119,9 @@ function parseCmd(state: GameState, cmd: string, out: string[]): Plans {
           break;
         case 'drop':
           push({ type: 'drop' });
+          break;
+        case 'st':
+          push({ type: 'stairs' });
           break;
         default:
           out.push(`  ! 不明なコマンド ${c}`);

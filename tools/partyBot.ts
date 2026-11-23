@@ -297,7 +297,7 @@ function explore(state: GameState, party: Unit[]): Plans {
   const foe = state.units.find((u) => u.side === 'enemy' && !u.down && !u.ai?.asleep);
   let goal: (p: Pos) => boolean = anyFrontier ? frontier : (p: Pos) => !!foe && adjacent(map, p, foe);
   let candidates = party;
-  /** 目標の階段('S' か '>')。それ以外の階段の上には止まらない(階を移ってしまう)ので、経路でも避ける */
+  /** 目標の階段('S' か '>')。それ以外の階段は経路で避ける(止まっても移らないが、道をふさがないように) */
   let goalStair: string | null = null;
   const obj = state.objective;
   const holder = obj?.kind === 'treasure' ? party.find((u) => u.id === obj.holder) : undefined;
@@ -334,6 +334,8 @@ function explore(state: GameState, party: Unit[]): Plans {
   }
   const lead = (best ?? []).slice(0, 8);
   plans[leader.id] = lead.map((d) => ({ type: 'move', dir: d, stop: true }));
+  // 目標の階段にこのターンで着くなら、階段を使う(プレイヤーが階段を行き先に選ぶのと同じ)
+  if (goalStair && best && best.length <= 8) plans[leader.id].push({ type: 'stairs' });
 
   // 残りは先頭に近い順に並べ、1 人前の者の出発点へ向かってから、その者と同じ経路をなぞる
   const rest = party.filter((u) => u !== leader).sort((a, b) => manhattan(a, leader) - manhattan(b, leader));

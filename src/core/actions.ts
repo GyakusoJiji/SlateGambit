@@ -52,6 +52,8 @@ export function actionCost(a: Action): number {
   switch (a.type) {
     case 'move':
       return a.slow ? RULES.carryMoveCost : 1;
+    case 'stairs':
+      return 0;
     case 'guard':
     case 'wait':
     case 'carry':
@@ -81,7 +83,7 @@ export function carryingAfter(unit: Unit, actions: Action[]): boolean {
 }
 
 /** 担いでいる間に予約できる行動 */
-const WHILE_CARRYING = new Set<Action['type']>(['move', 'guard', 'wait', 'drop']);
+const WHILE_CARRYING = new Set<Action['type']>(['move', 'guard', 'wait', 'drop', 'stairs']);
 
 export function planCost(actions: Action[]): number {
   return actions.reduce((s, a) => s + actionCost(a), 0);
@@ -166,6 +168,9 @@ export function expandPlan(actions: Action[]): Step[] {
         break;
       case 'drop':
         steps.push({ k: 'drop' });
+        break;
+      case 'stairs':
+        // ティックを使わない。ターンの終わりの判定(applyStairs)で見る
         break;
       case 'guard':
         steps.push({ k: 'guard' });
