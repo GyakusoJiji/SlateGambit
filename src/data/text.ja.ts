@@ -132,6 +132,8 @@ export const T = {
     stun: (a: string) => `${a} は足を払われて動けない`,
     interrupt: (a: string, spell?: string) => `${a} の${spell ? `${spell}の詠唱` : '構え'}が止まった!`,
     wander: '遠くから物音が近づいてくる…',
+    alarm: (a: string, n: number) => `${a} が角笛を吹き鳴らした! 増援が ${n} 体やってくる`,
+    bounty: (a: string, gold: number) => `${a} を止めた。持っていた宝 +${gold} G`,
     chest: (a: string, gold: number) => `${a} が宝箱を開けた(+${gold} G)`,
     exp: (n: number) => `全員が経験値 ${n} を得た`,
     levelup: (a: string, lv: number) => `${a} はレベル ${lv} に上がった!`,

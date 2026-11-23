@@ -110,23 +110,37 @@ export function applyWander(state: GameState, rng: Rng, restShare: number, event
   if (!events.some((e) => e.type === 'rest' && (e.hp > 0 || e.mp > 0))) return;
   const k = DIFFICULTY[state.difficulty ?? 'normal'].wander;
   if (rng.next() >= RULES.wanderChance * k * restShare) return;
+  const count = spawnFoes(state, rng, RULES.wanderBudget + currentFloor(state), `w${state.turn}_`, RULES.wanderDistance);
+  if (count > 0) events.push({ tick: TICKS_PER_TURN, type: 'wander', count });
+}
+
+/**
+ * 遠く(どの味方からもマンハッタン距離 minDistance 以上。無ければなるべく遠く)の 1 か所の周りに、
+ * 点数 budget 分の敵を出す。敵はすでにパーティの居場所へ向かっている(警戒状態)。出した数を返す
+ */
+export function spawnFoes(state: GameState, rng: Rng, budget: number, idTag: string, minDistance: number): number {
   const floor = currentFloor(state);
   const party = state.units.filter((u) => u.side === 'party' && !u.down);
-  if (party.length === 0) return;
+  if (party.length === 0) return 0;
   const { map } = state;
   const taken = new Set(state.units.filter((u) => !u.down).map((u) => `${u.x},${u.y}`));
-  const far: Pos[] = [];
+  const cells: { p: Pos; d: number }[] = [];
   for (let y = 0; y < map.h; y++) {
     for (let x = 0; x < map.w; x++) {
       if (tileAt(map, x, y) !== '.' || taken.has(`${x},${y}`)) continue;
-      if (party.every((p) => manhattan(p, { x, y }) >= RULES.wanderDistance)) far.push({ x, y });
+      cells.push({ p: { x, y }, d: Math.min(...party.map((m) => manhattan(m, { x, y }))) });
     }
   }
-  if (far.length === 0) return;
+  let far = cells.filter((c) => c.d >= minDistance).map((c) => c.p);
+  // 狭い地図(固定遭遇など)では、最も遠いマスの近くから出す
+  if (far.length === 0 && cells.length > 0) {
+    const max = Math.max(...cells.map((c) => c.d));
+    far = cells.filter((c) => c.d >= max - 2).map((c) => c.p);
+  }
+  if (far.length === 0) return 0;
   const kinds = Object.keys(MONSTER_GEN).filter((t) => floor >= MONSTER_GEN[t].from && floor <= (MONSTER_GEN[t].to ?? 99) && t !== 'ogre');
-  let budget = RULES.wanderBudget + floor;
   const origin = far[rng.int(0, far.length - 1)];
-  const target = party.sort((a, b) => manhattan(a, origin) - manhattan(b, origin))[0];
+  const target = [...party].sort((a, b) => manhattan(a, origin) - manhattan(b, origin))[0];
   let count = 0;
   while (budget >= 1) {
     const opts = kinds.filter((t) => MONSTER_GEN[t].cost <= budget);
@@ -142,7 +156,7 @@ export function applyWander(state: GameState, rng: Rng, restShare: number, event
     const m = MONSTERS[t];
     count++;
     state.units.push({
-      id: `${floor > 1 ? floor : ''}w${state.turn}_${count}`,
+      id: `${floor > 1 ? floor : ''}${idTag}${count}`,
       side: 'enemy',
       defId: t,
       name: m.name,
@@ -156,5 +170,5 @@ export function applyWander(state: GameState, rng: Rng, restShare: number, event
     taken.add(`${p.x},${p.y}`);
     budget -= MONSTER_GEN[t].cost;
   }
-  if (count > 0) events.push({ tick: TICKS_PER_TURN, type: 'wander', count });
+  return count;
 }

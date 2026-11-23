@@ -124,6 +124,10 @@ export class Playback {
         out.push({ kind: 'text', at: posOf(e.id), text: 'かばう', color: '#9fd0ff', rise: 0.6 + k * 0.4, alpha: 1 });
       } else if (e.type === 'stun') {
         out.push({ kind: 'text', at: posOf(e.id), text: '足止め', color: '#b0e0ff', rise: 0.6 + k * 0.4, alpha: 1 });
+      } else if (e.type === 'alarm') {
+        out.push({ kind: 'text', at: posOf(e.id), text: '警報!', color: '#ffb000', rise: 0.9 + k * 0.4, alpha: 1 });
+      } else if (e.type === 'bounty') {
+        out.push({ kind: 'text', at: posOf(e.id), text: `+${e.gold} G`, color: '#ffd23a', rise: 0.6 + k * 0.4, alpha: 1 });
       } else if (e.type === 'interrupt') {
         out.push({ kind: 'text', at: posOf(e.id), text: '詠唱中断', color: '#ffe060', rise: 0.9 + k * 0.4, alpha: 1 });
       } else if (e.type === 'heal') {

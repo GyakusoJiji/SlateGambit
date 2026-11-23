@@ -39,6 +39,11 @@ body {
   border-right: 1px solid #1c1c24;
 }
 
+/* hidden 属性は、.act などの display 指定より優先する(上部の「店」を隠すため) */
+[hidden] {
+  display: none !important;
+}
+
 #topbar {
   display: flex;
   align-items: center;

@@ -8,6 +8,7 @@ import { adjacent, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, til
 import { findPath } from './path';
 import { clearShot, interceptCandidates, overwatchTarget } from './reactions';
 import { Rng } from './rng';
+import { applyAlarm } from './alarm';
 import {
   TICKS_PER_TURN,
   type Action,
@@ -60,6 +61,10 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   const chargeStruck = new Set<string>();
   const chargeLost = new Set<string>();
   const treasure = state.objective?.kind === 'treasure' ? [treasureSnap(state)] : undefined;
+  /** ターンの初めに味方を見ていた敵(警報役が気付いたかの判定用) */
+  const enemiesSawParty = new Set(
+    units.filter((e) => e.side === 'enemy' && !e.down && units.some((p) => p.side === 'party' && !p.down && unitSees(map, e, p))).map((e) => e.id),
+  );
   /** ターンの初めに立っていた敵(倒した敵の経験値の計算用) */
   const foesAtStart = units.filter((u) => u.side === 'enemy' && !u.down);
 
@@ -277,6 +282,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   applyWakeUp(state, rng, events, frames);
   applyExp(state, foesAtStart, events, frames);
   updateAiMemory(state, attackedBy, events);
+  applyAlarm(state, rng, events, new Set(events.filter((e) => e.type === 'stun').map((e) => e.id)), enemiesSawParty);
   state.rng = rng.state;
   state.turn += 1;
   // 地下 1 階の入口に秘宝を持ち帰ったら、階段の判定より勝ちを優先する

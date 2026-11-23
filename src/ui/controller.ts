@@ -419,7 +419,9 @@ export class Controller {
             const b = plan[bi];
             const area =
               b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS[b.spell].radius, tick: planCost(plan.slice(0, bi + 1)) } : undefined;
-            return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area };
+            // 警報役は、増援を呼ぶまでの残りターンを出す(例「笛2」)
+            const left = u.ai?.alarm !== undefined && !u.ai.alarmRaised ? RULES.alarmTurns - u.ai.alarm : undefined;
+            return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area, label: left !== undefined ? `笛${left}` : undefined };
           })
       : [];
     const treasureAt = treasureHere(st);

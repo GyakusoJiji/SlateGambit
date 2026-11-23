@@ -55,6 +55,10 @@ const ICONS: Record<string, Icon> = {
     palette: { P: '#8040b0', G: '#6aa84f', R: '#ffd040', W: WOOD, K: '#ff7a20' },
     rows: ['..PPP..K', '.PPPPP.W', '.GRGRG.W', '..GGGG.W', '.PPPPPPW', 'PPPPPP.W', '.PPPP..W', '..G..G..'],
   },
+  hornblower: {
+    palette: { G: '#6aa84f', E: '#3f7a2f', R: '#ff3b3b', Y: '#e8c040', K: DARK },
+    rows: ['........', '.E....E.', '.GGGGGG.', '.GRGGRGY', '..GGGGYY', '.GGGGGYK', '..GGGG..', '..G..G..'],
+  },
   warlock: {
     palette: { R: '#b02030', G: '#6aa84f', Y: '#ffd040', W: WOOD, K: '#ff4020' },
     rows: ['..RRR.KK', '.RRRRR.Y', '.GYGYG.W', '..GGGG.W', '.RRRRRRW', 'RRYRRR.W', '.RRRR..W', '..G..G..'],

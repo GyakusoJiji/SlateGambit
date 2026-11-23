@@ -39,6 +39,8 @@ export const MONSTERS: Record<string, UnitDef> = {
   shaman: { id: 'shaman', name: 'ゴブリン呪術師', icon: 'shaman', maxHp: 16, maxMp: 6, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'], exp: 9 },
   orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [], exp: 12 },
   darkelf: { id: 'darkelf', name: 'ダークエルフ', icon: 'darkelf', maxHp: 28, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 7, sight: 8, spells: [], exp: 14 },
+  /** 警報役。パーティに気付くと逃げながら角笛を吹き、止められなければ増援を呼ぶ(alarm.ts) */
+  hornblower: { id: 'hornblower', name: '角笛ゴブリン', icon: 'hornblower', maxHp: 14, maxMp: 0, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 8 },
   /** 業火(5 ティック詠唱の大技)を使う。打たれ弱い */
   warlock: { id: 'warlock', name: '呪術師長', icon: 'warlock', maxHp: 22, maxMp: 8, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['hellfire'], exp: 14 },
   troll: { id: 'troll', name: 'トロル', icon: 'troll', maxHp: 55, maxMp: 0, atk: 11, dmgVar: 3, def: 2, range: 1, sight: 6, spells: [], exp: 18 },

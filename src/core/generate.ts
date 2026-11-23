@@ -30,6 +30,8 @@ export const MONSTER_GEN: Record<string, { cost: number; from: number; to?: numb
   ogre: { cost: 7, from: 3, weight: 1.5 },
 };
 const DRAGON_COST = 7;
+/** 警報役の点数 */
+const ALARM_COST = 2;
 
 /** 後衛(射撃・魔法)の敵。編成では部屋の奥に置く */
 export const BACK_LINE = new Set(['archer', 'shaman', 'darkelf', 'warlock']);
@@ -37,6 +39,8 @@ export const BACK_LINE = new Set(['archer', 'shaman', 'darkelf', 'warlock']);
 export const GEN = {
   /** 部屋の敵を「前衛+後衛」の編成で置く割合(前衛は入口側、後衛は奥) */
   formationRate: 0.6,
+  /** 地下 2 階以降の各階に、警報役と護衛の部屋を 1 つ置く確率 */
+  alarmRate: 0.6,
 };
 
 /**
@@ -319,7 +323,7 @@ function placeEnemies(
   const units: Unit[] = [];
   const counts: Record<string, number> = {};
   const PREFIX: Record<string, string> = {
-    slime: 's', bat: 'v', goblin: 'g', archer: 'a', shaman: 'm', orc: 'o', darkelf: 'e', troll: 't', ogre: 'b', dragon: 'd', wyrm: 'd', warlock: 'k',
+    slime: 's', bat: 'v', goblin: 'g', archer: 'a', shaman: 'm', orc: 'o', darkelf: 'e', troll: 't', ogre: 'b', dragon: 'd', wyrm: 'd', warlock: 'k', hornblower: 'h',
   };
   const spawn = (defId: string, p: Pos, ai: AiMemory = { mode: 'idle' }) => {
     const m = MONSTERS[defId];
@@ -384,6 +388,23 @@ function placeEnemies(
     if (lair) spawn(difficulty === 'easy' ? 'wyrm' : 'dragon', lair, { mode: 'idle', asleep: true });
     // ドラゴン以外の番人も置く
     fillRoom(farRoom, group - DRAGON_COST);
+  }
+  // 警報役の部屋: 部屋の奥に角笛ゴブリン、入口側に護衛(前衛)。点数は予算から引く
+  if (floor >= 2 && candidates.length > 1 && rng.next() < GEN.alarmRate) {
+    const r = candidates[rng.int(0, candidates.length - 1)];
+    const p = extremeCell(r, map, d, taken, 'far');
+    if (p && budget >= ALARM_COST + 2) {
+      spawn('hornblower', p);
+      budget -= ALARM_COST;
+      let room = Math.min(budget, 2 + floor);
+      while (room >= 2) {
+        const t = pickType(room, (x) => !BACK_LINE.has(x));
+        const q = t && extremeCell(r, map, d, taken, 'near');
+        if (!t || !q) break;
+        place(t, q);
+        room -= MONSTER_GEN[t].cost;
+      }
+    }
   }
   const order = [...candidates].sort(() => rng.next() - 0.5);
   for (let i = 0; budget >= 1 && i < order.length * 3; i++) {

@@ -48,6 +48,8 @@ export const RULES = {
   wakeRange: 3,
   /** 回復薬を使う AP(最後のティックで効く) */
   itemCost: 2,
+  /** 警報役が気付いてから増援を呼ぶまでのターン数 */
+  alarmTurns: 3,
 };
 
 /** 魔法の AP(業火のような遅い大技は多い) */

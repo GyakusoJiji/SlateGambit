@@ -11,7 +11,7 @@ import { Rng, hashSeed } from './rng';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from './types';
 import { unitSees } from './vision';
 
-export type Intent = 'attack' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath' | 'cast';
+export type Intent = 'attack' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath' | 'cast' | 'alarm';
 
 export function planEnemies(state: GameState): Plans {
   const plans: Plans = {};
@@ -25,6 +25,7 @@ export function planEnemies(state: GameState): Plans {
 /** 予兆表示用に、計画を大まかな意図に要約する */
 export function summarizeIntent(actions: Action[], unit?: Unit): Intent {
   if (unit?.ai?.asleep) return 'sleep';
+  if (unit?.defId === 'hornblower' && unit.ai?.alarm !== undefined && !unit.ai.alarmRaised) return 'alarm';
   if (actions.some((a) => a.type === 'spell' && a.spell === 'breath')) return 'breath';
   if (actions.some((a) => a.type === 'spell' && a.spell === 'hellfire')) return 'cast';
   if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell' || a.type === 'overwatch' || a.type === 'intercept')) return 'attack';
@@ -43,6 +44,14 @@ function planOne(state: GameState, e: Unit): Action[] {
   // 眠っている間は何もしない
   if (e.ai?.asleep) {
     while (apLeft(plan) > 0) plan.push({ type: 'wait' });
+    return plan;
+  }
+
+  // 警報役: 角笛を吹き終えるまでは、見えている味方から逃げて距離を取り、守りを固める
+  if (e.defId === 'hornblower' && !e.ai?.alarmRaised) {
+    const blockedBy = (p: Pos) => units.some((o) => o !== e && !o.down && o.x === p.x && o.y === p.y);
+    if (targets.length > 0) for (const d of retreatPath(state, e, targets, blockedBy)) plan.push({ type: 'move', dir: d });
+    while (apLeft(plan) > 0) plan.push({ type: 'guard' });
     return plan;
   }
 

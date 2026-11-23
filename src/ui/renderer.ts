@@ -44,7 +44,7 @@ export interface View {
   marks: Mark[];
   /** 敵の予兆。area はブレスなど範囲攻撃の着弾予定(中心と半径) */
   /** 敵の予兆。area は範囲魔法の着弾範囲と、発動するティック */
-  hints: { at: Pos; intent: Intent; area?: { at: Pos; radius: number; tick?: number } }[];
+  hints: { at: Pos; intent: Intent; area?: { at: Pos; radius: number; tick?: number }; label?: string }[];
   effects: Effect[];
   /** 床に置かれている宝の位置(宝探しのとき) */
   treasureAt?: Pos | null;
@@ -165,7 +165,7 @@ export class Renderer {
     const sorted = [...view.units].sort((a, b) => rank(a) - rank(b));
     for (const u of sorted) this.drawUnit(u);
 
-    for (const h of view.hints) this.drawHint(h.at, h.intent);
+    for (const h of view.hints) this.drawHint(h.at, h.intent, h.label);
     for (const e of view.effects) this.drawEffect(e);
     for (const p of view.pointers ?? []) this.drawPointer(p.at, p.color, p.label);
   }
@@ -350,21 +350,24 @@ export class Renderer {
     g.fillRect(cx - z * 0.1, cy - z * 0.16, z * 0.08, z * 0.08);
   }
 
+  /** 頭上の印。2 文字以上(「笛2」など)は横長の角丸にする */
   private badge(x: number, y: number, color: string, text: string): void {
     const g = this.ctx;
     const r = Math.max(6, this.zoom * 0.2);
+    g.font = `bold ${Math.round(r * 1.2)}px sans-serif`;
+    const w = Math.max(0, g.measureText(text).width - r * 1.2);
     g.fillStyle = color;
     g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
+    g.arc(x - w / 2, y, r, Math.PI / 2, Math.PI * 1.5);
+    g.arc(x + w / 2, y, r, Math.PI * 1.5, Math.PI / 2);
+    g.closePath();
     g.fill();
     g.fillStyle = '#111';
-    g.font = `bold ${Math.round(r * 1.2)}px sans-serif`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(text, x, y + 0.5);
   }
 
-  /** 範囲攻撃の着弾予定(点線で囲んだ赤い範囲) */
   /** 範囲魔法の着弾範囲。tick があれば、発動するティックを範囲の左上に出す(例「5」= 5 ティック目) */
   private drawDanger(c: Pos, radius: number, tick?: number): void {
     const g = this.ctx;
@@ -393,7 +396,8 @@ export class Renderer {
     }
   }
 
-  private drawHint(at: Pos, intent: Intent): void {
+  /** label があれば、印の文字の代わりに出す(警報役の残りターンなど) */
+  private drawHint(at: Pos, intent: Intent, label?: string): void {
     const map: Record<Intent, [string, string]> = {
       attack: ['#ff4d4d', '!'],
       move: ['#ffd24d', '→'],
@@ -402,8 +406,10 @@ export class Renderer {
       sleep: ['#8a8ad0', 'z'],
       breath: ['#ff7a20', '炎'],
       cast: ['#ff3a80', '詠'],
+      alarm: ['#ffb000', '笛'],
     };
-    const [color, text] = map[intent];
+    const [color, mark] = map[intent];
+    const text = label ?? mark;
     this.badge(this.sx(at.x) - this.zoom * 0.3, this.sy(at.y) - this.zoom * 0.32, color, text);
   }
 

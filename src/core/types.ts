@@ -35,6 +35,12 @@ export interface AiMemory {
   asleep?: boolean;
   /** 最後に炎のブレスを吐いたターン */
   breathTurn?: number;
+  /** 警報役: 気付いてから角笛を吹いたターン数(気付く前は未指定) */
+  alarm?: number;
+  /** 警報役: 増援を呼び終えた */
+  alarmRaised?: boolean;
+  /** 警報役: 止めた宝を渡し終えた */
+  bountyPaid?: boolean;
 }
 
 export interface Unit {
@@ -168,6 +174,10 @@ export type GameEvent =
   | { tick: number; type: 'stun'; id: string; ticks: number }
   /** 足払いで、id の構えていた攻撃・魔法(詠唱)が取り消された */
   | { tick: number; type: 'interrupt'; id: string; spell?: SpellId }
+  /** 警報役が角笛を吹き終え、増援が count 体現れた */
+  | { tick: number; type: 'alarm'; id: string; count: number }
+  /** 警報役を止め、持っていた宝(gold)を手に入れた */
+  | { tick: number; type: 'bounty'; id: string; gold: number }
   /** 休憩の物音で、遠くから敵が現れた(位置は教えない) */
   | { tick: number; type: 'wander'; count: number }
   /** mp=true なら MP の回復(回復薬) */

@@ -211,6 +211,12 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
       case 'wander':
         lines.push(T.log.wander);
         break;
+      case 'alarm':
+        lines.push(T.log.alarm(nameOf(e.id), e.count));
+        break;
+      case 'bounty':
+        lines.push(T.log.bounty(nameOf(e.id), e.gold));
+        break;
       case 'heal':
         lines.push(e.mp ? T.log.healMp(nameOf(e.id), e.amount) : T.log.heal(nameOf(e.id), e.amount));
         break;
@@ -318,6 +324,8 @@ export function turnSummary(events: GameEvent[], before: Unit[], nameOf: (id: st
     else if (e.type === 'treasure') notes.push(e.got ? T.log.treasureGot(nameOf(e.id)) : T.log.treasureDrop(nameOf(e.id)));
     else if (e.type === 'awaken') notes.push(T.log.awaken(nameOf(e.id)));
     else if (e.type === 'wander') notes.push(T.log.wander);
+    else if (e.type === 'alarm') notes.push(T.log.alarm(nameOf(e.id), e.count));
+    else if (e.type === 'bounty') notes.push(T.log.bounty(nameOf(e.id), e.gold));
   }
   const lv = levelUpNote(events, nameOf, party.length);
   if (lv) notes.push(lv);
