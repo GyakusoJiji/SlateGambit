@@ -5,12 +5,14 @@
 //   VARIANTS=all  … 難易度ごとに加えて、途中の階から始める場合
 //   VARIANTS=budget BUDGET="normal.3=20,22 hard.5=30"
 //                 … ある階の敵の点数の合計を差し替えて比べる(難易度.階=点数,点数,…)
+//   VARIANTS=enc     … 固定遭遇をボットで遊ぶ
 //   VARIANTS=descend … ボットが下り階段へ向かう探索率を変えて比べる
 import { it } from 'vitest';
 import { planEnemies } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
 import { DIFFICULTY, FLOORS, generateGame } from '../src/core/generate';
 import { createTestGame } from '../src/core/scenario';
+import { createEncounter, ENCOUNTERS } from '../src/core/encounters';
 import type { Difficulty, GameEvent, GameState } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
@@ -134,6 +136,9 @@ const VARIANTS: Variant[] = (process.env.VARIANTS === 'feat'
         },
       };
     })
+  : process.env.VARIANTS === 'enc'
+  ? // 固定遭遇をボットで遊ぶ(編成や新しい仕組みの比べ方の目安。ボットは足払いなどを狙って使わない)
+    ENCOUNTERS.map((e) => ({ name: e.title.slice(0, 20), setup: () => {}, game: (seed: number) => createEncounter(e.id, seed)! }))
   : process.env.VARIANTS === 'all'
   ? [
       ...BASE,

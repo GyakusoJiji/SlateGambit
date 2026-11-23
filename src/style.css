@@ -490,6 +490,16 @@ body {
   white-space: normal;
   text-align: left;
 }
+/* 難易度選択は固定遭遇の一覧が増えても画面に収め、はみ出す分はスクロールする */
+.sheet.start {
+  max-height: 100%;
+  overflow-y: auto;
+}
+.start h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
 .start .diff b {
   font-size: 16px;
 }

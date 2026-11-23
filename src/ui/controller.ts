@@ -5,6 +5,7 @@ import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
+import { createEncounter, encounterDef, ENCOUNTERS } from '../core/encounters';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
 import type { Action, Difficulty, GameEvent, GameState, Plans, Pos, Unit } from '../core/types';
@@ -203,7 +204,17 @@ export class Controller {
       <h2>${T.start.title}</h2>
       ${btn('easy')}${btn('normal')}${btn('hard')}
       <p class="note">${T.start.note}<br>${T.difficultyDesc.boss}</p>
+      <h3>${T.start.encounters}</h3>
+      ${ENCOUNTERS.map((e) => `<button class="act diff" data-ov="encounter" data-id="${e.id}"><b>${e.title}</b><small>${e.desc}</small></button>`).join('')}
     </div>`;
+  }
+
+  /** 固定遭遇を始める(自動保存しない)。見つからなければ false */
+  startEncounter(id: string, seed: number = randomSeed()): boolean {
+    const st = createEncounter(id, seed);
+    if (!st) return false;
+    this.begin(st);
+    return true;
   }
 
   private pendingSeed = 0;
@@ -280,8 +291,8 @@ export class Controller {
     this.history.push({ turn: this.state.turn, events: result.events, before: this.state.units });
     if (this.history.length > HISTORY_TURNS) this.history.shift();
     this.state = result.state;
-    // ターンが終わるたびに自動保存する(決着したら保存を消す)
-    saveGame(this.state);
+    // ターンが終わるたびに自動保存する(決着したら保存を消す)。固定遭遇は保存しない
+    if (!this.state.scenario) saveGame(this.state);
     this.refresh();
   }
 
@@ -429,7 +440,9 @@ export class Controller {
   private statusLine(): string {
     const st = this.state;
     const o = st.objective;
-    const goal = o?.kind === 'treasure' ? T.objectiveShort[o.holder ? 'treasureHeld' : 'treasure'] : T.objectiveShort.annihilate;
+    const goal = o?.kind === 'treasure' ? T.objectiveShort[o.holder ? 'treasureHeld' : 'treasure'] : T.objectiveShort[o?.kind ?? 'annihilate'];
+    // 固定遭遇は階とゴールドの代わりに遭遇の名前を出す
+    if (st.scenario) return `${encounterDef(st.scenario)?.title ?? st.scenario}·${T.turnShort(st.turn)}·${goal}`;
     return `${T.floor(currentFloor(st))}·${T.turnShort(st.turn)}·${T.gold(st.gold ?? 0)}·${goal}`;
   }
 
@@ -508,11 +521,12 @@ export class Controller {
     const won = this.state.status === 'won';
     this.el.overlay.hidden = false;
     this.el.overlay.innerHTML = `<div class="sheet result ${won ? 'won' : 'lost'}">
-      <h2>${won ? (this.state.objective?.kind === 'treasure' ? T.result.wonTreasure : T.result.won) : T.result.lost}</h2>
+      <h2>${won ? (({ treasure: T.result.wonTreasure, escape: T.result.wonEscape }) as Record<string, string>)[this.state.objective?.kind ?? ''] ?? T.result.won : T.result.lost}</h2>
       <p>${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.turn(this.state.turn - 1)} で決着</p>
       <p>${T.result.summary(this.state.deepest ?? currentFloor(this.state), T.gold(this.state.gold ?? 0))}</p>
       <p>${this.party().map((u) => `${u.name} ${T.level(u.level ?? 1)}`).join(' · ')}</p>
-      <button class="act primary" data-ov="new">${T.settings.newGame}</button>
+      ${this.state.scenario ? `<button class="act primary" data-ov="retry">${T.result.retry}</button>` : ''}
+      <button class="act${this.state.scenario ? '' : ' primary'}" data-ov="new">${T.settings.newGame}</button>
       <button class="act" data-ov="close">${T.settings.close}</button>
     </div>`;
   }
@@ -628,6 +642,15 @@ export class Controller {
       const input = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]');
       const typed = input && input.value && Number(input.value) !== this.state.seed;
       this.showStart(typed ? Number(input.value) : randomSeed());
+    }
+    if (b.dataset.ov === 'encounter' || b.dataset.ov === 'retry') {
+      const id = b.dataset.ov === 'retry' ? this.state.scenario! : b.dataset.id!;
+      // 再読み込みで同じ固定遭遇から始められるよう、URL に残す
+      const url = new URL(location.href);
+      for (const k of ['seed', 'diff', 'floor']) url.searchParams.delete(k);
+      url.searchParams.set('scenario', id);
+      history.replaceState(null, '', url);
+      this.startEncounter(id);
     }
     if (b.dataset.ov === 'diff') {
       const diff = b.dataset.diff as Difficulty;

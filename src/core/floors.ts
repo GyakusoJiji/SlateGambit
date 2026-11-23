@@ -105,7 +105,8 @@ export function openChests(state: GameState, events: GameEvent[], tick: number):
  * 確率は、その階の休憩に使った割合(休憩のティック数 ÷ 全ティック)に比例する
  */
 export function applyWander(state: GameState, rng: Rng, restShare: number, events: GameEvent[]): void {
-  if (RULES.wanderChance <= 0 || restShare <= 0) return;
+  // 固定遭遇では起きない(部屋の中だけで比べるため)
+  if (RULES.wanderChance <= 0 || restShare <= 0 || state.scenario) return;
   if (!events.some((e) => e.type === 'rest' && (e.hp > 0 || e.mp > 0))) return;
   const k = DIFFICULTY[state.difficulty ?? 'normal'].wander;
   if (rng.next() >= RULES.wanderChance * k * restShare) return;

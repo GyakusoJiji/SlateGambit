@@ -22,8 +22,12 @@ const params = new URLSearchParams(location.search);
 const seed = params.get('seed') ? Number(params.get('seed')) : randomSeed();
 const diff = params.get('diff') as Difficulty | null;
 const saved = loadGame();
+// ?scenario=ID で固定遭遇から始める(自動保存とは関係なく、毎回最初から)
+const scenario = params.get('scenario');
 const sameGame = saved && (!params.get('seed') || (saved.seed === seed && (saved.difficulty ?? 'normal') === diff));
-if (saved && sameGame) {
+if (scenario && controller.startEncounter(scenario)) {
+  // 固定遭遇を始めた
+} else if (saved && sameGame) {
   controller.resume(saved);
 } else if (diff === 'easy' || diff === 'normal' || diff === 'hard') {
   // &floor=N で途中の階から始める(バランス確認用。レベルもその階に合わせる)

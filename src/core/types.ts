@@ -68,8 +68,12 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
  * - annihilate: 敵の全滅(テスト用の固定マップ)
  * - treasure: 宝(秘宝)を拾い、持ったまま地下 1 階の入口の階段('S')に戻る。
  *   at=床に置かれている位置、floor=その階(未指定は今の階)、holder=持っている味方
+ * - escape: who(気絶していても、担がれていてもよい)が出口('S')でターンを終える(固定遭遇の救出)
  */
-export type Objective = { kind: 'annihilate' } | { kind: 'treasure'; at: Pos | null; floor?: number; holder?: string };
+export type Objective =
+  | { kind: 'annihilate' }
+  | { kind: 'treasure'; at: Pos | null; floor?: number; holder?: string }
+  | { kind: 'escape'; who: string };
 
 /** 今いない階の状態(戻ったときに再現する) */
 export interface FloorData {
@@ -101,6 +105,8 @@ export interface GameState {
   gold?: number;
   /** 訪れた最も深い階 */
   deepest?: number;
+  /** 固定遭遇の ID(固定遭遇なら自動保存せず、休憩の物音も起きない) */
+  scenario?: string;
 }
 
 // ---- 行動(予約リストの要素) ----

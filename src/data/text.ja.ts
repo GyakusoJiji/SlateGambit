@@ -97,6 +97,8 @@ export const T = {
   result: {
     won: '勝利! 敵を全滅させた',
     wonTreasure: '勝利! 秘宝を地上へ持ち帰った',
+    wonEscape: '勝利! 戦士を連れ出した',
+    retry: 'もう一度',
     lost: '全滅した…',
     summary: (deepest: number, gold: string) => `最も深く潜った階: 地下 ${deepest} 階 · 手に入れたゴールド: ${gold}`,
   },
@@ -189,16 +191,19 @@ export const T = {
   objective: {
     annihilate: '敵を全滅させる',
     treasure: '地下 5 階の秘宝を見つけ、地下 1 階の入口の階段まで持ち帰る',
+    escape: '気絶した戦士を、出口の階段まで連れ出す(担ぐか蘇生する)',
   } as Record<string, string>,
   /** トップバー用の短い表示 */
   objectiveShort: {
     annihilate: '敵を全滅',
     treasure: '秘宝を探す',
     treasureHeld: '秘宝を地上へ!',
+    escape: '戦士を出口へ',
   } as Record<string, string>,
 
   start: {
     title: '難易度を選んでください',
+    encounters: '固定遭遇(同じ部屋で作戦を試す。Lv 3・保存しない)',
     note: '地下 5 階まであるダンジョンは毎回ランダムに作られます。階段を行き先に選んで誰か 1 人が着くと、全員で別の階へ移ります(通り過ぎるだけなら移りません)。宝箱でゴールドを集め、敵を倒して経験値をためるとレベルが上がります',
   },
 

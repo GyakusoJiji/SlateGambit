@@ -886,6 +886,11 @@ function judge(state: GameState): GameState['status'] {
     const h = o.holder ? state.units.find((u) => u.id === o.holder) : undefined;
     return h && !h.down && currentFloor(state) === 1 && tileAt(state.map, h.x, h.y) === 'S' ? 'won' : 'playing';
   }
+  if (o?.kind === 'escape') {
+    // 救出: 対象(気絶していても、担がれていてもよい)が出口の階段のマスでターンを終えたら勝ち
+    const w = state.units.find((u) => u.id === o.who);
+    return w && tileAt(state.map, w.x, w.y) === 'S' ? 'won' : 'playing';
+  }
   if (state.units.filter((u) => u.side === 'enemy').every((u) => u.down)) return 'won';
   return 'playing';
 }
