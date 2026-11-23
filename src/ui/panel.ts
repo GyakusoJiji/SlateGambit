@@ -5,6 +5,7 @@ import { T } from '../data/text.ja';
 import { SPELLS } from '../data/units';
 import { expProgress, stats } from '../core/stats';
 import { iconUrl } from './icons';
+import { tickCells } from './timeline';
 
 export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'smite' | 'trip' | 'power' | 'carry' | 'group';
 
@@ -345,4 +346,23 @@ function strikeSummary(
     default:
       return s.target ? `${label}: ${nameOf(s.target)}` : label;
   }
+}
+
+/**
+ * 予約の時間軸: 味方ごとに 8 ティックの行動を並べる(見るだけ)。
+ * 見出しのティック番号を押すと、盤面にそのティックの終わりの予定位置を出す(もう一度押すと消す)
+ */
+export function timeline(party: Unit[], plans: Record<string, Action[]>, nameOf: (id: string) => string, filler: 'guard' | 'wait', tick: number | null, selected: string | null): string {
+  const head = Array.from({ length: TICKS_PER_TURN }, (_, i) => `<button class="tk${tick === i + 1 ? ' on' : ''}" data-tick="${i + 1}" title="${T.timeline.tickTitle(i + 1)}">${i + 1}</button>`).join('');
+  const rows = party
+    .map((u) => {
+      const cells = u.down
+        ? `<span class="cell down" style="grid-column: span ${TICKS_PER_TURN}">${T.down}</span>`
+        : tickCells(plans[u.id] ?? [], filler)
+            .map((c, i) => `<span class="cell${c.hit ? ' hit' : ''}${c.fill ? ' fill' : ''}${tick === i + 1 ? ' on' : ''}">${esc(c.glyph)}</span>`)
+            .join('');
+      return `<span class="who${u.id === selected ? ' sel' : ''}" data-sel="${u.id}">${esc(nameOf(u.id))}</span>${cells}`;
+    })
+    .join('');
+  return `<div class="timeline"><span class="who"></span>${head}${rows}</div>`;
 }

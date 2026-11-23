@@ -104,7 +104,7 @@ body {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  height: min(372px, 58%);
+  height: min(452px, 64%);
   overflow: hidden;
   padding: 6px 8px max(6px, env(safe-area-inset-bottom));
   background: var(--panel);
@@ -331,6 +331,62 @@ body {
 }
 .log:empty {
   display: none;
+}
+/* 予約の時間軸(4 人 × 8 ティック) */
+.timeline {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 4.5em repeat(8, 1fr);
+  gap: 1px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 15px;
+  text-align: center;
+}
+.timeline .who {
+  overflow: hidden;
+  padding-right: 4px;
+  color: var(--muted);
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.timeline .who.sel {
+  color: var(--accent);
+}
+.timeline .tk {
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.timeline .tk.on {
+  background: var(--accent);
+  color: #000;
+}
+.timeline .cell {
+  border-radius: 3px;
+  background: #2a2a3c;
+}
+.timeline .cell.fill {
+  color: #77778a;
+  background: #22222e;
+}
+.timeline .cell.hit {
+  background: #6a2a2a;
+  color: #ffd0c0;
+  font-weight: 700;
+}
+.timeline .cell.on {
+  outline: 1px solid var(--accent);
+}
+.timeline .cell.down {
+  color: var(--danger);
+  background: #22222e;
 }
 /* ターン後の結果の要約: 1 人 1 行。長い行は省略し、全部は履歴の画面で見る */
 .log.summary li {

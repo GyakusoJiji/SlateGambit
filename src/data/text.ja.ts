@@ -162,6 +162,10 @@ export const T = {
     idle: '待機',
   },
 
+  timeline: {
+    tickTitle: (t: number) => `${t} ティック目の終わりの予定位置を盤面に出す`,
+  },
+
   history: {
     title: '履歴',
     turn: (n: number) => `ターン ${n}`,

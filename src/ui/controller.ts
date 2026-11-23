@@ -13,7 +13,8 @@ import { T } from '../data/text.ja';
 import { SPELLS } from '../data/units';
 import { stats } from '../core/stats';
 import { attachInput } from './input';
-import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, turnSummary, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, timeline, turnSummary, type Mode } from './panel';
+import { reachInfo, tickPositions, tickCells } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
 import { saveGame } from './save';
@@ -39,6 +40,8 @@ export class Controller {
   private pressTimer = 0;
   private playback: Playback | null = null;
   private lastPlayback: Playback | null = null;
+  /** 時間軸で選んでいるティック(盤面にその時点の予定位置を出す)。null なら出さない */
+  private timelineTick: number | null = null;
   /** 最近のターンの出来事(履歴の画面用。保存はしない) */
   private history: { turn: number; events: GameEvent[]; before: Unit[] }[] = [];
   private names = new Map<string, string>();
@@ -247,6 +250,7 @@ export class Controller {
 
   private beginPlanning(): void {
     this.enemyPlans = planEnemies(this.state);
+    this.timelineTick = null;
     this.plans = {};
     for (const u of this.party()) this.plans[u.id] = [];
     const first = this.party().find((u) => !u.down);
@@ -368,6 +372,25 @@ export class Controller {
     for (const u of this.party()) {
       marks.push(...planMarks(st, u, this.plans[u.id] ?? [], u.id === this.selected ? '#ffe14a' : '#5ab0ffaa'));
     }
+    // 対象を選ぶモードでは、予定位置から届くマスと届く相手を出す
+    const sel = this.selected ? this.unit(this.selected) : undefined;
+    if (sel && !sel.down && TARGET_MODES.has(this.mode)) {
+      const { tiles, targets } = reachInfo(st, sel, simulate(st, sel, this.plans[sel.id] ?? []).end, this.mode);
+      for (const p of tiles) marks.push({ kind: 'area', at: p, radius: 0, color: 'rgba(110,190,255,0.13)' });
+      for (const t of targets) if (seen(t)) marks.push({ kind: 'target', at: t, color: '#7fe07f' });
+    }
+    // 時間軸でティックを選んでいれば、そのティックの終わりの味方の予定位置を出す(攻撃・魔法が発動する者は印を付ける)
+    if (this.timelineTick !== null) {
+      const t = this.timelineTick;
+      const filler = this.foesInSight() ? 'guard' : 'wait';
+      for (const u of this.party()) {
+        if (u.down) continue;
+        const plan = this.plans[u.id] ?? [];
+        const at = tickPositions(st, u, plan)[t];
+        marks.push({ kind: 'ghost', at, icon: stats(u).icon });
+        if (tickCells(plan, filler)[t - 1]?.hit) marks.push({ kind: 'target', at, color: '#ffb040' });
+      }
+    }
     // 止まるマスが重なっている所は赤い枠で知らせる
     for (const p of this.overlaps()) marks.push({ kind: 'area', at: p, radius: 0, color: 'rgba(255,40,40,0.35)' }, { kind: 'target', at: p, color: '#ff3030' });
     if (this.settings.debugPlans) {
@@ -460,6 +483,7 @@ export class Controller {
         ${actButton('group', { on: this.mode === 'group', off: !active || this.foesInSight() })}
         ${actButton('execute', { cls: 'primary' })}
       </div>
+      ${timeline(this.party(), this.plans, nameOf, this.foesInSight() ? 'guard' : 'wait', this.timelineTick, this.selected)}
       ${this.lastPlayback ? summaryList(turnSummary(this.lastPlayback.result.events, this.lastPlayback.before.units, nameOf)) : '<ul class="log"></ul>'}`;
   }
 
@@ -657,6 +681,13 @@ export class Controller {
     }
     // クイック移動・連続休憩の途中で何か押したら止める
     if (!pbBtn && this.stopAuto(T.toast.stopped)) return;
+    const tickBtn = t.closest<HTMLElement>('[data-tick]');
+    if (tickBtn && !this.playback) {
+      const n = Number(tickBtn.dataset.tick);
+      this.timelineTick = this.timelineTick === n ? null : n;
+      this.changed();
+      return;
+    }
     const selBtn = t.closest<HTMLElement>('[data-sel]');
     if (selBtn && !this.playback) {
       // カードで選んだら、そのキャラの位置に盤面を寄せる
@@ -947,6 +978,9 @@ export class Controller {
     return this.state.units.find((u) => u.id === id);
   }
 }
+
+/** 対象を選ぶモード(届くマスを盤面に出す) */
+const TARGET_MODES = new Set<Mode>(['attack', 'power', 'trip', 'fireball', 'smite', 'heal', 'revive', 'carry']);
 
 /** 履歴に残すターン数 */
 const HISTORY_TURNS = 30;
