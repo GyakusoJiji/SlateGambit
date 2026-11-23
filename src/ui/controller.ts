@@ -433,6 +433,10 @@ export class Controller {
     const down = findTile(st.map, '>');
     if (down && seen(down)) out.push({ at: down, color: '#b08cff', label: T.pointer.down });
     if (treasureAt && seen(treasureAt)) out.push({ at: treasureAt, color: '#ffd23a', label: T.pointer.treasure });
+    // 救出の対象(固定遭遇)。画面の外にいれば場所を示す
+    const o = st.objective;
+    const who = o?.kind === 'escape' ? st.units.find((u) => u.id === o.who) : undefined;
+    if (who && !this.renderer.inView(who)) out.push({ at: who, color: '#ff8080', label: T.pointer.rescue(who.name) });
     const party = this.party().filter((u) => !u.down);
     if (party.length > 0 && !party.some((u) => this.renderer.inView(u))) out.push({ at: centroid(party), color: '#5ab0ff', label: T.pointer.party });
     return out;

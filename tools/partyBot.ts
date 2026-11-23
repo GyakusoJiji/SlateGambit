@@ -306,7 +306,13 @@ function explore(state: GameState, party: Unit[]): Plans {
     for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) if (map.tiles[y][x] === c && seen({ x, y })) return true;
     return false;
   };
-  if (holder) {
+  const escapee = obj?.kind === 'escape' ? party.find((u) => u.id === obj.who) : undefined;
+  if (escapee) {
+    // 救出: 起きている対象を先頭に出口へ(気絶中は僧侶の蘇生を待つ)
+    goal = (p: Pos) => tile(p) === 'S';
+    candidates = [escapee];
+    goalStair = 'S';
+  } else if (holder) {
     // 秘宝を持っていれば、持ち主を先頭に上り階段(地下 1 階では入口)へ
     goal = (p: Pos) => tile(p) === 'S';
     candidates = [holder];

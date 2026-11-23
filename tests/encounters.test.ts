@@ -19,6 +19,30 @@ describe('固定遭遇', () => {
     }
   });
 
+  it('救出: 気絶した戦士を担いで出口の階段まで運べば勝ち(運ぶ者が立っていれば、担がれた戦士も一緒)', () => {
+    const s = createEncounter('rescue', 1)!;
+    expect(s.objective).toEqual({ kind: 'escape', who: 'p1' });
+    const w = s.units.find((u) => u.id === 'p1')!;
+    expect(w.down).toBe(true);
+    for (const u of s.units) if (u.side === 'enemy') u.down = true;
+    const exit = { x: 1, y: 3 };
+    expect(s.map.tiles[exit.y][exit.x]).toBe('S');
+    const priest = s.units.find((u) => u.id === 'p4')!;
+    priest.x = exit.x;
+    priest.y = exit.y + 1;
+    priest.carrying = 'p1';
+    w.x = priest.x;
+    w.y = priest.y;
+    const r = resolveTurn(s, { p4: [{ type: 'move', dir: 'N', slow: true }] });
+    expect(r.state.status).toBe('won');
+  });
+
+  it('救出: 戦士が出口に着くまでは、敵を全滅させても勝ちにならない', () => {
+    const s = createEncounter('rescue', 1)!;
+    for (const u of s.units) if (u.side === 'enemy') u.down = true;
+    expect(resolveTurn(s, {}).state.status).toBe('playing');
+  });
+
   it('知らない ID なら作らない', () => {
     expect(createEncounter('nothing', 1)).toBeNull();
   });

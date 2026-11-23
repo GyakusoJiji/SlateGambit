@@ -236,6 +236,7 @@ export const T = {
     down: '下り階段',
     treasure: '秘宝',
     party: '味方',
+    rescue: (name: string) => `救出: ${name}`,
   },
 
   err: {
