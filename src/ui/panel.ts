@@ -1,13 +1,13 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
 import { RULES, apLeft, carryingAfter, planCost, spellCost } from '../core/actions';
-import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type SpellId, type StrikeKind, type Unit } from '../core/types';
+import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type GameState, type ItemId, type SpellId, type StrikeKind, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
-import { SPELLS } from '../data/units';
+import { ITEMS, SPELLS } from '../data/units';
 import { expProgress, stats } from '../core/stats';
 import { iconUrl } from './icons';
 import { tickCells } from './timeline';
 
-export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'smite' | 'trip' | 'power' | 'carry' | 'group';
+export type Mode = 'move' | 'attack' | 'fireball' | 'heal' | 'revive' | 'smite' | 'trip' | 'power' | 'carry' | 'group' | 'potion';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -54,6 +54,8 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
       return T.act.wait;
     case 'spell':
       return SPELLS[a.spell].name + (a.target ? `:${nameOf(a.target)}` : '');
+    case 'item':
+      return `${ITEMS[a.item].short}:${nameOf(a.target)}`;
     case 'overwatch':
       return `${T.act.overwatch}×${a.ticks}`;
     case 'intercept':
@@ -86,6 +88,17 @@ const SKILL_SLOTS = 3;
 const GAP = '<span class="act-gap"></span>';
 
 /** キャラを選んでいないときの、全部グレーのボタン */
+/**
+ * 回復薬のボタン。押すたびに HP 薬と MP 薬を切り替える(選んでいる方を表示し、右下に残り数)。
+ * どちらも持っていない・AP が足りない・担いでいるときはグレー
+ */
+export function potionButton(kind: ItemId, items: GameState['items'], on: boolean, off: boolean): string {
+  const it = ITEMS[kind];
+  const n = items?.[kind] ?? 0;
+  const cls = ['act', on ? 'on' : '', off ? 'off' : ''].filter(Boolean).join(' ');
+  return `<button data-act="potion" data-label="${it.short}" class="${cls}"${off ? ' aria-disabled="true"' : ''}><span class="ic">🧪</span>${it.short}<small>${n}</small></button>`;
+}
+
 export function idleButtons(): string {
   return [...['move', 'attack', 'guard', 'wait', 'watch'].map((id) => actButton(id, { off: true })), GAP, GAP, GAP, actButton('carry', { off: true })].join('');
 }
@@ -199,7 +212,7 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         lines.push(T.log.wander);
         break;
       case 'heal':
-        lines.push(T.log.heal(nameOf(e.id), e.amount));
+        lines.push(e.mp ? T.log.healMp(nameOf(e.id), e.amount) : T.log.heal(nameOf(e.id), e.amount));
         break;
       case 'down':
         lines.push(T.log.down(nameOf(e.id)));
@@ -343,9 +356,10 @@ function strikeSummary(
       const kills = foes.filter((d) => killed(d.id)).length;
       return T.sum.area(label, foes.length, total, kills, allies.length);
     }
-    case 'heal': {
+    case 'heal':
+    case 'potion': {
       const h = after.find((e) => e.type === 'heal');
-      return h && h.type === 'heal' ? `${label}: ${nameOf(h.id)} +${h.amount}` : label;
+      return h && h.type === 'heal' ? `${label}: ${nameOf(h.id)} ${h.mp ? 'MP' : ''}+${h.amount}` : label;
     }
     default: {
       // 足払いで構え・詠唱を止めたら、それも添える

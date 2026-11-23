@@ -1,5 +1,5 @@
 // 同時解決エンジン。全ユニットの予約を 1 ティックずつ同時に処理する。
-import { SPELLS, unitDef } from '../data/units';
+import { ITEMS, SPELLS, unitDef } from '../data/units';
 import { applyStairs, applyWander, currentFloor, openChests, treasureHere } from './floors';
 import { gainExp, spellBonus, stats } from './stats';
 import { RULES, expandPlan, restTicks, type Step } from './actions';
@@ -33,7 +33,7 @@ export interface MoveIntent {
 
 interface StrikeIntent {
   unit: Unit;
-  action: Extract<Action, { type: 'attack' | 'spell' }>;
+  action: Extract<Action, { type: 'attack' | 'spell' | 'item' }>;
   reaction: boolean;
 }
 
@@ -201,7 +201,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     const hpDelta = new Map<string, number>();
     const revived = new Set<string>();
     const stuns: string[] = [];
-    const ctx: StrikeCtx = { tick, turn: state.turn, map, units, byId, rng, guard, cover, events, hpDelta, revived, attackedBy, stuns };
+    const ctx: StrikeCtx = { state, tick, turn: state.turn, map, units, byId, rng, guard, cover, events, hpDelta, revived, attackedBy, stuns };
     for (const st of strikes) performStrike(ctx, st);
     // 足払い: 次のティックから数ティック、予約していた行動が消える(構えや移動も中断される)
     for (const id of stuns) {
@@ -617,6 +617,7 @@ function nearestFree(map: GameState['map'], start: Pos, units: Unit[], continues
 }
 
 interface StrikeCtx {
+  state: GameState;
   tick: number;
   /** 解決中のターン番号 */
   turn: number;
@@ -703,6 +704,27 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     if (RULES.holdFireOnAlly && hit && hit !== target && hit.side === u.side) return fizzle(REACH.ally);
     events.push({ tick, type: 'strike', id: u.id, kind: 'ranged', target: target.id, hitId: hit?.id, end, reaction });
     if (hit) dealDamage(ctx, u, hit, def.atk, def.dmgVar, { mult: power, single: true });
+    return;
+  }
+
+  // 回復薬: 自分か隣の立っている味方に。持ち物が尽きていれば不発
+  if (action.type === 'item') {
+    const target = byId.get(action.target);
+    if (!target || target.down) return fizzle('対象が倒れている');
+    if (!nearOrSame(map, u, target)) return fizzle(REACH.adjacent);
+    const items = (ctx.state.items ??= {});
+    if (!items[action.item]) return fizzle('薬がない');
+    items[action.item]! -= 1;
+    const it = ITEMS[action.item];
+    events.push({ tick, type: 'strike', id: u.id, kind: 'potion', target: target.id, hitId: target.id, end: pos(target), reaction });
+    if (action.item === 'hp') {
+      ctx.hpDelta.set(target.id, (ctx.hpDelta.get(target.id) ?? 0) + it.amount);
+      events.push({ tick, type: 'heal', id: target.id, amount: it.amount });
+    } else {
+      const gain = Math.min(it.amount, stats(target).maxMp - target.mp);
+      target.mp += gain;
+      events.push({ tick, type: 'heal', id: target.id, amount: gain, mp: true });
+    }
     return;
   }
 

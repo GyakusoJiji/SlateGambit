@@ -1,5 +1,5 @@
 // 職業とモンスターの定義。数値調整はここで行う。
-import type { SpellId } from '../core/types';
+import type { ItemId, SpellId } from '../core/types';
 
 export interface UnitDef {
   id: string;
@@ -94,6 +94,12 @@ export const SPELLS: Record<SpellId, SpellDef> = {
    * 逃げる・足払いで詠唱を止める・先に倒す、のどれかで対処する
    */
   hellfire: { id: 'hellfire', name: '業火', mp: 4, range: 6, target: 'tile', power: 12, powerVar: 4, radius: 2, cost: 5 },
+};
+
+/** 回復薬。泉で買い、戦闘中も使える(2 AP・自分か隣の味方) */
+export const ITEMS: Record<ItemId, { id: ItemId; name: string; short: string; price: number; amount: number }> = {
+  hp: { id: 'hp', name: 'HP 回復薬', short: 'HP薬', price: 40, amount: 25 },
+  mp: { id: 'mp', name: 'MP 回復薬', short: 'MP薬', price: 40, amount: 8 },
 };
 
 export function unitDef(defId: string): UnitDef {

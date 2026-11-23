@@ -127,7 +127,7 @@ export class Playback {
       } else if (e.type === 'interrupt') {
         out.push({ kind: 'text', at: posOf(e.id), text: '詠唱中断', color: '#ffe060', rise: 0.9 + k * 0.4, alpha: 1 });
       } else if (e.type === 'heal') {
-        out.push({ kind: 'text', at: posOf(e.id), text: `+${e.amount}`, color: '#70ff90', rise: 0.3 + k * 0.5, alpha: 1 });
+        out.push({ kind: 'text', at: posOf(e.id), text: `+${e.amount}${e.mp ? ' MP' : ''}`, color: e.mp ? '#80b8ff' : '#70ff90', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'fizzle') {
         out.push({ kind: 'text', at: posOf(e.id), text: 'miss', color: '#c0c0c0', rise: 0.3 + k * 0.4, alpha });
       } else if (e.type === 'rest') {

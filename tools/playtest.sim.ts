@@ -18,7 +18,7 @@ import { visibleFoes } from '../src/core/vision';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
 import { stats } from '../src/core/stats';
 import { RULES } from '../src/core/actions';
-import { BOT, planParty } from './partyBot';
+import { BOT, botShop, planParty } from './partyBot';
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -278,6 +278,7 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
     while (state.status === 'playing' && state.turn <= MAX_TURNS) {
       const hpBefore = new Map(state.units.map((u) => [u.id, u.hp / stats(u).maxHp]));
       const fight = visibleFoes(state.map, state.units, 'party').size > 0;
+      botShop(state);
       const r = resolveTurn(state, { ...planEnemies(state), ...planParty(state) });
       const lastHit = new Map<string, string>();
       for (const e of r.events) collect(e, lastHit, hpBefore);

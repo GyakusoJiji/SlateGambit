@@ -42,6 +42,7 @@ export const T = {
     move: '1AP/マス(上下左右のみ)。味方は通り抜けられるが重なって止まれない',
     attack: '3AP。近接は斜めを含む隣の敵に届く。届かない敵を選ぶと近づいて攻撃(残りAP全部)',
     carry: '1AP。隣(斜めも可)の気絶した味方を担ぐ。移動 2AP/マス',
+    potion: '2AP。自分か隣の味方に回復薬を使う(HP 薬は HP+25、MP 薬は MP+8)。もう一度押すと HP 薬と MP 薬を切り替える',
     drop: '1AP。担いでいる味方をその場に降ろす',
     fireball: '3AP。マス指定、3×3 を爆破。味方も巻き込む',
     smite: '3AP。マス指定、3×3 の敵だけに光を落とす(味方は巻き込まない)',
@@ -63,6 +64,7 @@ export const T = {
     move: '移動先のマスをタップ(敵をタップで攻撃)',
     attack: '攻撃する敵をタップ(届かなければ近づいて攻撃)',
     carry: '担ぐ気絶した味方(隣のマス)をタップ',
+    potion: '回復薬を使う味方(自分か隣)をタップ。ボタンをもう一度押すと薬の種類を切り替える',
     fireball: '撃ち込むマスをタップ(3×3・味方も巻き込む)',
     smite: '光を落とすマスをタップ(3×3・敵だけに当たる)',
     trip: '足を払う敵をタップ',
@@ -106,6 +108,7 @@ export const T = {
   log: {
     attack: (a: string, b: string, n: number, guarded: boolean) => `${a} → ${b} に ${n} ダメージ${guarded ? '(防御)' : ''}`,
     heal: (b: string, n: number) => `${b} が ${n} 回復`,
+    healMp: (b: string, n: number) => `${b} の MP が ${n} 回復`,
     down: (a: string) => `${a} が倒れた`,
     revive: (a: string) => `${a} が起き上がった`,
     fizzle: (a: string, why: string) => `${a} の行動は不発(${why})`,
@@ -149,6 +152,7 @@ export const T = {
       revive: '蘇生',
       trip: '足払い',
       hellfire: '業火',
+      potion: '薬',
     } as Record<string, string>,
     interrupted: (spell?: string) => `(${spell ? `${spell}の詠唱` : '構え'}を止めた)`,
     hit: (b: string, n: number, killed: boolean) => `${b}に ${n}${killed ? '(撃破)' : ''}`,
@@ -169,6 +173,16 @@ export const T = {
 
   timeline: {
     tickTitle: (t: number) => `${t} ティック目の終わりの予定位置を盤面に出す`,
+  },
+
+  shop: {
+    title: '泉の店',
+    note: '泉にいる間だけ回復薬を買える。持ち物はパーティ共通',
+    gold: (g: number) => `所持金 ${g} G`,
+    have: (n: number) => `持っている数 ${n}`,
+    buy: (name: string, price: number) => `${name}を買う(${price} G)`,
+    noItem: (name: string) => `${name}を持っていない(泉の店で買える)`,
+    reserved: (name: string) => `${name}は予約済みの分で足りなくなる`,
   },
 
   history: {

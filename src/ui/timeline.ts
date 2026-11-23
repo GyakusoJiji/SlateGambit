@@ -59,7 +59,7 @@ function glyphOf(s: Step): string {
     case 'windup':
       return '構';
     case 'strike':
-      return s.action.type === 'attack' ? (s.action.power ? '強' : '攻') : SPELLS[s.action.spell].name[0];
+      return s.action.type === 'attack' ? (s.action.power ? '強' : '攻') : s.action.type === 'item' ? '薬' : SPELLS[s.action.spell].name[0];
     case 'guard':
       return '防';
     case 'cover':
@@ -103,7 +103,7 @@ function modeRange(u: Unit, mode: Mode): number {
 export function reachInfo(st: GameState, u: Unit, from: Pos, mode: Mode): { tiles: Pos[]; targets: Unit[] } {
   const { map } = st;
   const r = modeRange(u, mode);
-  const near = mode === 'carry' || mode === 'revive';
+  const near = mode === 'carry' || mode === 'revive' || mode === 'potion';
   const melee = (mode === 'attack' || mode === 'power') && r <= 1;
   const ok = (p: Pos): boolean => {
     if (near) return nearOrSame(map, from, p);
@@ -122,6 +122,7 @@ export function reachInfo(st: GameState, u: Unit, from: Pos, mode: Mode): { tile
   if (mode === 'attack' || mode === 'power') targets = others.filter((o) => o.side !== u.side && !o.down && inReach(map, u, from, o, others));
   else if (mode === 'trip') targets = others.filter((o) => o.side !== u.side && !o.down && ok(o));
   else if (mode === 'heal') targets = [u, ...others].filter((o) => o.side === u.side && !o.down && ok(o));
+  else if (mode === 'potion') targets = [u, ...others].filter((o) => o.side === u.side && !o.down && ok(o));
   else if (near) targets = others.filter((o) => o.side === u.side && o.down && ok(o));
   return { tiles, targets };
 }

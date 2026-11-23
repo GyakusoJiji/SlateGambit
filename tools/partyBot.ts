@@ -2,23 +2,41 @@
 // 敵の計画は見ない(プレイヤーと同じく、見えている敵の現在位置だけで判断する)。
 import { RULES, apLeft, fillPlan } from '../src/core/actions';
 import { hasLos, linePoints } from '../src/core/los';
-import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step } from '../src/core/map';
+import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from '../src/core/map';
 import { findPath, pathAdjacent, pathTo } from '../src/core/path';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
-import { SPELLS } from '../src/data/units';
+import { ITEMS, SPELLS } from '../src/data/units';
 import { stats } from '../src/core/stats';
 import { currentFloor, treasureHere } from '../src/core/floors';
 import { FLOORS } from '../src/core/generate';
 
 /** 下り階段を見つけていれば、床のこの割合を探索した時点で降りる(宝箱・経験値と、時間の兼ね合い) */
 export const BOT = {
+  /** HP の割合がこれ未満なら、戦闘中に HP 回復薬を飲む */
+  potionAt: 0.3,
+  /** 泉で HP 回復薬をこの数まで買う */
+  potionStock: 3,
   descendAt: 0.7,
   /** 特技を使うか(比較用に個別に切れる) */
   use: { cover: true, power: true, trip: true, smite: true },
 };
 
 const ORDER = ['warrior', 'thief', 'priest', 'mage'];
+
+/**
+ * 泉の店: 敵が見えない間に誰かが泉にいれば、HP 回復薬を BOT.potionStock 個まで買う(状態を直接書き換える)。
+ * 自動対戦の進行役が、計画を立てる前に呼ぶ
+ */
+export function botShop(state: GameState): void {
+  if (visibleFoes(state.map, state.units, 'party').size > 0) return;
+  if (!state.units.some((u) => u.side === 'party' && !u.down && tileAt(state.map, u.x, u.y) === 'H')) return;
+  const it = ITEMS.hp;
+  while ((state.items?.hp ?? 0) < BOT.potionStock && (state.gold ?? 0) >= it.price) {
+    state.gold = (state.gold ?? 0) - it.price;
+    state.items = { ...state.items, hp: (state.items?.hp ?? 0) + 1 };
+  }
+}
 
 export function planParty(state: GameState): Plans {
   const { map, units } = state;
@@ -52,8 +70,14 @@ export function planParty(state: GameState): Plans {
   /** 先に計画した味方の予定位置(火球の巻き込み回避に使う) */
   const endPos = new Map<string, Pos>();
   const reserved = new Set<string>();
+  let potions = state.items?.hp ?? 0;
   for (const u of party) {
     const plan: Action[] = [];
+    // HP が少なければ、まず HP 回復薬を飲む
+    if (potions > 0 && u.hp / stats(u).maxHp < BOT.potionAt) {
+      plan.push({ type: 'item', item: 'hp', target: u.id });
+      potions--;
+    }
     const ctx: Ctx = { state, u, plan, pos: { x: u.x, y: u.y }, foes, endPos, reserved };
     reserved.add(key(ctx.pos));
     switch (u.defId) {

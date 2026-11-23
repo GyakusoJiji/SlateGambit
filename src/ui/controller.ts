@@ -1,20 +1,20 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
 import { planEnemies, summarizeIntent } from '../core/ai';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan, planCost } from '../core/actions';
-import { adjacent, nearOrSame, samePos, step } from '../core/map';
+import { adjacent, nearOrSame, samePos, step, tileAt } from '../core/map';
 import { pathTo } from '../core/path';
 import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
 import { createEncounter, encounterDef, ENCOUNTERS } from '../core/encounters';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
-import type { Action, Difficulty, GameEvent, GameState, Plans, Pos, Unit } from '../core/types';
+import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
-import { SPELLS } from '../data/units';
+import { ITEMS, SPELLS } from '../data/units';
 import { stats } from '../core/stats';
 import { attachInput } from './input';
-import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, timeline, turnSummary, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, potionButton, timeline, turnSummary, type Mode } from './panel';
 import { reachInfo, tickPositions, tickCells } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
@@ -41,6 +41,8 @@ export class Controller {
   private pressTimer = 0;
   private playback: Playback | null = null;
   private lastPlayback: Playback | null = null;
+  /** 回復薬のボタンで選んでいる薬の種類 */
+  private potionKind: ItemId = 'hp';
   /** 時間軸で選んでいるティック(盤面にその時点の予定位置を出す)。null なら出さない */
   private timelineTick: number | null = null;
   /** 最近のターンの出来事(履歴の画面用。保存はしない) */
@@ -464,6 +466,8 @@ export class Controller {
     turnEl.title = `${T.floorLong(currentFloor(this.state))} · ${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.objective[this.state.objective?.kind ?? 'annihilate']}`;
     const replay = this.el.topbar.querySelector<HTMLButtonElement>('[data-top="replay"]')!;
     replay.disabled = !this.lastPlayback || !!pb;
+    // 泉の店: 誰かが泉にいて、敵が見えていない予約中だけ出す
+    this.el.topbar.querySelector<HTMLButtonElement>('[data-top="shop"]')!.hidden = !!pb || !this.canShop();
 
     if (pb) {
       const before = pb.before.units.filter((u) => u.side === 'party');
@@ -498,6 +502,7 @@ export class Controller {
       <div class="acts">
         ${actions}
         ${actButton('undo', { off: !hasPlan })}
+        ${active ? potionButton(this.potionKind, this.state.items, this.mode === 'potion', this.potionOff(sel, acts)) : potionButton(this.potionKind, this.state.items, false, true)}
         ${actButton('rest', { off: this.foesInSight() })}
         ${actButton('group', { on: this.mode === 'group', off: !active || this.foesInSight() })}
         ${actButton('execute', { cls: 'primary' })}
@@ -534,6 +539,33 @@ export class Controller {
       ${this.state.scenario ? `<button class="act primary" data-ov="retry">${T.result.retry}</button>` : ''}
       <button class="act${this.state.scenario ? '' : ' primary'}" data-ov="new">${T.settings.newGame}</button>
       <button class="act" data-ov="close">${T.settings.close}</button>
+    </div>`;
+  }
+
+  /** 泉の店を開けるか: 立っている味方が泉のマスにいて、敵が見えていない */
+  private canShop(): boolean {
+    const st = this.state;
+    return st.status === 'playing' && !this.foesInSight() && this.party().some((u) => !u.down && tileAt(st.map, u.x, u.y) === 'H');
+  }
+
+  /** 泉の店: ゴールドで回復薬を買う */
+  private showShop(): void {
+    const st = this.state;
+    const gold = st.gold ?? 0;
+    const rows = (Object.keys(ITEMS) as ItemId[])
+      .map((k) => {
+        const it = ITEMS[k];
+        return `<div class="row"><span>${it.name} · ${T.shop.have(st.items?.[k] ?? 0)}</span>
+          <button class="act" data-ov="buy" data-item="${k}" ${gold < it.price ? 'disabled' : ''}>${T.shop.buy(it.short, it.price)}</button></div>`;
+      })
+      .join('');
+    this.el.overlay.hidden = false;
+    this.el.overlay.innerHTML = `<div class="sheet shop">
+      <h2>${T.shop.title}</h2>
+      <p class="note">${T.shop.note}</p>
+      <p>${T.shop.gold(gold)}</p>
+      ${rows}
+      <button class="act primary" data-ov="close">${T.settings.close}</button>
     </div>`;
   }
 
@@ -622,6 +654,7 @@ export class Controller {
     if (!b) return;
     if (b.dataset.top === 'settings') this.showSettings();
     if (b.dataset.top === 'history' && !this.playback) this.showHistory();
+    if (b.dataset.top === 'shop' && !this.playback && this.canShop()) this.showShop();
     if (b.dataset.top === 'replay' && this.lastPlayback && !this.playback) {
       this.playback = this.lastPlayback;
       this.replaying = true;
@@ -638,6 +671,17 @@ export class Controller {
       return;
     }
     if (b.dataset.ov === 'close') this.el.overlay.hidden = true;
+    if (b.dataset.ov === 'buy' && this.canShop()) {
+      const k = b.dataset.item as ItemId;
+      const st = this.state;
+      if ((st.gold ?? 0) >= ITEMS[k].price) {
+        st.gold = (st.gold ?? 0) - ITEMS[k].price;
+        st.items = { ...st.items, [k]: (st.items?.[k] ?? 0) + 1 };
+        if (!st.scenario) saveGame(st);
+        this.changed();
+        this.showShop();
+      }
+    }
     if (b.dataset.ov === 'form-up' || b.dataset.ov === 'form-down') {
       const seed = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]')?.value;
       this.moveInFormation(b.dataset.id!, b.dataset.ov === 'form-up' ? -1 : 1);
@@ -797,8 +841,27 @@ export class Controller {
         this.mode = act;
         this.lastMode.set(u.id, act);
         break;
+      case 'potion':
+        // 2 回目は薬の種類を切り替える。選んだ薬を持っていなければ、持っている方にする
+        if (this.mode === 'potion') this.potionKind = this.potionKind === 'hp' ? 'mp' : 'hp';
+        if (!this.state.items?.[this.potionKind]) this.potionKind = this.potionKind === 'hp' ? 'mp' : 'hp';
+        this.mode = 'potion';
+        break;
     }
     this.changed();
+  }
+
+  /** 回復薬のボタンをグレーにするか(どちらの薬も無い・AP 不足・担いでいる) */
+  private potionOff(u: Unit, acts: Action[]): boolean {
+    const items = this.state.items ?? {};
+    return !(items.hp || items.mp) || apLeft(acts) < RULES.itemCost || carryingAfter(u, acts);
+  }
+
+  /** 予約済みの回復薬の数(全員分) */
+  private reservedItems(kind: ItemId): number {
+    return Object.values(this.plans)
+      .flat()
+      .filter((a) => a.type === 'item' && a.item === kind).length;
   }
 
   /** キャラごとに最後に選んだ行動モード(選択したときの初期位置にする) */
@@ -920,6 +983,14 @@ export class Controller {
         } else ok = this.append(u, { type: 'carry', target: ally.id });
       }
       else if (m === 'heal' && ally && !ally.down) ok = this.append(u, { type: 'spell', spell: 'heal', target: ally.id });
+      else if (m === 'potion' && ally && !ally.down) {
+        const it = ITEMS[this.potionKind];
+        const have = st.items?.[this.potionKind] ?? 0;
+        if (!nearOrSame(st.map, simulate(st, u, this.plans[u.id]).end, ally)) this.toast(T.err.notTarget);
+        else if (have <= 0) this.toast(T.shop.noItem(it.name));
+        else if (this.reservedItems(this.potionKind) >= have) this.toast(T.shop.reserved(it.name));
+        else ok = this.append(u, { type: 'item', item: this.potionKind, target: ally.id });
+      }
       else if (m === 'revive' && ally && ally.down) ok = this.append(u, { type: 'spell', spell: 'revive', target: ally.id });
       else if ((m === 'fireball' || m === 'smite') && st.explored[tile.y * st.map.w + tile.x]) ok = this.append(u, { type: 'spell', spell: m, tile });
       else if (m === 'trip' && foe) ok = this.append(u, { type: 'spell', spell: 'trip', target: foe.id });
@@ -1009,7 +1080,7 @@ export class Controller {
 }
 
 /** 対象を選ぶモード(届くマスを盤面に出す) */
-const TARGET_MODES = new Set<Mode>(['attack', 'power', 'trip', 'fireball', 'smite', 'heal', 'revive', 'carry']);
+const TARGET_MODES = new Set<Mode>(['attack', 'power', 'trip', 'fireball', 'smite', 'heal', 'revive', 'carry', 'potion']);
 
 /** 履歴に残すターン数 */
 const HISTORY_TURNS = 30;

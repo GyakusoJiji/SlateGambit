@@ -46,6 +46,8 @@ export const RULES = {
   breathEvery: 2,
   /** 眠っている敵が、姿を見て目を覚ます距離(マンハッタン距離、射線が通るとき) */
   wakeRange: 3,
+  /** 回復薬を使う AP(最後のティックで効く) */
+  itemCost: 2,
 };
 
 /** 魔法の AP(業火のような遅い大技は多い) */
@@ -70,6 +72,8 @@ export function actionCost(a: Action): number {
       return RULES.coverCost;
     case 'spell':
       return spellCost(a.spell);
+    case 'item':
+      return RULES.itemCost;
     case 'overwatch':
     case 'intercept':
     case 'charge':
@@ -146,7 +150,7 @@ export function canAppend(unit: Unit, actions: Action[], action: Action): string
 export type Step =
   | { k: 'move'; action: Extract<Action, { type: 'move' }> }
   | { k: 'windup'; action: Action }
-  | { k: 'strike'; action: Extract<Action, { type: 'attack' | 'spell' }> }
+  | { k: 'strike'; action: Extract<Action, { type: 'attack' | 'spell' | 'item' }> }
   | { k: 'guard' }
   | { k: 'cover' }
   /** 足払いで動けない */
@@ -189,7 +193,8 @@ export function expandPlan(actions: Action[]): Step[] {
         steps.push({ k: 'wait' });
         break;
       case 'attack':
-      case 'spell': {
+      case 'spell':
+      case 'item': {
         const n = actionCost(a);
         for (let i = 0; i < n - 1; i++) steps.push({ k: 'windup', action: a });
         steps.push({ k: 'strike', action: a });

@@ -107,7 +107,12 @@ export interface GameState {
   deepest?: number;
   /** 固定遭遇の ID(固定遭遇なら自動保存せず、休憩の物音も起きない) */
   scenario?: string;
+  /** パーティ共通の持ち物(回復薬の数)。泉でゴールドを払って買う */
+  items?: Partial<Record<ItemId, number>>;
 }
+
+/** 回復薬の種類 */
+export type ItemId = 'hp' | 'mp';
 
 // ---- 行動(予約リストの要素) ----
 
@@ -127,6 +132,8 @@ export type Action =
   | { type: 'guard' }
   | { type: 'wait' }
   | { type: 'spell'; spell: SpellId; target?: string; tile?: Pos }
+  /** 回復薬を飲む・飲ませる(2 AP。自分か隣の立っている味方。2 ティック目に効く) */
+  | { type: 'item'; item: ItemId; target: string }
   | { type: 'overwatch'; ticks: number }
   | { type: 'intercept'; ticks: number };
 
@@ -134,7 +141,7 @@ export type Plans = Record<string, Action[]>;
 
 // ---- 解決結果 ----
 
-export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | 'revive' | 'smite' | 'trip' | 'hellfire';
+export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | 'revive' | 'smite' | 'trip' | 'hellfire' | 'potion';
 
 export type GameEvent =
   | { tick: number; type: 'move'; id: string; from: Pos; to: Pos }
@@ -163,7 +170,8 @@ export type GameEvent =
   | { tick: number; type: 'interrupt'; id: string; spell?: SpellId }
   /** 休憩の物音で、遠くから敵が現れた(位置は教えない) */
   | { tick: number; type: 'wander'; count: number }
-  | { tick: number; type: 'heal'; id: string; amount: number }
+  /** mp=true なら MP の回復(回復薬) */
+  | { tick: number; type: 'heal'; id: string; amount: number; mp?: boolean }
   | { tick: number; type: 'down'; id: string }
   | { tick: number; type: 'revive'; id: string }
   | { tick: number; type: 'rest'; id: string; hp: number; mp: number }
