@@ -339,7 +339,7 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
         }
         case 'fizzle':
           add(s.fizzles, `${defOf.get(e.id)}:${e.reason}`);
-          if (e.reason === '届かない' && unitDef(defOf.get(e.id)!).range <= 1) {
+          if (e.reason === '隣にいない' && unitDef(defOf.get(e.id)!).range <= 1) {
             s.meleeWhiffs++;
             s.meleeTries++;
           }

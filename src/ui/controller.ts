@@ -3,17 +3,17 @@ import { planEnemies, summarizeIntent } from '../core/ai';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../core/actions';
 import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
-import { inReach, resolveTurn } from '../core/resolve';
+import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
-import type { Action, Difficulty, GameState, Plans, Pos, Unit } from '../core/types';
+import type { Action, Difficulty, GameEvent, GameState, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { SPELLS } from '../data/units';
 import { stats } from '../core/stats';
 import { attachInput } from './input';
-import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, turnSummary, type Mode } from './panel';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
 import { saveGame } from './save';
@@ -39,6 +39,8 @@ export class Controller {
   private pressTimer = 0;
   private playback: Playback | null = null;
   private lastPlayback: Playback | null = null;
+  /** 最近のターンの出来事(履歴の画面用。保存はしない) */
+  private history: { turn: number; events: GameEvent[]; before: Unit[] }[] = [];
   private names = new Map<string, string>();
   private settings: Settings = loadSettings();
   private renderer: Renderer;
@@ -222,6 +224,7 @@ export class Controller {
     this.names = displayNames(this.state.units);
     this.playback = null;
     this.lastPlayback = null;
+    this.history = [];
     this.replaying = false;
     this.selected = null;
     this.lastMode.clear();
@@ -270,6 +273,8 @@ export class Controller {
     // クイック移動・連続休憩の再生は速くする
     if (fast) this.playback.speed = 4;
     this.lastPlayback = this.playback;
+    this.history.push({ turn: this.state.turn, events: result.events, before: this.state.units });
+    if (this.history.length > HISTORY_TURNS) this.history.shift();
     this.state = result.state;
     // ターンが終わるたびに自動保存する(決着したら保存を消す)
     saveGame(this.state);
@@ -439,7 +444,7 @@ export class Controller {
     // 行動ボタンは常に同じ並び(4 列 × 5 行)。選択中のキャラが使えないものはグレーアウト
     const active = sel && !sel.down;
     const status = active
-      ? `<b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${planChips(acts, nameOf, this.foesInSight())}`
+      ? `<b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${vitals(sel)}${planChips(acts, nameOf, this.foesInSight())}`
       : `<span class="chip empty">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</span>`;
     const promptText = active ? prompt : '';
     const actions = active ? actionButtons(sel, acts, this.mode) : idleButtons();
@@ -455,7 +460,7 @@ export class Controller {
         ${actButton('group', { on: this.mode === 'group', off: !active || this.foesInSight() })}
         ${actButton('execute', { cls: 'primary' })}
       </div>
-      ${this.lastPlayback ? eventLog(this.lastPlayback.result.events, nameOf, 3) : '<ul class="log"></ul>'}`;
+      ${this.lastPlayback ? summaryList(turnSummary(this.lastPlayback.result.events, this.lastPlayback.before.units, nameOf)) : '<ul class="log"></ul>'}`;
   }
 
   private panelVersion = 0;
@@ -485,6 +490,27 @@ export class Controller {
       <p>${this.party().map((u) => `${u.name} ${T.level(u.level ?? 1)}`).join(' · ')}</p>
       <button class="act primary" data-ov="new">${T.settings.newGame}</button>
       <button class="act" data-ov="close">${T.settings.close}</button>
+    </div>`;
+  }
+
+  /** 履歴の画面: 新しいターンから順に、味方ごとの要約と経過の全部 */
+  private showHistory(): void {
+    const nameOf = (id: string) => this.names.get(id) ?? id;
+    const turns = [...this.history]
+      .reverse()
+      .map(
+        (h) => `<section class="turn-log">
+          <h3>${T.history.turn(h.turn)}</h3>
+          ${summaryList(turnSummary(h.events, h.before, nameOf))}
+          <details><summary>${T.history.detail}</summary>${eventLog(h.events, nameOf, Infinity)}</details>
+        </section>`,
+      )
+      .join('');
+    this.el.overlay.hidden = false;
+    this.el.overlay.innerHTML = `<div class="sheet history">
+      <h2>${T.history.title}</h2>
+      <div class="turns">${turns || `<p class="note">${T.history.empty}</p>`}</div>
+      <button class="act primary" data-ov="close">${T.settings.close}</button>
     </div>`;
   }
 
@@ -551,6 +577,7 @@ export class Controller {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-top]');
     if (!b) return;
     if (b.dataset.top === 'settings') this.showSettings();
+    if (b.dataset.top === 'history' && !this.playback) this.showHistory();
     if (b.dataset.top === 'replay' && this.lastPlayback && !this.playback) {
       this.playback = this.lastPlayback;
       this.replaying = true;
@@ -780,7 +807,8 @@ export class Controller {
     return out;
   }
 
-  private append(u: Unit, a: Action): boolean {
+  /** 予約に足す。advance=false なら、AP を使い切っても次のキャラへ移らない */
+  private append(u: Unit, a: Action, advance = true): boolean {
     const list = this.plans[u.id];
     const err = canAppend(u, list, a);
     if (err) {
@@ -789,7 +817,7 @@ export class Controller {
     }
     list.push(a);
     this.changed();
-    this.advanceIfFull(u);
+    if (advance) this.advanceIfFull(u);
     return true;
   }
 
@@ -821,6 +849,8 @@ export class Controller {
     // 対象を選ぶモード
     if (u && this.mode !== 'move') {
       const m = this.mode;
+      // 敵を狙うモードで味方をタップしたら、そのキャラを選ぶ(接近攻撃の後は次のキャラへ自動で移らないため)
+      if ((m === 'attack' || m === 'power' || m === 'trip') && ally && !ally.down && ally.id !== u.id) return this.select(ally.id);
       let ok = false;
       if (m === 'attack' && foe) ok = this.attackOrCharge(u, foe);
       else if (m === 'carry' && ally && ally.down && ally.id !== u.id) {
@@ -885,11 +915,18 @@ export class Controller {
    * 遠隔で味方が射線上にいる場合も「届かない」とみなし、接近攻撃で射線の空く位置へ動かす
    */
   private attackOrCharge(u: Unit, foe: Unit): boolean {
+    const st = this.state;
     const plan = this.plans[u.id];
-    const end = simulate(this.state, u, plan).end;
-    if (inReach(this.state.map, u, end, foe, this.state.units)) return this.append(u, { type: 'attack', target: foe.id });
-    const ok = this.append(u, { type: 'charge', target: foe.id, ticks: apLeft(plan) });
-    if (ok) this.toast(T.err.toCharge);
+    const end = simulate(st, u, plan).end;
+    const why = reachProblem(st.map, u, end, foe, st.units);
+    if (!why) return this.append(u, { type: 'attack', target: foe.id });
+    const ap = apLeft(plan);
+    // 接近攻撃で AP を使い切っても、次のキャラへは移らない(続けたタップが別のキャラに入らないように)
+    const ok = this.append(u, { type: 'charge', target: foe.id, ticks: ap }, false);
+    if (ok) {
+      const route = chargeRoute(st.map, u, end, foe, st.units);
+      this.toast(T.err.toCharge(why, ap, route ? route.length - 1 : null, RULES.attackCost).trim());
+    }
     return ok;
   }
 
@@ -909,6 +946,21 @@ export class Controller {
   private unit(id: string): Unit | undefined {
     return this.state.units.find((u) => u.id === id);
   }
+}
+
+/** 履歴に残すターン数 */
+const HISTORY_TURNS = 30;
+
+/** 結果の要約の一覧(1 行ずつ。長い行は省略し、全部は履歴の画面で見る) */
+function summaryList(lines: string[]): string {
+  const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  return `<ul class="log summary">${lines.map((l) => `<li title="${esc(l)}">${esc(l)}</li>`).join('')}</ul>`;
+}
+
+/** 選んでいるキャラの HP・MP(現在値/最大値) */
+function vitals(u: Unit): string {
+  const d = stats(u);
+  return `<span class="vitals">HP ${u.hp}/${d.maxHp}${d.maxMp > 0 ? ` MP ${u.mp}/${d.maxMp}` : ''}</span>`;
 }
 
 /** 予約から移動部分だけを辿り、予定経路と予定位置を求める(他ユニットとの競合は考慮しない) */
@@ -953,7 +1005,10 @@ function planMarks(st: GameState, u: Unit, actions: Action[], color: string): Ma
       const t = find(a.target);
       if (t) {
         marks.push({ kind: 'target', at: t, color: '#ff5050' });
-        marks.push({ kind: 'path', points: [end, t], color: '#ff5050', dashed: true });
+        // 経路の目安(予約の時点の位置で求める。実行時に相手が動けば変わる)。行けなければ相手への直線
+        const route = chargeRoute(st.map, u, end, t, st.units);
+        if (route && route.length > 1) marks.push({ kind: 'path', points: route, color: '#ff5050', dashed: true });
+        marks.push({ kind: 'path', points: [route?.at(-1) ?? end, t], color: '#ff505099', dashed: true });
       }
     } else if (a.type === 'carry') {
       const t = find(a.target);

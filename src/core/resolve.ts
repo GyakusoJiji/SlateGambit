@@ -56,6 +56,9 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   const attackedBy = new Map<string, string>();
   /** 接近攻撃で、射程内に入ってから構えたティック数 */
   const chargeWind = new Map<string, number>();
+  /** 接近攻撃で攻撃まで届いた者と、狙いが倒れて攻撃しなかった者(ターン後の結果の要約用) */
+  const chargeStruck = new Set<string>();
+  const chargeLost = new Set<string>();
   const treasure = state.objective?.kind === 'treasure' ? [treasureSnap(state)] : undefined;
   /** ターンの初めに立っていた敵(倒した敵の経験値の計算用) */
   const foesAtStart = units.filter((u) => u.side === 'enemy' && !u.down);
@@ -71,7 +74,12 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     for (const u of units) {
       if (u.down) continue;
       let s = steps.get(u.id)![ti];
-      if (s.k === 'charge') s = chargeStep(map, u, byId.get(s.target), s, chargeWind, units);
+      if (s.k === 'charge') {
+        const t = byId.get(s.target);
+        s = chargeStep(map, u, t, s, chargeWind, units);
+        if (s.k === 'strike') chargeStruck.add(u.id);
+        if (!t || t.down) chargeLost.add(u.id);
+      }
       current.set(u.id, s);
       if (s.k === 'guard' || s.k === 'cover') guard.add(u.id);
       if (s.k === 'cover') cover.add(u.id);
@@ -247,6 +255,11 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     if (treasure) treasure.push(treasureSnap(state));
   }
 
+  // 接近攻撃が一度も攻撃まで届かなかった味方は、理由を残す(敵の分はログが煩わしくなるので出さない)
+  for (const u of units) {
+    if (u.side !== 'party' || u.down || chargeStruck.has(u.id) || !plans[u.id]?.some((a) => a.type === 'charge')) continue;
+    events.push({ tick: TICKS_PER_TURN, type: 'fizzle', id: u.id, reason: chargeLost.has(u.id) ? '狙いが倒れた' : '接近攻撃が届かなかった' });
+  }
   applyRest(state, plans, seenAtStart.party.size > 0, events, frames);
   {
     const stand = state.units.filter((u) => u.side === 'party' && !u.down);
@@ -331,10 +344,57 @@ function pathRules(units: Unit[], u: Unit, target: Unit): { blocks: (p: Pos) => 
  * units を渡すと、遠隔は味方などが射線上にいない(最初に当たるのが t)ことも条件にする
  */
 export function inReach(map: GameState['map'], u: Unit, from: Pos, t: Unit, units?: Unit[]): boolean {
+  return reachProblem(map, u, from, t, units) === null;
+}
+
+/**
+ * from から t へ攻撃が届かない理由(届くなら null)。
+ * 近接は「隣にいない」、遠隔は「射程外」「壁に遮られている」「味方が射線上にいる」「別の敵が射線上にいる」
+ * (units を渡したときだけ射線上のユニットを見る)
+ */
+export function reachProblem(map: GameState['map'], u: Unit, from: Pos, t: Unit, units?: Unit[]): string | null {
   const def = stats(u);
-  if (def.range <= 1) return adjacent(map, from, t);
-  if (dist2(from, t) > def.range * def.range || !hasLos(map, from, t)) return false;
-  return !units || clearShot(units, u, from, t);
+  if (def.range <= 1) return adjacent(map, from, t) ? null : REACH.adjacent;
+  return rangedProblem(map, from, t, def.range) ?? (units ? blockerProblem(units, u, from, t) : null);
+}
+
+/** 届かない理由の言い回し(不発の理由と共通) */
+export const REACH = {
+  adjacent: '隣にいない',
+  range: '射程外',
+  wall: '壁に遮られている',
+  ally: '味方が射線上にいる',
+  foe: '別の敵が射線上にいる',
+} as const;
+
+/** 射程と壁だけを見た理由 */
+function rangedProblem(map: GameState['map'], from: Pos, to: Pos, range: number): string | null {
+  if (dist2(from, to) > range * range) return REACH.range;
+  if (!hasLos(map, from, to)) return REACH.wall;
+  return null;
+}
+
+function blockerProblem(units: Unit[], u: Unit, from: Pos, t: Unit): string | null {
+  if (clearShot(units, u, from, t)) return null;
+  const hit = linePoints(from, t)
+    .map((p) => units.find((o) => o !== u && o !== t && !o.down && o.x === p.x && o.y === p.y))
+    .find(Boolean);
+  return hit && hit.side !== u.side ? REACH.foe : REACH.ally;
+}
+
+/**
+ * 接近攻撃の経路の目安: from から、t へ攻撃が届く空いたマスまでの経路(from を含むマスの列)。
+ * 予約の時点の位置で求めるので、実行時に相手や味方が動けば変わる。行けなければ null
+ */
+export function chargeRoute(map: GameState['map'], u: Unit, from: Pos, t: Unit, units: Unit[]): Pos[] | null {
+  const mover = { ...u, x: from.x, y: from.y };
+  const others = units.filter((o) => o.id !== u.id);
+  const { blocks, taken } = pathRules(others, mover, t);
+  const dirs = findPath(map, mover, (q) => !taken(q) && inReach(map, u, q, t, others), blocks, 400);
+  if (!dirs) return null;
+  const out: Pos[] = [{ x: from.x, y: from.y }];
+  for (const d of dirs) out.push(step(out[out.length - 1], d));
+  return out;
 }
 
 /** 接近攻撃の 1 ティック分を、構え・攻撃・移動(charge のまま)・防御のいずれかに読み替える */
@@ -616,12 +676,13 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     if (!target || target.down) return fizzle('対象がいない');
     const power = action.power ? RULES.powerMult : 1;
     if (def.range <= 1) {
-      if (!adjacent(map, u, target)) return fizzle('届かない');
+      if (!adjacent(map, u, target)) return fizzle(REACH.adjacent);
       events.push({ tick, type: 'strike', id: u.id, kind: 'melee', target: target.id, hitId: target.id, end: pos(target), reaction });
       dealDamage(ctx, u, target, def.atk, def.dmgVar, { mult: power, single: true, melee: true });
       return;
     }
-    if (dist2(u, target) > def.range * def.range || !hasLos(map, u, target)) return fizzle('射線が通らない');
+    const far = rangedProblem(map, u, target, def.range);
+    if (far) return fizzle(far);
     // 射線上で最初に当たったユニットに命中する。
     // ただし撃つ瞬間に味方が射線上にいれば撃たない(AP は消費する)
     let hit: Unit | undefined;
@@ -633,7 +694,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
         break;
       }
     }
-    if (RULES.holdFireOnAlly && hit && hit !== target && hit.side === u.side) return fizzle('味方が射線上にいる');
+    if (RULES.holdFireOnAlly && hit && hit !== target && hit.side === u.side) return fizzle(REACH.ally);
     events.push({ tick, type: 'strike', id: u.id, kind: 'ranged', target: target.id, hitId: hit?.id, end, reaction });
     if (hit) dealDamage(ctx, u, hit, def.atk, def.dmgVar, { mult: power, single: true });
     return;
@@ -645,7 +706,8 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   u.mp -= sd.mp;
   if (sd.target === 'tile') {
     const tile = action.tile!;
-    if (dist2(u, tile) > sd.range * sd.range || !hasLos(map, u, tile)) return fizzle('射線が通らない');
+    const far = rangedProblem(map, u, tile, sd.range);
+    if (far) return fizzle(far);
     const breath = action.spell === 'breath';
     if (breath && u.ai) u.ai.breathTurn = ctx.turn;
     const kind = breath ? 'breath' : action.spell === 'smite' ? 'smite' : 'fireball';
@@ -661,7 +723,8 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   if (sd.target === 'foe') {
     // 足払い: 敵 1 体を数ティック動けなくする
     if (target.down || target.side === u.side) return fizzle('対象がいない');
-    if (dist2(u, target) > sd.range * sd.range || !hasLos(map, u, target)) return fizzle('射線が通らない');
+    const far = rangedProblem(map, u, target, sd.range);
+    if (far) return fizzle(far);
     events.push({ tick, type: 'strike', id: u.id, kind: 'trip', target: target.id, hitId: target.id, end: pos(target), reaction });
     events.push({ tick, type: 'stun', id: target.id, ticks: RULES.stunTicks });
     ctx.stuns.push(target.id);
@@ -670,7 +733,8 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   }
   if (sd.target === 'ally') {
     if (target.down) return fizzle('対象が倒れている');
-    if (dist2(u, target) > sd.range * sd.range || !hasLos(map, u, target)) return fizzle('届かない');
+    const far = rangedProblem(map, u, target, sd.range);
+    if (far) return fizzle(far);
     const amount = sd.power + spellBonus(u) + ctx.rng.int(0, sd.powerVar);
     ctx.hpDelta.set(target.id, (ctx.hpDelta.get(target.id) ?? 0) + amount);
     events.push({ tick, type: 'strike', id: u.id, kind: 'heal', target: target.id, hitId: target.id, end: pos(target), reaction });
@@ -679,7 +743,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   }
   // 蘇生
   if (!target.down) return fizzle('対象が倒れていない');
-  if (!nearOrSame(map, u, target)) return fizzle('届かない');
+  if (!nearOrSame(map, u, target)) return fizzle(REACH.adjacent);
   events.push({ tick, type: 'strike', id: u.id, kind: 'revive', target: target.id, hitId: target.id, end: pos(target), reaction });
   ctx.revived.add(target.id);
 }

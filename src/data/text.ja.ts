@@ -131,6 +131,43 @@ export const T = {
     levelup: (a: string, lv: number) => `${a} はレベル ${lv} に上がった!`,
     levelupAll: (lv: number) => `全員がレベル ${lv} に上がった!`,
     stairs: (from: number, to: number) => (to > from ? `地下 ${to} 階へ降りた` : `地下 ${to} 階へ上った`),
+    noHit: (a: string, spell: string) => `${a} の${spell}は誰にも当たらなかった`,
+  },
+
+  /** ターン後の結果の要約(味方ごとに 1 行) */
+  sum: {
+    kind: {
+      melee: '攻撃',
+      ranged: '射撃',
+      fireball: '火球',
+      smite: '聖光',
+      breath: '炎のブレス',
+      heal: '回復',
+      revive: '蘇生',
+      trip: '足払い',
+    } as Record<string, string>,
+    hit: (b: string, n: number, killed: boolean) => `${b}に ${n}${killed ? '(撃破)' : ''}`,
+    missed: (label: string) => `${label}: 外れた`,
+    area: (label: string, foes: number, total: number, kills: number, allies: number) =>
+      `${label}: 命中 ${foes} 体${foes > 0 ? `(計 ${total}${kills > 0 ? `・撃破 ${kills}` : ''})` : ''}${allies > 0 ? `・味方 ${allies} 人を巻き込んだ` : ''}`,
+    fizzle: (why: string) => `不発(${why})`,
+    cover: (b: string) => `${b}をかばった`,
+    halt: '敵を見て停止',
+    carry: (b: string) => `${b}を担いだ`,
+    taken: (n: number) => `被ダメ ${n}`,
+    down: '気絶!',
+    revived: '起き上がった',
+    rest: (s: string) => `休憩 ${s}`,
+    moved: '移動',
+    idle: '待機',
+  },
+
+  history: {
+    title: '履歴',
+    turn: (n: number) => `ターン ${n}`,
+    empty: 'まだ何も起きていない',
+    summary: '要約',
+    detail: '経過',
   },
 
   difficulty: {
@@ -197,6 +234,10 @@ export const T = {
     notTarget: 'そこには対象がいない',
     carrying: '担いでいる間は攻撃できない',
     powerReach: '強攻撃は、予定位置から届く敵にしか使えない',
-    toCharge:'届かないので、近づいて攻撃する(残りAP全部)',
+    /** 攻撃が届かず接近攻撃にしたときの通知。steps=経路の目安のマス数(行けなければ null) */
+    toCharge: (why: string, ap: number, steps: number | null, attackCost: number) =>
+      `${why}ので、近づいて攻撃する(残り ${ap}AP 全部)
+` +
+      (steps === null ? '今は近づける道がない(相手が動けば変わる)' : steps === 0 ? '' : `目安: ${steps} マス進んでから攻撃` + (steps + attackCost > ap ? '(このターンには届かない見込み)' : '')),
   },
 };

@@ -332,6 +332,43 @@ body {
 .log:empty {
   display: none;
 }
+/* ターン後の結果の要約: 1 人 1 行。長い行は省略し、全部は履歴の画面で見る */
+.log.summary li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan .vitals {
+  margin: 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* 履歴の画面 */
+.sheet.history {
+  max-height: 100%;
+  max-width: 480px;
+}
+.sheet.history .turns {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sheet.history h3 {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+.sheet.history .log {
+  margin-top: 4px;
+}
+.sheet.history .log.summary li {
+  white-space: normal;
+}
+.sheet.history details summary {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
 
 /* オーバーレイ */
 #overlay {

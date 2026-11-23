@@ -1,6 +1,6 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
 import { RULES, apLeft, carryingAfter, planCost } from '../core/actions';
-import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type SpellId, type Unit } from '../core/types';
+import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type SpellId, type StrikeKind, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { SPELLS } from '../data/units';
 import { expProgress, stats } from '../core/stats';
@@ -171,6 +171,9 @@ export function levelUpNote(events: GameEvent[], nameOf: (id: string) => string,
   return [...byLevel].map(([lv, ids]) => T.log.levelup(ids.map(nameOf).join('・'), lv)).join(' ');
 }
 
+/** 範囲魔法の種類 */
+const AREA_KINDS = new Set<StrikeKind>(['fireball', 'smite', 'breath']);
+
 export function eventLog(events: GameEvent[], nameOf: (id: string) => string, limit = 6): string {
   const lines: string[] = [];
   const rests: string[] = [];
@@ -208,6 +211,10 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'strike':
         if (e.reaction) lines.push(T.log.reaction(nameOf(e.id)));
+        // 範囲魔法が誰にも当たらなかったことも残す(敵が動いて空振りした結果を、再生しなくても分かるように)
+        if (AREA_KINDS.has(e.kind) && !events.some((d) => d.type === 'damage' && d.by === e.id && d.tick === e.tick)) {
+          lines.push(T.log.noHit(nameOf(e.id), SPELLS[e.kind as SpellId].name));
+        }
         break;
       case 'rest':
         // 休憩は全員分を 1 行にまとめる(下で追加)
@@ -252,4 +259,90 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
     .slice(-limit)
     .map((l) => `<li>${esc(l)}</li>`)
     .join('')}</ul>`;
+}
+
+/**
+ * ターン後の結果の要約。ターンの初めの味方ごとに 1 行(攻撃・魔法の結果、不発の理由、受けたダメージ)と、
+ * 全体の出来事(階の移動・レベルアップ・宝箱など)を 1 行。詳しい経過は eventLog(履歴の画面)で見る
+ */
+export function turnSummary(events: GameEvent[], before: Unit[], nameOf: (id: string) => string): string[] {
+  const sideOf = new Map(before.map((u) => [u.id, u.side]));
+  /** 倒れたティック(同じターンに倒れ・起き上がり・また倒れることもある) */
+  const downAt = new Map<string, Set<number>>();
+  for (const e of events) if (e.type === 'down') downAt.set(e.id, new Set([...(downAt.get(e.id) ?? []), e.tick]));
+  const party = before.filter((u) => u.side === 'party');
+  const lines: string[] = [];
+  for (const u of party) {
+    const parts: string[] = [];
+    let taken = 0;
+    let moved = false;
+    let rest = '';
+    events.forEach((e, i) => {
+      if (!('id' in e) || e.id !== u.id) return;
+      if (e.type === 'strike') parts.push(strikeSummary(events, i, u.side, sideOf, downAt, nameOf));
+      else if (e.type === 'fizzle') parts.push(T.sum.fizzle(e.reason));
+      else if (e.type === 'damage') taken += e.amount;
+      else if (e.type === 'cover') parts.push(T.sum.cover(nameOf(e.for)));
+      else if (e.type === 'halt') parts.push(T.sum.halt);
+      else if (e.type === 'carry') parts.push(T.sum.carry(nameOf(e.target)));
+      else if (e.type === 'move') moved = true;
+      else if (e.type === 'rest') rest = T.log.restPart('', e.hp, e.mp).trim();
+      else if (e.type === 'revive' || e.type === 'wake' || (e.type === 'spring' && e.revived)) parts.push(T.sum.revived);
+    });
+    if (taken > 0) parts.push(T.sum.taken(taken));
+    if (downAt.has(u.id)) parts.push(T.sum.down);
+    if (parts.length === 0) parts.push(u.down ? T.down : rest ? T.sum.rest(rest) : moved ? T.sum.moved : T.sum.idle);
+    lines.push(`${nameOf(u.id)}: ${parts.join(' / ')}`);
+  }
+  const notes: string[] = [];
+  for (const e of events) {
+    if (e.type === 'stairs') notes.push(T.log.stairs(e.from, e.to));
+    else if (e.type === 'chest') notes.push(T.log.chest(nameOf(e.id), e.gold));
+    else if (e.type === 'treasure') notes.push(e.got ? T.log.treasureGot(nameOf(e.id)) : T.log.treasureDrop(nameOf(e.id)));
+    else if (e.type === 'awaken') notes.push(T.log.awaken(nameOf(e.id)));
+    else if (e.type === 'wander') notes.push(T.log.wander);
+  }
+  const lv = levelUpNote(events, nameOf, party.length);
+  if (lv) notes.push(lv);
+  if (notes.length > 0) lines.push(notes.join(' / '));
+  return lines;
+}
+
+/** events[i](味方の攻撃・魔法)の結果を短く。同じティックの、次の攻撃・魔法までに出たダメージ・回復を集める */
+function strikeSummary(
+  events: GameEvent[],
+  i: number,
+  side: Unit['side'],
+  sideOf: Map<string, Unit['side']>,
+  downAt: Map<string, Set<number>>,
+  nameOf: (id: string) => string,
+): string {
+  const s = events[i];
+  if (s.type !== 'strike') return '';
+  const after: GameEvent[] = [];
+  for (let j = i + 1; j < events.length && events[j].tick === s.tick && events[j].type !== 'strike'; j++) after.push(events[j]);
+  const dmg = after.filter((e): e is Extract<GameEvent, { type: 'damage' }> => e.type === 'damage' && e.by === s.id);
+  const killed = (id: string) => !!downAt.get(id)?.has(s.tick);
+  const label = s.reaction ? (s.kind === 'ranged' ? T.act.overwatch : T.act.intercept) : T.sum.kind[s.kind];
+  switch (s.kind) {
+    case 'melee':
+    case 'ranged':
+      if (dmg.length === 0) return T.sum.missed(label);
+      return `${label}: ${dmg.map((d) => T.sum.hit(nameOf(d.id), d.amount, killed(d.id))).join('、')}`;
+    case 'fireball':
+    case 'smite':
+    case 'breath': {
+      const foes = dmg.filter((d) => sideOf.get(d.id) !== side);
+      const allies = dmg.filter((d) => sideOf.get(d.id) === side);
+      const total = foes.reduce((t, d) => t + d.amount, 0);
+      const kills = foes.filter((d) => killed(d.id)).length;
+      return T.sum.area(label, foes.length, total, kills, allies.length);
+    }
+    case 'heal': {
+      const h = after.find((e) => e.type === 'heal');
+      return h && h.type === 'heal' ? `${label}: ${nameOf(h.id)} +${h.amount}` : label;
+    }
+    default:
+      return s.target ? `${label}: ${nameOf(s.target)}` : label;
+  }
 }

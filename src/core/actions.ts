@@ -118,6 +118,8 @@ export function planMp(actions: Action[]): number {
 export function canAppend(unit: Unit, actions: Action[], action: Action): string | null {
   if (unit.down) return '気絶している';
   if (actionCost(action) > apLeft(actions)) return 'AP が足りない';
+  // 残り AP 全部を使う行動は、AP が 0 なら予約しない
+  if ((action.type === 'charge' || action.type === 'overwatch' || action.type === 'intercept') && action.ticks <= 0) return 'AP が足りない';
   const def = unitDef(unit.defId);
   if (action.type === 'spell') {
     if (!def.spells.includes(action.spell)) return 'その魔法は使えない';
