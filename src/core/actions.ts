@@ -1,4 +1,5 @@
 import { SPELLS, unitDef } from '../data/units';
+import { spellMp } from './stats';
 import { AP_PER_TURN, type Action, type SpellId, type Unit } from './types';
 
 /** 行動コストなどの調整用の値(自動対戦で比較できるよう書き換え可能にしてある) */
@@ -121,8 +122,8 @@ export function restTicks(actions: Action[] | undefined): number {
 }
 
 /** 予約全体の MP 消費 */
-export function planMp(actions: Action[]): number {
-  return actions.reduce((s, a) => s + (a.type === 'spell' ? SPELLS[a.spell].mp : 0), 0);
+export function planMp(actions: Action[], unit?: { perks?: string[] }): number {
+  return actions.reduce((s, a) => s + (a.type === 'spell' ? (unit ? spellMp(unit, a.spell) : SPELLS[a.spell].mp) : 0), 0);
 }
 
 /** 予約に action を追加できるか。できない場合は理由を返す */
@@ -134,7 +135,7 @@ export function canAppend(unit: Unit, actions: Action[], action: Action): string
   const def = unitDef(unit.defId);
   if (action.type === 'spell') {
     if (!def.spells.includes(action.spell)) return 'その魔法は使えない';
-    if (planMp(actions) + SPELLS[action.spell].mp > unit.mp) return 'MP が足りない';
+    if (planMp(actions, unit) + spellMp(unit, action.spell) > unit.mp) return 'MP が足りない';
   }
   if (action.type === 'overwatch' && def.range <= 1) return '遠隔攻撃を持たない';
   if (action.type === 'cover' && !def.spells.includes('cover')) return 'かばうは使えない';

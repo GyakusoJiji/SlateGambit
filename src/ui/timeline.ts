@@ -3,7 +3,7 @@ import { expandPlan, fillPlan, planCost, type Step } from '../core/actions';
 import { hasLos } from '../core/los';
 import { adjacent, dist2, isWalkable, nearOrSame, step } from '../core/map';
 import { chargeRoute, inReach } from '../core/resolve';
-import { stats } from '../core/stats';
+import { spellRange, stats } from '../core/stats';
 import { AP_PER_TURN, type Action, type GameState, type Pos, type Unit } from '../core/types';
 import { SPELLS } from '../data/units';
 import type { Mode } from './panel';
@@ -89,7 +89,7 @@ function modeRange(u: Unit, mode: Mode): number {
     case 'smite':
     case 'heal':
     case 'trip':
-      return SPELLS[mode].range;
+      return spellRange(u, mode);
     default:
       return 1;
   }

@@ -1,7 +1,7 @@
 // 同時解決エンジン。全ユニットの予約を 1 ティックずつ同時に処理する。
 import { ITEMS, SPELLS, unitDef } from '../data/units';
 import { applyStairs, applyWander, currentFloor, openChests, treasureHere } from './floors';
-import { gainExp, spellBonus, stats } from './stats';
+import { gainExp, spellBonus, spellMp, spellRange, stats } from './stats';
 import { RULES, expandPlan, restTicks, type Step } from './actions';
 import { hasLos, linePoints } from './los';
 import { adjacent, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from './map';
@@ -736,11 +736,13 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
 
   // 魔法
   const sd = SPELLS[action.spell];
-  if (u.mp < sd.mp) return fizzle('MP が足りない');
-  u.mp -= sd.mp;
+  const cost = spellMp(u, action.spell);
+  const range = spellRange(u, action.spell);
+  if (u.mp < cost) return fizzle('MP が足りない');
+  u.mp -= cost;
   if (sd.target === 'tile') {
     const tile = action.tile!;
-    const far = rangedProblem(map, u, tile, sd.range);
+    const far = rangedProblem(map, u, tile, range);
     if (far) return fizzle(far);
     const breath = action.spell === 'breath';
     if (breath && u.ai) u.ai.breathTurn = ctx.turn;
@@ -757,7 +759,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   if (sd.target === 'foe') {
     // 足払い: 敵 1 体を数ティック動けなくする
     if (target.down || target.side === u.side) return fizzle('対象がいない');
-    const far = rangedProblem(map, u, target, sd.range);
+    const far = rangedProblem(map, u, target, range);
     if (far) return fizzle(far);
     events.push({ tick, type: 'strike', id: u.id, kind: 'trip', target: target.id, hitId: target.id, end: pos(target), reaction });
     events.push({ tick, type: 'stun', id: target.id, ticks: RULES.stunTicks });
@@ -767,7 +769,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   }
   if (sd.target === 'ally') {
     if (target.down) return fizzle('対象が倒れている');
-    const far = rangedProblem(map, u, target, sd.range);
+    const far = rangedProblem(map, u, target, range);
     if (far) return fizzle(far);
     const amount = sd.power + spellBonus(u) + ctx.rng.int(0, sd.powerVar);
     ctx.hpDelta.set(target.id, (ctx.hpDelta.get(target.id) ?? 0) + amount);

@@ -187,6 +187,11 @@ export const T = {
     reserved: (name: string) => `${name}は予約済みの分で足りなくなる`,
   },
 
+  perk: {
+    title: (name: string, lv: number) => `${name}(Lv ${lv})の成長を 1 つ選んでください`,
+    note: '選んだ成長はこのゲームの間ずっと続く(後から変えられない)',
+  },
+
   history: {
     title: '履歴',
     turn: (n: number) => `ターン ${n}`,

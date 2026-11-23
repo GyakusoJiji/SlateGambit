@@ -11,8 +11,8 @@ import { quickMovePlans } from '../core/quickmove';
 import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, Pos, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
-import { ITEMS, SPELLS } from '../data/units';
-import { stats } from '../core/stats';
+import { ITEMS, PERKS, SPELLS } from '../data/units';
+import { pendingPerk, stats } from '../core/stats';
 import { attachInput } from './input';
 import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, potionButton, timeline, turnSummary, type Mode } from './panel';
 import { reachInfo, tickPositions, tickCells } from './timeline';
@@ -249,6 +249,8 @@ export class Controller {
     this.renderer.resize();
     this.renderer.centerOn(centroid(party));
     this.beginPlanning();
+    // 途中の階や固定遭遇から始めると、最初から成長の二択を選べることがある
+    this.showPerkChoice();
     if (!this.looping) {
       this.looping = true;
       requestAnimationFrame((t) => this.loop(t, t));
@@ -323,6 +325,7 @@ export class Controller {
     if (lv) notes.push(lv);
     if (notes.length > 0) this.toast(notes.join('\n'));
     this.beginPlanning();
+    this.showPerkChoice();
   }
 
   private loop(now: number, prev: number): void {
@@ -544,6 +547,21 @@ export class Controller {
     </div>`;
   }
 
+  /** 成長の二択がまだのキャラがいれば、選ぶ画面を出す(選ぶまで閉じない) */
+  private showPerkChoice(): boolean {
+    if (this.state.status !== 'playing') return false;
+    const u = this.party().find((p) => pendingPerk(p));
+    if (!u) return false;
+    const choices = pendingPerk(u)!;
+    this.el.overlay.hidden = false;
+    this.el.overlay.innerHTML = `<div class="sheet perk">
+      <h2>${T.perk.title(u.name, u.level ?? 1)}</h2>
+      ${choices.map((p) => `<button class="act diff" data-ov="perk" data-id="${u.id}" data-perk="${p}"><b>${PERKS[p].name}</b><small>${PERKS[p].desc}</small></button>`).join('')}
+      <p class="note">${T.perk.note}</p>
+    </div>`;
+    return true;
+  }
+
   /** 泉の店を開けるか: 立っている味方が泉のマスにいて、敵が見えていない */
   private canShop(): boolean {
     const st = this.state;
@@ -668,11 +686,21 @@ export class Controller {
   private onOverlayClick(e: Event): void {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-ov]');
     if (!b) {
-      // 難易度選択は選ぶまで閉じない
-      if (e.target === this.el.overlay && !this.el.overlay.querySelector('.start')) this.el.overlay.hidden = true;
+      // 難易度選択と成長の二択は選ぶまで閉じない
+      if (e.target === this.el.overlay && !this.el.overlay.querySelector('.start, .perk')) this.el.overlay.hidden = true;
       return;
     }
     if (b.dataset.ov === 'close') this.el.overlay.hidden = true;
+    if (b.dataset.ov === 'perk') {
+      const u = this.unit(b.dataset.id!);
+      if (u && pendingPerk(u)) {
+        u.perks = [...(u.perks ?? []), b.dataset.perk!];
+        if (!this.state.scenario) saveGame(this.state);
+        this.el.overlay.hidden = true;
+        this.changed();
+        this.showPerkChoice();
+      }
+    }
     if (b.dataset.ov === 'buy' && this.canShop()) {
       const k = b.dataset.item as ItemId;
       const st = this.state;

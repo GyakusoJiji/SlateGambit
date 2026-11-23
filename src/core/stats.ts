@@ -1,6 +1,30 @@
 // レベルによる能力値の補正と、経験値・レベルアップの処理。
-import { EXP_TABLE, MAX_LEVEL, SPELL_GROWTH, unitDef, type UnitDef } from '../data/units';
-import { TICKS_PER_TURN, type GameEvent, type Unit } from './types';
+import { EXP_TABLE, MAX_LEVEL, PERK_CHOICES, PERKS, SPELL_GROWTH, SPELLS, unitDef, type UnitDef } from '../data/units';
+import { TICKS_PER_TURN, type GameEvent, type SpellId, type Unit } from './types';
+
+type PerkHolder = { perks?: string[] };
+
+/** 成長の補正を加えた魔法の射程 */
+export function spellRange(u: PerkHolder, id: SpellId): number {
+  return SPELLS[id].range + (u.perks ?? []).reduce((s, p) => s + (PERKS[p]?.spell === id ? PERKS[p].range ?? 0 : 0), 0);
+}
+
+/** 成長の補正を加えた魔法の MP 消費(1 未満にはしない) */
+export function spellMp(u: PerkHolder, id: SpellId): number {
+  const base = SPELLS[id].mp;
+  if (base <= 0) return base;
+  return Math.max(1, base + (u.perks ?? []).reduce((s, p) => s + (PERKS[p]?.spell === id ? PERKS[p].mp ?? 0 : 0), 0));
+}
+
+/** まだ選んでいない成長の二択(無ければ null) */
+export function pendingPerk(u: Unit): string[] | null {
+  if (u.side !== 'party') return null;
+  for (const c of PERK_CHOICES) {
+    if (u.defId !== c.class || (u.level ?? 1) < c.level) continue;
+    if (!c.choices.some((p) => u.perks?.includes(p))) return c.choices;
+  }
+  return null;
+}
 
 const cache = new Map<string, UnitDef>();
 

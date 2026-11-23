@@ -63,6 +63,8 @@ export interface Unit {
   level?: number;
   /** 累計の経験値(パーティのみ) */
   exp?: number;
+  /** レベルアップの二択で選んだ成長(PERKS の ID) */
+  perks?: string[];
 }
 
 export type GameStatus = 'playing' | 'won' | 'lost';

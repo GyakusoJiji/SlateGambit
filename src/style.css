@@ -486,7 +486,8 @@ body {
   gap: 8px;
 }
 /* 難易度選択 */
-.start .diff {
+.start .diff,
+.perk .diff {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
@@ -505,15 +506,18 @@ body {
   font-size: 14px;
   color: var(--muted);
 }
-.start .diff b {
+.start .diff b,
+.perk .diff b {
   font-size: 16px;
 }
-.start .diff small {
+.start .diff small,
+.perk .diff small {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
 }
-.start .note {
+.start .note,
+.perk .note {
   margin: 0;
   color: var(--muted);
   font-size: 12px;

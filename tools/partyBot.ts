@@ -7,7 +7,7 @@ import { findPath, pathAdjacent, pathTo } from '../src/core/path';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
 import { ITEMS, SPELLS } from '../src/data/units';
-import { stats } from '../src/core/stats';
+import { pendingPerk, spellMp, spellRange, stats } from '../src/core/stats';
 import { currentFloor, treasureHere } from '../src/core/floors';
 import { FLOORS } from '../src/core/generate';
 
@@ -17,6 +17,8 @@ export const BOT = {
   potionAt: 0.3,
   /** 泉で HP 回復薬をこの数まで買う */
   potionStock: 3,
+  /** 成長の二択で選ぶもの */
+  perk: 'fireMp',
   descendAt: 0.7,
   /** 特技を使うか(比較用に個別に切れる) */
   use: { cover: true, power: true, trip: true, smite: true },
@@ -35,6 +37,14 @@ export function botShop(state: GameState): void {
   while ((state.items?.hp ?? 0) < BOT.potionStock && (state.gold ?? 0) >= it.price) {
     state.gold = (state.gold ?? 0) - it.price;
     state.items = { ...state.items, hp: (state.items?.hp ?? 0) + 1 };
+  }
+}
+
+/** 成長の二択: まだ選んでいなければ BOT.perk(無ければ最初の候補)を選ぶ(状態を直接書き換える) */
+export function botPerks(state: GameState): void {
+  for (const u of state.units) {
+    const c = pendingPerk(u);
+    if (c) u.perks = [...(u.perks ?? []), c.includes(BOT.perk) ? BOT.perk : c[0]];
   }
 }
 
@@ -213,7 +223,7 @@ function archer(ctx: Ctx): void {
 
 function mage(ctx: Ctx): void {
   const { state, u } = ctx;
-  const fb = SPELLS.fireball;
+  const fb = { ...SPELLS.fireball, range: spellRange(u, 'fireball'), mp: spellMp(u, 'fireball') };
   const allies = () =>
     state.units
       .filter((o) => o.side === 'party' && !o.down && o !== u)

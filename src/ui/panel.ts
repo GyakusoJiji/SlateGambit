@@ -3,7 +3,7 @@ import { RULES, apLeft, carryingAfter, planCost, spellCost } from '../core/actio
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type GameState, type ItemId, type SpellId, type StrikeKind, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { ITEMS, SPELLS } from '../data/units';
-import { expProgress, stats } from '../core/stats';
+import { expProgress, spellMp, stats } from '../core/stats';
 import { iconUrl } from './icons';
 import { tickCells } from './timeline';
 
@@ -109,10 +109,10 @@ export function actionButtons(u: Unit, actions: Action[], mode: Mode): string {
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
   const need = (s: SpellId) => (s === 'power' ? RULES.powerCost : s === 'cover' ? RULES.coverCost : spellCost(s));
-  const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= need(s) && u.mp >= SPELLS[s].mp;
+  const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= need(s) && u.mp >= spellMp(u, s);
   // ボタンはどのキャラでも同じ位置に並べ、使えないものはグレーアウトする
   // 特技の枠には、その職業の魔法だけを出す
-  const skills = d.spells.map((s) => actButton(s, { on: mode === s, off: !spell(s) }));
+  const skills = d.spells.map((s) => actButton(s, { on: mode === s, off: !spell(s), mp: spellMp(u, s) }));
   while (skills.length < SKILL_SLOTS) skills.push(GAP);
   const list = [
     actButton('move', { on: mode === 'move', off: ap < (busy ? RULES.carryMoveCost : 1) }),
@@ -153,9 +153,11 @@ const ICONS: Record<string, string> = {
  * 行動ボタン 1 つ。使えないボタンは disabled ではなく off クラスでグレーアウトする
  * (disabled だとマウスを乗せても説明が出ないため)。押されても controller 側で無視する
  */
-export function actButton(id: string, opts: { on?: boolean; off?: boolean; cls?: string } = {}): string {
+export function actButton(id: string, opts: { on?: boolean; off?: boolean; cls?: string; mp?: number } = {}): string {
   const label = id in SPELLS ? SPELLS[id as SpellId].name : (T.act as Record<string, string>)[id];
-  const mp = id in SPELLS && SPELLS[id as SpellId].mp > 0 ? `<small>${SPELLS[id as SpellId].mp}</small>` : '';
+  // MP の消費(成長で変わる分は opts.mp で渡す)
+  const cost = opts.mp ?? (id in SPELLS ? SPELLS[id as SpellId].mp : 0);
+  const mp = cost > 0 ? `<small>${cost}</small>` : '';
   const cls = ['act', opts.on ? 'on' : '', opts.off ? 'off' : '', opts.cls ?? ''].filter(Boolean).join(' ');
   return `<button data-act="${id}" data-label="${label}" class="${cls}"${opts.off ? ' aria-disabled="true"' : ''}><span class="ic">${ICONS[id] ?? ''}</span>${label}${mp}</button>`;
 }

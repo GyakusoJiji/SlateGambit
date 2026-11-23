@@ -98,6 +98,17 @@ export const SPELLS: Record<SpellId, SpellDef> = {
   hellfire: { id: 'hellfire', name: '業火', mp: 4, range: 6, target: 'tile', power: 12, powerVar: 4, radius: 2, cost: 5 },
 };
 
+/**
+ * レベルアップの二択(成長)。class の職業が level に達したとき、choices から 1 つ選ぶ。
+ * 今は魔法使いの Lv 2 だけで試している
+ */
+export const PERK_CHOICES: { class: string; level: number; choices: string[] }[] = [{ class: 'mage', level: 2, choices: ['fireRange', 'fireMp'] }];
+
+export const PERKS: Record<string, { name: string; desc: string; spell: SpellId; range?: number; mp?: number }> = {
+  fireRange: { name: '遠くまで届く火球', desc: '火球の射程 +1(6 → 7)。危ない位置に立たずに撃てる', spell: 'fireball', range: 1 },
+  fireMp: { name: '軽い火球', desc: '火球の MP 消費 −1(3 → 2)。撃てる回数が増える', spell: 'fireball', mp: -1 },
+};
+
 /** 回復薬。泉で買い、戦闘中も使える(2 AP・自分か隣の味方) */
 export const ITEMS: Record<ItemId, { id: ItemId; name: string; short: string; price: number; amount: number }> = {
   hp: { id: 'hp', name: 'HP 回復薬', short: 'HP薬', price: 40, amount: 25 },
