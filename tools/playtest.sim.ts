@@ -10,7 +10,7 @@
 import { it } from 'vitest';
 import { planEnemies } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
-import { DIFFICULTY, FLOORS, generateGame } from '../src/core/generate';
+import { DIFFICULTY, FLOORS, GEN, generateGame } from '../src/core/generate';
 import { createTestGame } from '../src/core/scenario';
 import { createEncounter, ENCOUNTERS } from '../src/core/encounters';
 import type { Difficulty, GameEvent, GameState } from '../src/core/types';
@@ -136,6 +136,22 @@ const VARIANTS: Variant[] = (process.env.VARIANTS === 'feat'
         },
       };
     })
+  : process.env.VARIANTS === 'easy'
+  ? // Easy の調整候補(若いドラゴンの HP・物音の倍率・警報役の部屋)
+    [
+      { name: 'Easy 今のまま', setup: () => {}, game: gen('easy') },
+      tweak('Easy 若竜HP45', () => ((MONSTERS.wyrm.maxHp = 45), () => (MONSTERS.wyrm.maxHp = 55))),
+      tweak('Easy 物音0.2', () => {
+        const w = DIFFICULTY.easy.wander;
+        DIFFICULTY.easy.wander = 0.2;
+        return () => (DIFFICULTY.easy.wander = w);
+      }),
+      tweak('Easy 警報なし', () => {
+        const a = GEN.alarmRate;
+        GEN.alarmRate = 0;
+        return () => (GEN.alarmRate = a);
+      }),
+    ]
   : process.env.VARIANTS === 'enc'
   ? // 固定遭遇をボットで遊ぶ(編成や新しい仕組みの比べ方の目安。ボットは足払いなどを狙って使わない)
     ENCOUNTERS.map((e) => ({ name: e.title.slice(0, 20), setup: () => {}, game: (seed: number) => createEncounter(e.id, seed)! }))
@@ -150,6 +166,12 @@ const VARIANTS: Variant[] = (process.env.VARIANTS === 'feat'
   : BASE) as Variant[];
 void strengthen;
 void rest;
+
+/** Easy で、setup が返す関数で元に戻す変種 */
+function tweak(name: string, setup: () => () => unknown): Variant {
+  let undo: () => unknown = () => {};
+  return { name, setup: () => (undo = setup()), game: gen('easy'), teardown: () => undo() };
+}
 
 function strengthen(atk: number, hp: number): void {
   addAtk(Object.values(MONSTERS), atk);
