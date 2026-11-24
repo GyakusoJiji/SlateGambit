@@ -100,7 +100,7 @@ function modeRange(u: Unit, mode: Mode): number {
  * 近接の攻撃は隣接、担ぐ・蘇生は隣接か同じマス、それ以外は射程内で射線が通るマス。
  * 届く相手は、攻撃なら射線上に味方などがいない敵、足払いは敵、回復は味方、担ぐ・蘇生は気絶した味方
  */
-export function reachInfo(st: GameState, u: Unit, from: Pos, mode: Mode): { tiles: Pos[]; targets: Unit[] } {
+export function reachInfo(st: GameState, u: Unit, from: Pos, mode: Mode): { tiles: Pos[]; targets: Unit[]; blind: Pos[] } {
   const { map } = st;
   const r = modeRange(u, mode);
   const near = mode === 'carry' || mode === 'revive' || mode === 'potion';
@@ -111,10 +111,14 @@ export function reachInfo(st: GameState, u: Unit, from: Pos, mode: Mode): { tile
     return dist2(from, p) <= r * r && hasLos(map, from, p);
   };
   const tiles: Pos[] = [];
+  /** 火球: 射程内だが射線の通らない(見えない)マス。撃てるが着弾点がずれる */
+  const blind: Pos[] = [];
   for (let y = Math.max(0, from.y - r); y <= Math.min(map.h - 1, from.y + r); y++) {
     for (let x = Math.max(0, from.x - r); x <= Math.min(map.w - 1, from.x + r); x++) {
       const p = { x, y };
-      if (isWalkable(map, x, y) && st.explored[y * map.w + x] && ok(p)) tiles.push(p);
+      if (!isWalkable(map, x, y) || !st.explored[y * map.w + x]) continue;
+      if (ok(p)) tiles.push(p);
+      else if (mode === 'fireball' && dist2(from, p) <= r * r) blind.push(p);
     }
   }
   const others = st.units.filter((o) => o.id !== u.id);
@@ -124,5 +128,5 @@ export function reachInfo(st: GameState, u: Unit, from: Pos, mode: Mode): { tile
   else if (mode === 'heal') targets = [u, ...others].filter((o) => o.side === u.side && !o.down && ok(o));
   else if (mode === 'potion') targets = [u, ...others].filter((o) => o.side === u.side && !o.down && ok(o));
   else if (near) targets = others.filter((o) => o.side === u.side && o.down && ok(o));
-  return { tiles, targets };
+  return { tiles, targets, blind };
 }

@@ -1,5 +1,5 @@
 // 同時解決結果(TurnResult)の再生。速度変更・一時停止・コマ送り・スキップ・再視聴に対応する。
-import { TICKS_PER_TURN, type GameEvent, type GameState, type Pos, type TurnResult, type UnitSnapshot } from '../core/types';
+import { TICKS_PER_TURN, type FloorMap, type GameEvent, type GameState, type Pos, type TurnResult, type UnitSnapshot } from '../core/types';
 import { sideVisibleMask } from '../core/vision';
 import type { Effect } from './renderer';
 
@@ -19,8 +19,8 @@ export class Playback {
     readonly before: GameState,
     readonly result: TurnResult,
   ) {
-    const map = before.map;
-    this.visible = result.frames.map((f) => {
+    this.visible = result.frames.map((f, i) => {
+      const map = this.mapAt(i);
       const units = before.units.map((u) => {
         const s = f.find((x) => x.id === u.id)!;
         return { ...u, x: s.x, y: s.y, down: s.down };
@@ -32,6 +32,12 @@ export class Playback {
       acc = acc.map((e, i) => e | v[i]);
       return acc;
     });
+  }
+
+  /** フレーム i の時点の地形(扉の開閉を反映する) */
+  mapAt(i: number): FloorMap {
+    const tiles = this.result.tiles?.[i];
+    return tiles ? { ...this.before.map, tiles } : this.before.map;
   }
 
   get done(): boolean {

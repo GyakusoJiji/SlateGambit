@@ -10,16 +10,19 @@ export type Dir = 'N' | 'E' | 'S' | 'W';
 export type Side = 'party' | 'enemy';
 
 /**
- * マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'S'=上り階段(地下 1 階では入口), '>'=下り階段,
+ * マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'D'=扉(閉), 'S'=上り階段(地下 1 階では入口), '>'=下り階段,
  * 'H'=回復の泉, '$'=宝箱, 'c'=開けた宝箱
+ * 閉じた扉は視線を遮るが、通ることはできる(隣に立ったユニットが開けるため)
  */
-export type TileChar = '#' | '.' | '+' | 'S' | '>' | 'H' | '$' | 'c';
+export type TileChar = '#' | '.' | '+' | 'D' | 'S' | '>' | 'H' | '$' | 'c';
 
 export interface FloorMap {
   w: number;
   h: number;
   /** h 行・各 w 文字 */
   tiles: string[];
+  /** 開いている扉('+')が自動で閉まるまでの残りターン数("x,y" → ターン数) */
+  doors?: Record<string, number>;
 }
 
 /** 魔法と特技。cover・power は魔法ではないが、特技のボタンとして同じ枠に並べる */
@@ -54,6 +57,8 @@ export interface Unit {
   hp: number;
   mp: number;
   down: boolean;
+  /** 倒れたターン(倒れた敵の描画を一定ターン後に消すため) */
+  downTurn?: number;
   /** 担いでいる気絶した味方の ID */
   carrying?: string;
   /** 気絶中に、担がれたままターンを終えた連続回数(降ろされると 0 に戻る) */
@@ -166,6 +171,8 @@ export type GameEvent =
       hitId?: string;
       /** 着弾点(描画用) */
       end: Pos;
+      /** 見えないマスを狙った火球の着弾点が、狙ったマス(tile)からずれた */
+      scatter?: boolean;
       reaction?: boolean;
     }
   | { tick: number; type: 'fizzle'; id: string; reason: string }
@@ -222,6 +229,8 @@ export interface TurnResult {
   events: GameEvent[];
   /** frames[0] がターン開始時、frames[t] が t ティック終了時 */
   frames: UnitSnapshot[][];
+  /** 各フレームでの地形(扉の開閉で変わる。frames と同じ添字) */
+  tiles?: string[][];
   /** 各フレームでの宝の状態(目的が宝探しのときだけ。frames と同じ添字) */
   treasure?: { at: Pos | null; holder?: string }[];
 }

@@ -6,6 +6,7 @@ import { DIR_LIST, isWalkable, manhattan, step } from './map';
 import { Rng, hashSeed } from './rng';
 import { stats } from './stats';
 import type { AiMemory, Difficulty, FloorMap, GameState, Pos, Unit } from './types';
+import { openDoorsNear } from './doors';
 import { updateExplored } from './vision';
 
 export const MAP_W = 40;
@@ -110,6 +111,7 @@ export function generateGame(seed: number, difficulty: Difficulty = 'normal', st
     deepest: startFloor,
   };
   placeParty(state, f.up);
+  openDoorsNear(state.map, state.units);
   updateExplored(state);
   return state;
 }
@@ -291,7 +293,7 @@ function connected(tiles: string[][]): boolean {
   return bfs(map, start).filter((v) => v >= 0).length === floors;
 }
 
-/** 部屋の外周で、通路が部屋へまっすぐ入るマスを扉にする */
+/** 部屋の外周で、通路が部屋へまっすぐ入るマスを扉(閉)にする */
 function addDoors(tiles: string[][], rooms: Room[]): void {
   const open = (x: number, y: number) => x >= 0 && y >= 0 && x < MAP_W && y < MAP_H && tiles[y][x] !== '#';
   for (const r of rooms) {
@@ -300,7 +302,7 @@ function addDoors(tiles: string[][], rooms: Room[]): void {
         if (inRoom(r, { x, y }) || tiles[y][x] !== '.') continue;
         const horiz = open(x - 1, y) && open(x + 1, y) && !open(x, y - 1) && !open(x, y + 1);
         const vert = open(x, y - 1) && open(x, y + 1) && !open(x - 1, y) && !open(x + 1, y);
-        if (horiz || vert) tiles[y][x] = '+';
+        if (horiz || vert) tiles[y][x] = 'D';
       }
   }
 }

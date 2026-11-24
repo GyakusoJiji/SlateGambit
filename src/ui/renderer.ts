@@ -146,7 +146,7 @@ export class Renderer {
       for (let x = x0; x <= x1; x++) {
         const i = y * map.w + x;
         if (view.visible && !view.explored[i] && !view.visible[i]) continue;
-        this.drawTile(tileAt(map, x, y), this.sx(x) - z / 2, this.sy(y) - z / 2, z);
+        this.drawTile(tileAt(map, x, y), this.sx(x) - z / 2, this.sy(y) - z / 2, z, map, x, y);
         if (view.visible && !view.visible[i]) {
           g.fillStyle = COLORS.fogDim;
           g.fillRect(this.sx(x) - z / 2, this.sy(y) - z / 2, z, z);
@@ -215,7 +215,7 @@ export class Renderer {
     g.fillText(label, lx, ly + 0.5);
   }
 
-  private drawTile(t: string, px: number, py: number, z: number): void {
+  private drawTile(t: string, px: number, py: number, z: number, map: FloorMap, x: number, y: number): void {
     const g = this.ctx;
     if (t === '#') {
       g.fillStyle = COLORS.wall;
@@ -236,11 +236,8 @@ export class Renderer {
     g.fillRect(px, py, z, z);
     g.strokeStyle = 'rgba(255,255,255,0.04)';
     g.strokeRect(px + 0.5, py + 0.5, z - 1, z - 1);
-    if (t === '+') {
-      g.fillStyle = COLORS.door;
-      g.fillRect(px + z * 0.15, py + z * 0.15, z * 0.7, z * 0.7);
-      g.fillStyle = '#e0c060';
-      g.fillRect(px + z * 0.62, py + z * 0.48, z * 0.08, z * 0.08);
+    if (t === '+' || t === 'D') {
+      this.drawDoor(t === 'D', px, py, z, tileAt(map, x, y - 1) === '#' && tileAt(map, x, y + 1) === '#');
     } else if (t === 'H') {
       // 回復の泉
       g.fillStyle = '#2a6fa8';
@@ -276,6 +273,51 @@ export class Renderer {
       g.fillStyle = open ? '#6a6050' : '#e8c060';
       g.fillRect(px + z * 0.46, py + z * 0.4, z * 0.08, z * 0.1);
     }
+  }
+
+  /**
+   * 扉。closed=閉じた扉(板戸が通路をふさぐ)、開いた扉は枠と、壁側に開いた戸板だけを描く。
+   * ew=通路が東西に通っている(扉の上下が壁)
+   */
+  private drawDoor(closed: boolean, px: number, py: number, z: number, ew: boolean): void {
+    const g = this.ctx;
+    // 枠(壁側の 2 か所の柱)
+    g.fillStyle = '#5a3c1c';
+    if (ew) {
+      g.fillRect(px + z * 0.3, py, z * 0.4, z * 0.1);
+      g.fillRect(px + z * 0.3, py + z * 0.9, z * 0.4, z * 0.1);
+    } else {
+      g.fillRect(px, py + z * 0.3, z * 0.1, z * 0.4);
+      g.fillRect(px + z * 0.9, py + z * 0.3, z * 0.1, z * 0.4);
+    }
+    if (closed) {
+      // 板戸(縦板の継ぎ目と取っ手)
+      const [x, y, w, h] = ew ? [px + z * 0.32, py + z * 0.04, z * 0.36, z * 0.92] : [px + z * 0.04, py + z * 0.32, z * 0.92, z * 0.36];
+      g.fillStyle = COLORS.door;
+      g.fillRect(x, y, w, h);
+      g.strokeStyle = '#4a2e12';
+      g.lineWidth = 1;
+      g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      g.beginPath();
+      if (ew) {
+        g.moveTo(px + z * 0.5, y);
+        g.lineTo(px + z * 0.5, y + h);
+      } else {
+        g.moveTo(x, py + z * 0.5);
+        g.lineTo(x + w, py + z * 0.5);
+      }
+      g.stroke();
+      g.fillStyle = '#e0c060';
+      if (ew) g.fillRect(px + z * 0.54, py + z * 0.56, z * 0.08, z * 0.08);
+      else g.fillRect(px + z * 0.56, py + z * 0.54, z * 0.08, z * 0.08);
+      return;
+    }
+    // 開いた扉: 戸板が片側の柱から通路に沿って開いている
+    g.fillStyle = COLORS.door;
+    g.globalAlpha = 0.85;
+    if (ew) g.fillRect(px + z * 0.3, py + z * 0.1, z * 0.62, z * 0.1);
+    else g.fillRect(px + z * 0.1, py + z * 0.3, z * 0.1, z * 0.62);
+    g.globalAlpha = 1;
   }
 
   private drawUnit(u: DisplayUnit): void {

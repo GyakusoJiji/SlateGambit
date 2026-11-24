@@ -116,6 +116,32 @@ body {
   border-top: 1px solid var(--line);
 }
 
+/* 持ち物の欄(所持金・回復薬・秘宝) */
+.inv {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  flex: 0 0 auto;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #d8d8e4;
+}
+.inv .item {
+  white-space: nowrap;
+}
+.inv .gold {
+  color: #ffd23a;
+  font-weight: bold;
+}
+.inv .none {
+  opacity: 0.5;
+}
+.inv .relic {
+  color: #ff8cc6;
+  font-weight: bold;
+}
+
 /* パーティカード */
 .cards {
   display: grid;

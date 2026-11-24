@@ -6,6 +6,7 @@ import { chestGold, DIFFICULTY, FLOORS, generateFloor, MONSTER_GEN, placeParty }
 import { chebyshev, manhattan, tileAt } from './map';
 import type { Rng } from './rng';
 import { TICKS_PER_TURN, type GameEvent, type GameState, type Pos } from './types';
+import { openDoorsNear } from './doors';
 import { updateExplored } from './vision';
 
 export function currentFloor(state: GameState): number {
@@ -83,6 +84,7 @@ export function changeFloor(state: GameState, to: number): void {
   state.deepest = Math.max(state.deepest ?? 1, to);
   const arrive = findTile(state.map, to > cur ? 'S' : '>');
   if (arrive) placeParty(state, arrive);
+  openDoorsNear(state.map, state.units);
   updateExplored(state);
 }
 

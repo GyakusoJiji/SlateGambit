@@ -24,9 +24,10 @@ export function isWalkable(map: FloorMap, x: number, y: number): boolean {
   return tileAt(map, x, y) !== '#';
 }
 
-/** 視線を遮るか */
+/** 視線を遮るか(壁と閉じた扉) */
 export function isOpaque(map: FloorMap, x: number, y: number): boolean {
-  return tileAt(map, x, y) === '#';
+  const t = tileAt(map, x, y);
+  return t === '#' || t === 'D';
 }
 
 export function step(p: Pos, dir: Dir): Pos {

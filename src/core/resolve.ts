@@ -9,6 +9,7 @@ import { findPath } from './path';
 import { clearShot, interceptCandidates, overwatchTarget } from './reactions';
 import { Rng } from './rng';
 import { applyAlarm } from './alarm';
+import { openDoorsNear, tickDoors } from './doors';
 import {
   TICKS_PER_TURN,
   type Action,
@@ -53,6 +54,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   const cover = new Set<string>();
   const watching = new Set<string>();
   const frames: UnitSnapshot[][] = [snapshot(units, guard, watching)];
+  const tiles: string[][] = [map.tiles.slice()];
   /** このターンに攻撃してきた相手(AI の警戒用) */
   const attackedBy = new Map<string, string>();
   /** 接近攻撃で、射程内に入ってから構えたティック数 */
@@ -116,6 +118,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       m.unit.x = m.to.x;
       m.unit.y = m.to.y;
     }
+    // 扉の隣に来たら開ける(開けた先に敵が見えれば、下の「敵を見たら停止」が働く)
+    openDoorsNear(map, units);
 
     // 敵を見たら停止
     for (const m of intents) {
@@ -145,6 +149,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       else events.push({ tick, type: 'bump', id: m.unit.id, at: m.to });
     }
     for (const d of displaced) events.push({ tick, type: 'move', id: d.unit.id, from: d.from, to: d.to });
+    if (displaced.length > 0) openDoorsNear(map, units);
     /** このティックに実際に位置が変わったユニット(条件付き行動の発動条件) */
     const movedNow = new Set([...intents.filter((m) => m.status === 'ok').map((m) => m.unit.id), ...displaced.map((d) => d.unit.id)]);
 
@@ -249,6 +254,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       if (!u.down && u.hp <= 0) {
         u.down = true;
         u.hp = 0;
+        if (u.side === 'enemy') u.downTurn = state.turn;
         events.push({ tick, type: 'down', id: u.id });
       }
     }
@@ -263,6 +269,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
 
     updateExplored(state);
     frames.push(snapshot(units, guard, watching));
+    tiles.push(map.tiles.slice());
     if (treasure) treasure.push(treasureSnap(state));
   }
 
@@ -283,6 +290,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   applyExp(state, foesAtStart, events, frames);
   updateAiMemory(state, attackedBy, events);
   applyAlarm(state, rng, events, new Set(events.filter((e) => e.type === 'stun').map((e) => e.id)), enemiesSawParty);
+  // 開いた扉の時間経過(閉まった扉は最後のフレームの地形にも反映する)
+  if (tickDoors(map, state.units)) tiles[tiles.length - 1] = map.tiles.slice();
   state.rng = rng.state;
   state.turn += 1;
   // 地下 1 階の入口に秘宝を持ち帰ったら、階段の判定より勝ちを優先する
@@ -291,7 +300,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     const users = new Set(Object.keys(plans).filter((id) => plans[id]?.some((a) => a.type === 'stairs')));
     applyStairs(state, events, users);
   }
-  return { state, events, frames, treasure };
+  return { state, events, frames, tiles, treasure };
 }
 
 function treasureSnap(state: GameState): { at: Pos | null; holder?: string } {
@@ -741,13 +750,17 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   if (u.mp < cost) return fizzle('MP が足りない');
   u.mp -= cost;
   if (sd.target === 'tile') {
-    const tile = action.tile!;
-    const far = rangedProblem(map, u, tile, range);
-    if (far) return fizzle(far);
+    const aim = action.tile!;
+    let tile = aim;
+    const far = rangedProblem(map, u, aim, range);
+    // 火球は見えない(射線の通らない)マスにも撃てるが、着弾点が最大 1 マスずれる
+    if (far === REACH.wall && action.spell === 'fireball') tile = scatterTile(ctx, aim);
+    else if (far) return fizzle(far);
     const breath = action.spell === 'breath';
     if (breath && u.ai) u.ai.breathTurn = ctx.turn;
     const kind = breath ? 'breath' : action.spell === 'smite' || action.spell === 'hellfire' ? action.spell : 'fireball';
-    events.push({ tick, type: 'strike', id: u.id, kind, tile, end: tile, reaction });
+    const scatter = tile !== aim;
+    events.push({ tick, type: 'strike', id: u.id, kind, tile: aim, end: tile, reaction, ...(scatter ? { scatter } : {}) });
     for (const o of units) {
       if (o.down || (sd.foesOnly && o.side === u.side)) continue;
       if (Math.max(Math.abs(o.x - tile.x), Math.abs(o.y - tile.y)) <= sd.radius) dealDamage(ctx, u, o, sd.power + spellBonus(u), sd.powerVar);
@@ -782,6 +795,20 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
   if (!nearOrSame(map, u, target)) return fizzle(REACH.adjacent);
   events.push({ tick, type: 'strike', id: u.id, kind: 'revive', target: target.id, hitId: target.id, end: pos(target), reaction });
   ctx.revived.add(target.id);
+}
+
+/**
+ * 見えないマスを狙った火球の着弾点: 狙ったマスとその周り 8 マスのうち、壁でないマスから乱数で選ぶ
+ * (狙ったマスに落ちることもある)。壁でないマスが無ければ狙ったマス
+ */
+function scatterTile(ctx: StrikeCtx, aim: Pos): Pos {
+  const cells: Pos[] = [];
+  for (let dy = -RULES.fireballScatter; dy <= RULES.fireballScatter; dy++)
+    for (let dx = -RULES.fireballScatter; dx <= RULES.fireballScatter; dx++)
+      if (isWalkable(ctx.map, aim.x + dx, aim.y + dy)) cells.push({ x: aim.x + dx, y: aim.y + dy });
+  if (cells.length === 0) return aim;
+  const p = cells[ctx.rng.int(0, cells.length - 1)];
+  return p.x === aim.x && p.y === aim.y ? aim : p;
 }
 
 /** 狙いが倒れたときに移る先: 届く敵のうち最も近い者 */

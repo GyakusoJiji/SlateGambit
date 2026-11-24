@@ -1,6 +1,7 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
 import { planEnemies, summarizeIntent } from '../core/ai';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan, planCost } from '../core/actions';
+import { hasLos } from '../core/los';
 import { adjacent, nearOrSame, samePos, step, tileAt } from '../core/map';
 import { pathTo } from '../core/path';
 import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
@@ -8,13 +9,13 @@ import { FLOORS, generateGame } from '../core/generate';
 import { createEncounter, encounterDef, ENCOUNTERS } from '../core/encounters';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
-import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, Pos, Unit } from '../core/types';
+import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, Pos, TurnResult, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { ITEMS, PERKS, SPELLS } from '../data/units';
 import { pendingPerk, stats } from '../core/stats';
 import { attachInput } from './input';
-import { actButton, actionButtons, eventLog, idleButtons, levelUpNote, partyCards, planChips, playbackControls, potionButton, timeline, turnSummary, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, idleButtons, inventoryBar, levelUpNote, partyCards, planChips, playbackControls, potionButton, timeline, turnSummary, type Mode } from './panel';
 import { reachInfo, tickPositions, tickCells } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
@@ -148,52 +149,127 @@ export class Controller {
   /** 再生中に自分で盤面を動かしたか(動かしたらその再生の間は追わない) */
   private userPanned = false;
 
-  // ---- 自動で進める操作(クイック移動・連続休憩) ----
+  // ---- 自動で進める操作(クイック移動) ----
 
   /** クイック移動の行き先と先頭のキャラ */
   private quick: { leader: string; target: Pos } | null = null;
-  /** 連続休憩の残り回数(0 なら連続休憩していない) */
-  private autoRest = 0;
   private autoTimer = 0;
 
-  /** 自動で進めている操作を止める。止めたら true */
+  /** 自動で進めている操作(クイック移動・全員休憩)を止める。止めたら true */
   private stopAuto(msg?: string): boolean {
-    if (!this.quick && !this.autoRest) return false;
+    if (!this.quick && !this.rest) return false;
     this.quick = null;
-    this.autoRest = 0;
+    this.rest = null;
     clearTimeout(this.autoTimer);
     if (msg) this.toast(msg);
     this.changed();
     return true;
   }
 
-  /** 予約フェーズに戻ったとき、クイック移動・連続休憩の続きを行う */
+  /** 予約フェーズに戻ったとき、クイック移動・全員休憩の続きを行う */
   private continueAuto(): void {
-    if (!this.quick && !this.autoRest) return;
+    if (this.rest) {
+      if (this.state.status !== 'playing') return void this.stopAuto();
+      this.autoTimer = window.setTimeout(() => {
+        if (this.rest && !this.playback) this.restStep();
+      }, 120);
+      return;
+    }
+    if (!this.quick) return;
     if (this.state.status !== 'playing') return void this.stopAuto();
     if (this.foesInSight()) return void this.stopAuto(T.toast.foundFoe);
     const last = this.lastPlayback?.result.events ?? [];
     if (last.some((e) => e.type === 'damage')) return void this.stopAuto();
-    if (this.quick) {
-      const plans = quickMovePlans(this.state, this.quick.leader, this.quick.target, this.settings.formation);
-      if (!plans) return void this.stopAuto(T.toast.arrived);
-      this.autoTimer = window.setTimeout(() => {
-        if (!this.quick || this.playback) return;
-        this.plans = { ...this.plans, ...plans };
-        this.execute(true);
-      }, 120);
-      return;
-    }
-    // 連続休憩: 立っている全員が全快するまで
-    const tired = this.party().some((u) => !u.down && (u.hp < stats(u).maxHp || u.mp < stats(u).maxMp));
-    if (!tired) return void this.stopAuto(T.toast.rested);
-    this.autoRest--;
-    if (this.autoRest <= 0) return void this.stopAuto();
+    const plans = quickMovePlans(this.state, this.quick.leader, this.quick.target, this.settings.formation);
+    if (!plans) return void this.stopAuto(T.toast.arrived);
     this.autoTimer = window.setTimeout(() => {
-      if (!this.autoRest || this.playback) return;
-      for (const id of Object.keys(this.plans)) this.plans[id] = [];
+      if (!this.quick || this.playback) return;
+      this.plans = { ...this.plans, ...plans };
       this.execute(true);
     }, 120);
+  }
+
+  /** 立っている味方に、HP か MP が減っている者がいるか */
+  private tired(): boolean {
+    return this.party().some((u) => !u.down && (u.hp < stats(u).maxHp || u.mp < stats(u).maxMp));
+  }
+
+  /** 全員休憩の途中経過(null なら休憩していない)。left=残りターン数、turns=休んだターン数 */
+  private rest: { left: number; turns: number } | null = null;
+
+  /** 全員休憩を始める */
+  private restAll(): void {
+    this.rest = { left: REST_TURNS, turns: 0 };
+    this.restStep();
+  }
+
+  /**
+   * 全員休憩を進める。敵が見えないターンはまとめて解決して画面に出さず、
+   * 敵が見えているターン(物音で来た敵などが近づいてくる)は 1 ターンずつ再生して見せる。休憩は続ける。
+   * 攻撃を受ける・敵が隣まで来る・全快する・決着する・REST_TURNS ターンたつと止める
+   * (途中の盤面やボタンを押しても止まる。経過は履歴で見られる)
+   */
+  private restStep(): void {
+    const r = this.rest;
+    if (!r) return;
+    let last: { before: GameState; result: TurnResult } | null = null;
+    let why: string | null = null;
+    let shown = false;
+    while (r.left > 0) {
+      const before = this.state;
+      const party: Plans = {};
+      for (const u of this.party()) if (!u.down) party[u.id] = fillPlan([], 'wait');
+      const result = resolveTurn(before, { ...planEnemies(before), ...party });
+      this.pushHistory(before, result);
+      this.state = result.state;
+      last = { before, result };
+      r.left--;
+      r.turns++;
+      why = this.restStopReason(result.events);
+      if (why === null && r.left <= 0) why = T.toast.restLimit;
+      // 敵が見えていた(見えた)ターンは再生する
+      shown = visibleFoes(before.map, before.units, 'party').size > 0 || this.foesInSight() || result.events.some((e) => e.type === 'damage');
+      if (shown || why !== null) break;
+    }
+    if (!last) return void (this.rest = null);
+    if (!this.state.scenario) saveGame(this.state);
+    const done = why !== null;
+    if (done) this.rest = null;
+    const note = done && why ? T.toast.restDone(r.turns, why) : '';
+    if (shown) {
+      // 再生が終わったら finishPlayback → beginPlanning → continueAuto で続きを休む
+      this.playback = new Playback(last.before, last.result);
+      this.lastPlayback = this.playback;
+      this.userPanned = false;
+      this.restNote = note;
+      this.refresh();
+      return;
+    }
+    const pb = new Playback(last.before, last.result);
+    pb.skip();
+    this.lastPlayback = pb;
+    if (note) this.toast(note);
+    this.beginPlanning();
+    this.showPerkChoice();
+  }
+
+  /** 再生が終わってから出す全員休憩の結果の通知 */
+  private restNote = '';
+
+  /** 全員休憩をやめる理由(続けるなら null)。決着したときは空文字(結果の画面を出すので通知しない) */
+  private restStopReason(events: GameEvent[]): string | null {
+    if (this.state.status !== 'playing') return '';
+    if (events.some((e) => e.type === 'damage' && this.unit(e.id)?.side === 'party')) return T.toast.restHurt;
+    const st = this.state;
+    const near = st.units.some((f) => f.side === 'enemy' && !f.down && this.party().some((p) => !p.down && adjacent(st.map, p, f)));
+    if (near) return T.toast.restFoeNear;
+    if (!this.tired()) return T.toast.rested;
+    return null;
+  }
+
+  private pushHistory(before: GameState, result: TurnResult): void {
+    this.history.push({ turn: before.turn, events: result.events, before: before.units });
+    if (this.history.length > HISTORY_TURNS) this.history.shift();
   }
 
   /** 難易度選択の画面を出す。選ぶとそのシードで新しいゲームを始める */
@@ -289,11 +365,10 @@ export class Controller {
     const result = resolveTurn(this.state, { ...this.enemyPlans, ...filled });
     this.playback = new Playback(this.state, result);
     this.userPanned = false;
-    // クイック移動・連続休憩の再生は速くする
+    // クイック移動の再生は速くする
     if (fast) this.playback.speed = 4;
     this.lastPlayback = this.playback;
-    this.history.push({ turn: this.state.turn, events: result.events, before: this.state.units });
-    if (this.history.length > HISTORY_TURNS) this.history.shift();
+    this.pushHistory(this.state, result);
     this.state = result.state;
     // ターンが終わるたびに自動保存する(決着したら保存を消す)。固定遭遇は保存しない
     if (!this.state.scenario) saveGame(this.state);
@@ -323,6 +398,8 @@ export class Controller {
     }
     const lv = levelUpNote(events, (id) => this.names.get(id) ?? id, this.party().length);
     if (lv) notes.push(lv);
+    if (this.restNote) notes.push(this.restNote);
+    this.restNote = '';
     if (notes.length > 0) this.toast(notes.join('\n'));
     this.beginPlanning();
     this.showPerkChoice();
@@ -358,19 +435,22 @@ export class Controller {
     const noFog = this.settings.noFog;
     if (pb) {
       const fi = pb.frameIndex();
+      const map = pb.mapAt(fi);
       const visible = noFog ? null : pb.visible[fi];
       const snaps = pb.units();
       const units: DisplayUnit[] = [];
       for (const s of snaps) {
         const u = pb.before.units.find((x) => x.id === s.id)!;
-        if (u.side === 'enemy' && visible && !visible[s.y * pb.before.map.w + s.x] && !s.down) continue;
-        if (u.side === 'enemy' && visible && s.down && !visible[s.y * pb.before.map.w + s.x]) continue;
+        // 敵は味方の視界に入っているものだけ描く。倒れた敵は一定ターンたつと消す
+        if (u.side === 'enemy' && visible && !visible[s.y * map.w + s.x]) continue;
+        const after = pb.result.state.units.find((x) => x.id === s.id) ?? u;
+        if (s.down && corpseGone(after, pb.before.turn)) continue;
         const d = stats(u);
         units.push({ id: s.id, icon: d.icon, side: u.side, x: s.fx, y: s.fy, hp: s.hp, maxHp: d.maxHp, down: s.down, guard: s.guard, watch: s.watch, selected: false, carrying: s.carrying });
       }
       const tr = pb.treasure();
       for (const u of units) u.treasure = !!tr && tr.holder === u.id;
-      return { map: pb.before.map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects(), treasureAt: tr?.at, pointers: this.pointers(pb.before, pb.explored[fi], tr?.at ?? null) };
+      return { map, explored: pb.explored[fi], visible, units, marks: [], hints: [], effects: pb.effects(), treasureAt: tr?.at, pointers: this.pointers(pb.before, pb.explored[fi], tr?.at ?? null) };
     }
 
     const st = this.state;
@@ -378,7 +458,7 @@ export class Controller {
     const visible = noFog ? null : sideVisibleMask(st.map, st.units, 'party');
     const seen = (u: Unit) => !visible || visible[u.y * st.map.w + u.x];
     const units: DisplayUnit[] = st.units
-      .filter((u) => u.side === 'party' || seen(u))
+      .filter((u) => u.side === 'party' || (seen(u) && !corpseGone(u, st.turn)))
       .map((u) => {
         const d = stats(u);
         return { id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying, treasure: obj?.kind === 'treasure' && obj.holder === u.id };
@@ -391,8 +471,10 @@ export class Controller {
     // 対象を選ぶモードでは、予定位置から届くマスと届く相手を出す
     const sel = this.selected ? this.unit(this.selected) : undefined;
     if (sel && !sel.down && TARGET_MODES.has(this.mode)) {
-      const { tiles, targets } = reachInfo(st, sel, simulate(st, sel, this.plans[sel.id] ?? []).end, this.mode);
+      const { tiles, targets, blind } = reachInfo(st, sel, simulate(st, sel, this.plans[sel.id] ?? []).end, this.mode);
       for (const p of tiles) marks.push({ kind: 'area', at: p, radius: 0, color: 'rgba(110,190,255,0.13)' });
+      // 火球: 見えないマス(撃てるが着弾点がずれる)
+      for (const p of blind) marks.push({ kind: 'area', at: p, radius: 0, color: 'rgba(255,150,60,0.12)' });
       for (const t of targets) if (seen(t)) marks.push({ kind: 'target', at: t, color: '#7fe07f' });
     }
     // 時間軸でティックを選んでいれば、そのティックの終わりの味方の予定位置を出す(攻撃・魔法が発動する者は印を付ける)
@@ -456,7 +538,7 @@ export class Controller {
     const goal = o?.kind === 'treasure' ? T.objectiveShort[o.holder ? 'treasureHeld' : 'treasure'] : T.objectiveShort[o?.kind ?? 'annihilate'];
     // 固定遭遇は階とゴールドの代わりに遭遇の名前を出す
     if (st.scenario) return `${encounterDef(st.scenario)?.title ?? st.scenario}·${T.turnShort(st.turn)}·${goal}`;
-    return `${T.floor(currentFloor(st))}·${T.turnShort(st.turn)}·${T.gold(st.gold ?? 0)}·${goal}`;
+    return `${T.floor(currentFloor(st))}·${T.turnShort(st.turn)}·${goal}`;
   }
 
   private updatePanel(): void {
@@ -481,7 +563,9 @@ export class Controller {
         const s = snaps.find((x) => x.id === u.id)!;
         return { ...u, hp: s.hp, mp: s.mp, down: s.down };
       });
+      const tr = pb.treasure();
       this.el.panel.innerHTML = `
+        ${this.inventory(pb.before, pb.eventsSoFar(), tr?.holder ?? null)}
         ${partyCards(shown, {}, null)}
         <p class="prompt">${T.prompt.playing}</p>
         ${playbackControls(pb.paused, pb.speed, pb.currentTick())}
@@ -500,7 +584,9 @@ export class Controller {
     const promptText = active ? prompt : '';
     const actions = active ? actionButtons(sel, acts, this.mode) : idleButtons();
     const hasPlan = active && acts.length > 0;
+    const o = this.state.objective;
     this.el.panel.innerHTML = `
+      ${this.inventory(this.state, [], o?.kind === 'treasure' ? o.holder ?? null : null)}
       ${partyCards(this.party(), this.plans, this.selected)}
       <div class="plan">${status}</div>
       <p class="prompt" data-prompt="${promptText}">${promptText}</p>
@@ -514,6 +600,24 @@ export class Controller {
       </div>
       ${timeline(this.party(), this.plans, nameOf, this.foesInSight() ? 'guard' : 'wait', this.timelineTick, this.selected)}
       ${this.lastPlayback ? summaryList(turnSummary(this.lastPlayback.result.events, this.lastPlayback.before.units, nameOf)) : '<ul class="log"></ul>'}`;
+  }
+
+  /**
+   * 持ち物の欄。再生中は、ターンの初めの持ち物に、それまでに起きた出来事(宝箱・警報役の宝・回復薬)を足し引きして出す
+   */
+  private inventory(st: GameState, events: GameEvent[], holder: string | null): string {
+    let gold = st.gold ?? 0;
+    const items = { ...st.items };
+    events.forEach((e, i) => {
+      if (e.type === 'chest' || e.type === 'bounty') gold += e.gold;
+      // 回復薬は、使った直後の回復の出来事で種類が分かる
+      if (e.type === 'strike' && e.kind === 'potion') {
+        const h = events[i + 1];
+        const k: ItemId = h?.type === 'heal' && h.mp ? 'mp' : 'hp';
+        items[k] = Math.max(0, (items[k] ?? 0) - 1);
+      }
+    });
+    return inventoryBar(gold, items, holder && (this.names.get(holder) ?? holder));
   }
 
   private panelVersion = 0;
@@ -782,7 +886,7 @@ export class Controller {
       this.refresh();
       return;
     }
-    // クイック移動・連続休憩の途中で何か押したら止める
+    // クイック移動の途中で何か押したら止める
     if (!pbBtn && this.stopAuto(T.toast.stopped)) return;
     const tickBtn = t.closest<HTMLElement>('[data-tick]');
     if (tickBtn && !this.playback) {
@@ -822,11 +926,9 @@ export class Controller {
   private onAction(act: string): void {
     if (act === 'execute') return this.execute();
     if (act === 'rest') {
-      // 全員の予約を消して休憩する。全快するか敵が見えるまで続ける(最大 20 ターン)
+      // 全員の予約を消して休憩する。全快するか敵が見えるまでのターンを、まとめて 1 回で処理する
       if (this.foesInSight()) return this.toast(T.err.cannotRest);
-      for (const id of Object.keys(this.plans)) this.plans[id] = [];
-      this.autoRest = 20;
-      return this.execute(true);
+      return this.restAll();
     }
     if (act === 'group') {
       if (this.foesInSight()) return this.toast(T.err.cannotGroup);
@@ -1115,6 +1217,17 @@ const TARGET_MODES = new Set<Mode>(['attack', 'power', 'trip', 'fireball', 'smit
 /** 履歴に残すターン数 */
 const HISTORY_TURNS = 30;
 
+/** 全員休憩でまとめて処理する最大ターン数 */
+const REST_TURNS = 20;
+
+/** 倒れた敵を描き続けるターン数(倒れたターンの後、このターン数がたつと消す) */
+const CORPSE_TURNS = 3;
+
+/** 倒れた敵の描画を消すか(turn=表示しているターン) */
+function corpseGone(u: Unit, turn: number): boolean {
+  return u.side === 'enemy' && u.down && turn - (u.downTurn ?? -Infinity) > CORPSE_TURNS;
+}
+
 /** 結果の要約の一覧(1 行ずつ。長い行は省略し、全部は履歴の画面で見る) */
 function summaryList(lines: string[]): string {
   const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -1159,6 +1272,10 @@ function planMarks(st: GameState, u: Unit, actions: Action[], color: string): Ma
       }
     } else if (a.type === 'spell') {
       if (a.tile) {
+        // 見えないマスを狙った火球は、ずれて届きうる範囲も薄く出す
+        if (a.spell === 'fireball' && !hasLos(st.map, end, a.tile)) {
+          marks.push({ kind: 'area', at: a.tile, radius: SPELLS[a.spell].radius + RULES.fireballScatter, color: 'rgba(255,120,30,0.12)' });
+        }
         marks.push({ kind: 'area', at: a.tile, radius: SPELLS[a.spell].radius, color: 'rgba(255,120,30,0.25)' });
         marks.push({ kind: 'target', at: a.tile, color: '#ff8a30' });
       } else if (a.target) {

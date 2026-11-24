@@ -31,6 +31,17 @@ export function partyCards(party: Unit[], plans: Record<string, Action[]>, selec
     .join('')}</div>`;
 }
 
+/**
+ * 持ち物の欄: 所持金・回復薬の数・秘宝(持っている味方の名前)。予約中も再生中も盤面のすぐ下に出す
+ */
+export function inventoryBar(gold: number, items: GameState['items'], relic: string | null): string {
+  const potions = (Object.keys(ITEMS) as ItemId[])
+    .map((k) => `<span class="item${items?.[k] ? '' : ' none'}" title="${ITEMS[k].name}">🧪${ITEMS[k].short} ×${items?.[k] ?? 0}</span>`)
+    .join('');
+  const treasure = relic !== null ? `<span class="item relic">💎${T.inv.relic(esc(relic))}</span>` : '';
+  return `<div class="inv"><span class="item gold">💰${T.gold(gold)}</span>${potions}${treasure}</div>`;
+}
+
 export function actionLabel(a: Action, nameOf: (id: string) => string): string {
   const arrow = { N: '↑', E: '→', S: '↓', W: '←' };
   switch (a.type) {
@@ -236,6 +247,7 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'strike':
         if (e.reaction) lines.push(T.log.reaction(nameOf(e.id)));
+        if (e.scatter) lines.push(T.log.scatter(nameOf(e.id)));
         // 範囲魔法が誰にも当たらなかったことも残す(敵が動いて空振りした結果を、再生しなくても分かるように)
         if (AREA_KINDS.has(e.kind) && !events.some((d) => d.type === 'damage' && d.by === e.id && d.tick === e.tick)) {
           lines.push(T.log.noHit(nameOf(e.id), SPELLS[e.kind as SpellId].name));
