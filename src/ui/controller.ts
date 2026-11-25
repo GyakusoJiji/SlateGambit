@@ -973,6 +973,24 @@ export class Controller {
     </div>`;
   }
 
+  /**
+   * 宿・馬小屋で「全員休憩」を押したとき: その施設で休み(宿は宿代を払って泊まる。足りなければ泊まらない)、
+   * 結果にかかわらず保存して、そのことを知らせる
+   */
+  private restAtFacility(fac: 'inn' | 'stable'): void {
+    const st = this.state;
+    // 回復の必要が無ければ、保存だけする
+    let msg = '';
+    if (fac === 'inn') {
+      if (anyTired(st)) msg = useInn(st) ? T.facility.inn.done : T.facility.inn.poor(innCost(st));
+    } else {
+      msg = useStable(st) ? T.facility.stable.done : T.facility.stable.nothing;
+    }
+    saveGame(st);
+    this.toast(T.toast.saved(msg));
+    this.changed();
+  }
+
   /** 施設を使った後: 保存して、画面と施設の画面を描き直す */
   private facilityUsed(msg?: string): void {
     if (!this.state.scenario) saveGame(this.state);
@@ -1241,6 +1259,9 @@ export class Controller {
     if (act === 'rest') {
       // 全員の予約を消して休憩する。全快するか敵が見えるまでのターンを、まとめて 1 回で処理する
       if (this.foesInSight()) return this.toast(T.err.cannotRest);
+      // 宿・馬小屋にいるときは、その施設で休んで保存する(時間は進まない)
+      const fac = this.facility();
+      if (fac === 'inn' || fac === 'stable') return this.restAtFacility(fac);
       return this.restAll();
     }
     if (act === 'group') {
