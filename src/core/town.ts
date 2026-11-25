@@ -1,8 +1,9 @@
 // 地上(階 0)の城。 中央を縦に貫く幅 3 の大広間(下端が城の入口、上端が地下 1 階への下り階段)の
-// 左右に、扉の付いた部屋が 3 つずつ並び、それぞれに施設がある(宿・馬小屋・道具屋・療養所・銀行・教会)。
-// 施設は通れるマス(視線も遮らない)で、立っている味方が施設のマスにいて敵が見えなければ使える(controller.ts)。
+// 左右に、扉の付いた部屋(中は ROOM_SIZE × ROOM_SIZE)が 3 つずつ並び、それぞれに施設がある
+// (宿・馬小屋・道具屋・療養所・銀行・教会)。施設のマスは部屋の中央の目印(通れて、視線も遮らない)。
+// 立っている味方が施設の部屋の中(どのマスでもよい)にいて敵が見えなければ使える(controller.ts)。
 import { ITEMS } from '../data/units';
-import { DIR_LIST, isWalkable, step } from './map';
+import { DIR_LIST, isWalkable, step, tileAt } from './map';
 import { stats } from './stats';
 import type { FloorMap, GameState, ItemId, Pos, Unit } from './types';
 
@@ -46,6 +47,9 @@ const ROOMS: [FacilityId, FacilityId][] = [
   ['shop', 'stable'],
 ];
 
+/** 施設の部屋の中の広さ(縦横のマス数) */
+export const ROOM_SIZE = 5;
+
 export interface Town {
   map: FloorMap;
   /** 城の入口(新しいゲームの開始位置) */
@@ -57,24 +61,27 @@ export interface Town {
 
 /**
  * 地上の城を作る(どのシードでも同じ間取り)。
- * 大広間は地図の中央の 3 列で、上端の中央に下り階段、下端の中央が入口。
- * 左右の部屋は大広間との間の壁に扉(閉)があり、部屋の中央に施設のマスを置く
+ * 大広間は地図の中央の 3 列で、上端の中央に下り階段、下端の中央が入口。縦の長さは部屋の並びに合わせ、地図の上下の中ほどに置く。
+ * 左右の部屋(中は ROOM_SIZE × ROOM_SIZE)は大広間との間の壁に扉(閉)があり、部屋の中央に施設のマスを置く
  */
 export function generateTown(_seed: number, w: number, h: number): Town {
   const tiles = Array.from({ length: h }, () => new Array<string>(w).fill('#'));
   const cx = Math.floor(w / 2) - 1;
   const hall = { x0: cx - 1, x1: cx + 1 };
-  for (let y = 1; y < h - 1; y++) for (let x = hall.x0; x <= hall.x1; x++) tiles[y][x] = '.';
-
-  // 部屋: 大広間の左右の壁(1 マス)の外側。縦は 3 等分し、部屋の間に壁を 1 マス挟む
-  const left = { x0: 2, x1: hall.x0 - 2 };
-  const right = { x0: hall.x1 + 2, x1: hall.x1 + 2 + (left.x1 - left.x0) };
+  // 大広間の縦: 部屋の並び(間に壁 1 マス)の上下に 2 行ずつ(下り階段・入口の行と、余白の行)
   const rows = ROOMS.length;
-  const span = Math.floor((h - 2 - (rows + 1)) / rows);
+  const hallH = rows * ROOM_SIZE + (rows - 1) + 4;
+  const top = Math.max(1, 1 + Math.floor((h - 2 - hallH) / 2));
+  const bottom = Math.min(h - 2, top + hallH - 1);
+  for (let y = top; y <= bottom; y++) for (let x = hall.x0; x <= hall.x1; x++) tiles[y][x] = '.';
+
+  // 部屋: 大広間の左右の壁(1 マス)の外側。部屋の間に壁を 1 マス挟む
+  const left = { x0: hall.x0 - 1 - ROOM_SIZE, x1: hall.x0 - 2 };
+  const right = { x0: hall.x1 + 2, x1: hall.x1 + 1 + ROOM_SIZE };
   const facilities = {} as Record<FacilityId, Pos>;
   ROOMS.forEach(([l, r], i) => {
-    const y0 = 2 + i * (span + 1);
-    const y1 = y0 + span - 1;
+    const y0 = top + 2 + i * (ROOM_SIZE + 1);
+    const y1 = y0 + ROOM_SIZE - 1;
     const mid = Math.floor((y0 + y1) / 2);
     for (const [side, id, doorX] of [
       [left, l, hall.x0 - 1],
@@ -88,9 +95,9 @@ export function generateTown(_seed: number, w: number, h: number): Town {
     }
   });
 
-  const down = { x: cx, y: 1 };
+  const down = { x: cx, y: top };
   tiles[down.y][down.x] = '>';
-  const start = { x: cx, y: h - 2 };
+  const start = { x: cx, y: bottom };
   return { map: { w, h, tiles: tiles.map((r) => r.join('')) }, start, down, facilities };
 }
 
@@ -231,11 +238,35 @@ export function buyItem(state: GameState, k: ItemId): boolean {
   return true;
 }
 
-/** 立っている味方が施設のマスにいれば、その施設(複数あれば最初の 1 つ) */
+/**
+ * 立っている味方が施設にいれば、その施設(複数あれば最初の 1 つ)。
+ * 地上では施設の部屋の中ならどのマスでもよい。ほかの階では施設のマスの上だけ
+ */
 export function facilityHere(state: GameState): FacilityId | null {
   for (const u of standing(state)) {
-    const f = facilityOf(state.map.tiles[u.y]?.[u.x] ?? '#');
+    const f = (state.floor ?? 1) === 0 ? roomFacility(state.map, u) : facilityOf(tileAt(state.map, u.x, u.y));
     if (f) return f;
+  }
+  return null;
+}
+
+const isDoor = (c: string) => c === 'D' || c === '+';
+
+/** p を含む部屋(壁と扉で区切られた床のまとまり)にある施設。扉の上・壁・施設の無いまとまり(大広間)なら null */
+export function roomFacility(map: FloorMap, p: Pos): FacilityId | null {
+  if (!isWalkable(map, p.x, p.y) || isDoor(tileAt(map, p.x, p.y))) return null;
+  const seen = new Set([p.y * map.w + p.x]);
+  const q: Pos[] = [p];
+  for (let i = 0; i < q.length; i++) {
+    const f = facilityOf(tileAt(map, q[i].x, q[i].y));
+    if (f) return f;
+    for (const dir of DIR_LIST) {
+      const s = step(q[i], dir);
+      const k = s.y * map.w + s.x;
+      if (seen.has(k) || !isWalkable(map, s.x, s.y) || isDoor(tileAt(map, s.x, s.y))) continue;
+      seen.add(k);
+      q.push(s);
+    }
   }
   return null;
 }

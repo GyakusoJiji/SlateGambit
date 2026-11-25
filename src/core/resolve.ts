@@ -305,7 +305,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   applyExp(state, foesAtStart, events, frames);
   applyLoot(state, foesAtStart, events);
   applyBanditEscape(state, events);
-  applyRumors(state, events);
+  applyRumors(state, events, frames);
   updateAiMemory(state, attackedBy, events);
   applyAlarm(state, rng, events, new Set(events.filter((e) => e.type === 'stun').map((e) => e.id)), enemiesSawParty);
   // 開いた扉の時間経過(閉まった扉は最後のフレームの地形にも反映する)

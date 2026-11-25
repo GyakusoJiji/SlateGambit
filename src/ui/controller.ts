@@ -38,7 +38,7 @@ import { actButton, actionButtons, eventLog, idleButtons, inventoryBar, levelUpN
 import { reachInfo, tickPositions, tickCells } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
-import { loadGame, saveGame } from './save';
+import { clearInn, loadGame, loadInn, saveGame, saveInn } from './save';
 import { LESSONS, lessonDef, TUTORIAL_ID, TUTORIAL_PAGES } from '../core/tutorial';
 
 interface Settings {
@@ -210,6 +210,8 @@ export class Controller {
     if (this.foesInSight()) return void this.stopAuto(T.toast.foundFoe);
     const last = this.lastPlayback?.result.events ?? [];
     if (last.some((e) => e.type === 'damage')) return void this.stopAuto();
+    // 噂を聞いたら、通知を読めるよう止まる(次のターンの通知で上書きしない)
+    if (last.some((e) => e.type === 'rumor')) return void this.stopAuto();
     const plans = quickMovePlans(this.state, this.quick.leader, this.quick.target, this.settings.formation);
     if (!plans) return void this.stopAuto(T.toast.arrived);
     this.autoTimer = window.setTimeout(() => {
@@ -316,14 +318,18 @@ export class Controller {
     </div>`;
   }
 
-  /** キャンペーンの画面: 保存があれば続きから、または難易度を選んではじめから */
+  /**
+   * キャンペーンの画面: 宿・馬小屋の保存があればそこから、または難易度を選んではじめから。
+   * ターンごとの自動保存(最後のターン)は、起動したときの自動の再開だけに使う
+   */
   private showCampaign(): void {
     const saved = loadGame();
+    const inn = loadInn();
     const btn = (d: Difficulty) => `<button class="act diff" data-ov="diff" data-diff="${d}">
         <b>${T.difficulty[d]}</b><small>${T.difficultyDesc[d]}</small></button>`;
     this.el.overlay.innerHTML = `<div class="sheet start">
       <h2>${T.menu.campaign}</h2>
-      ${saved ? `<button class="act diff primary" data-ov="continue"><b>${T.menu.continue}</b><small>${T.menu.continueDesc(T.floor(currentFloor(saved)), saved.turn)}</small></button>` : ''}
+      ${inn ? `<button class="act diff primary" data-ov="continue-inn"><b>${T.menu.continueInn}</b><small>${T.menu.continueInnDesc(inn.turn, !!saved && saved.turn !== inn.turn)}</small></button>` : ''}
       <h3>${T.menu.newGame}</h3>
       ${btn('easy')}${btn('normal')}${btn('hard')}
       <p class="note">${T.start.note}<br>${T.difficultyDesc.boss}</p>
@@ -445,16 +451,21 @@ export class Controller {
   start(seed: number, difficulty: Difficulty = 'normal', persist = true, startFloor = 0): void {
     this.mg = null;
     this.begin(generateGame(seed, difficulty, Math.max(0, Math.min(FLOORS, startFloor))));
-    if (persist) saveGame(this.state);
+    if (persist) {
+      saveGame(this.state);
+      // 前のキャンペーンの宿・馬小屋の保存は使えなくする
+      clearInn();
+    }
   }
 
   /** 自動保存から続きを始める。起動 1 回ごとに、銀行の預金に利息が付く(まれに暴落する) */
-  resume(state: GameState): void {
+  /** fromInn: 宿・馬小屋の保存から始める(自動保存をその状態で上書きする) */
+  resume(state: GameState, fromInn = false): void {
     const day = bankDay(state, Math.random());
-    if (day && !state.scenario) saveGame(state);
+    if ((day || fromInn) && !state.scenario) saveGame(state);
     this.mg = null;
     this.begin(state);
-    const notes = [T.toast.resumed(state.turn)];
+    const notes = [fromInn ? T.toast.resumedInn(state.turn) : T.toast.resumed(state.turn)];
     if (day) notes.push(day.crash ? T.facility.bank.crash(day.amount) : T.facility.bank.interest(day.amount));
     this.toast(notes.join('\n'));
   }
@@ -722,12 +733,6 @@ export class Controller {
     turnEl.title = `${T.floorLong(currentFloor(this.state))} · ${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.objective[this.state.objective?.kind ?? 'annihilate']}`;
     const replay = this.el.topbar.querySelector<HTMLButtonElement>('[data-top="replay"]')!;
     replay.disabled = !this.lastPlayback || !!pb;
-    // 泉の店: 誰かが泉にいて、敵が見えていない予約中だけ出す
-    // 施設: 誰かが施設のマスにいて、敵が見えていない予約中だけ、その施設の名前のボタンを出す
-    const shopBtn = this.el.topbar.querySelector<HTMLButtonElement>('[data-top="shop"]')!;
-    const fac = pb ? null : this.facility();
-    shopBtn.hidden = !fac;
-    if (fac) shopBtn.textContent = T.facility[fac].name;
 
     if (pb) {
       const before = pb.before.units.filter((u) => u.side === 'party');
@@ -762,7 +767,7 @@ export class Controller {
     const actions = active ? actionButtons(sel, acts, this.mode, { potion, noMagic: currentFloor(this.state) === 0 }) : idleButtons({ potion });
     const o = this.state.objective;
     this.el.panel.innerHTML = `
-      ${this.inventory(this.state, [], o?.kind === 'treasure' ? o.holder ?? null : null)}
+      ${this.inventory(this.state, [], o?.kind === 'treasure' ? o.holder ?? null : null, true)}
       ${partyCards(this.party(), this.plans, this.selected)}
       <div class="plan">${status}</div>
       <p class="prompt" data-prompt="${promptText}">${promptText}</p>
@@ -779,9 +784,10 @@ export class Controller {
   }
 
   /**
-   * 持ち物の欄。再生中は、ターンの初めの持ち物に、それまでに起きた出来事(宝箱・警報役の宝・回復薬)を足し引きして出す
+   * 持ち物の欄。再生中は、ターンの初めの持ち物に、それまでに起きた出来事(宝箱・警報役の宝・回復薬)を足し引きして出す。
+   * withFacility: 誰かが施設の部屋にいて、敵が見えていなければ、右端にその施設の名前のボタンを出す(予約中だけ)
    */
-  private inventory(st: GameState, events: GameEvent[], holder: string | null): string {
+  private inventory(st: GameState, events: GameEvent[], holder: string | null, withFacility = false): string {
     let gold = st.gold ?? 0;
     const items = { ...st.items };
     events.forEach((e, i) => {
@@ -797,7 +803,8 @@ export class Controller {
     });
     // 加護は、再生中に使われたら(持ち直した出来事があれば)消して出す
     const blessing = !!st.blessing && !events.some((e) => e.type === 'blessing');
-    return inventoryBar(gold, items, holder && (this.names.get(holder) ?? holder), st.bank ?? 0, blessing);
+    const fac = withFacility ? this.facility() : null;
+    return inventoryBar(gold, items, holder && (this.names.get(holder) ?? holder), st.bank ?? 0, blessing, fac ? T.facility[fac].name : undefined);
   }
 
   private panelVersion = 0;
@@ -841,6 +848,8 @@ export class Controller {
       </div>`;
       return;
     }
+    // キャンペーンを勝ち終えたら、宿・馬小屋の保存も消す(全滅したときは、そこからやり直せるよう残す)
+    if (won && !this.state.scenario) clearInn();
     this.el.overlay.innerHTML = `<div class="sheet result ${won ? 'won' : 'lost'}">
       <h2>${won ? (({ treasure: T.result.wonTreasure, escape: T.result.wonEscape }) as Record<string, string>)[this.state.objective?.kind ?? ''] ?? T.result.won : T.result.lost}</h2>
       <p>${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.turn(this.state.turn - 1)} で決着</p>
@@ -987,6 +996,7 @@ export class Controller {
       msg = useStable(st) ? T.facility.stable.done : T.facility.stable.nothing;
     }
     saveGame(st);
+    saveInn(st);
     this.toast(T.toast.saved(msg));
     this.changed();
   }
@@ -1084,7 +1094,6 @@ export class Controller {
     if (!b) return;
     if (b.dataset.top === 'settings') this.showSettings();
     if (b.dataset.top === 'history' && !this.playback) this.showHistory();
-    if (b.dataset.top === 'shop' && !this.playback) this.showFacility();
     if (b.dataset.top === 'replay' && this.lastPlayback && !this.playback) {
       this.playback = this.lastPlayback;
       this.replaying = true;
@@ -1142,11 +1151,11 @@ export class Controller {
     }
     if (b.dataset.ov === 'campaign') this.showCampaign();
     if (b.dataset.ov === 'minigames') this.showMinigames();
-    if (b.dataset.ov === 'continue') {
-      const saved = loadGame();
-      if (saved) {
+    if (b.dataset.ov === 'continue-inn') {
+      const inn = loadInn();
+      if (inn) {
         this.setUrl({});
-        this.resume(saved);
+        this.resume(inn, true);
       }
     }
     if (b.dataset.ov === 'mg-start' || b.dataset.ov === 'mg-again') {
@@ -1226,6 +1235,8 @@ export class Controller {
       this.changed();
       return;
     }
+    // 持ち物の欄の右端の施設ボタン
+    if (t.closest('[data-fac]') && !this.playback) return this.showFacility();
     const selBtn = t.closest<HTMLElement>('[data-sel]');
     if (selBtn && !this.playback) {
       // カードで選んだら、そのキャラの位置に盤面を寄せる

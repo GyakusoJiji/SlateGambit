@@ -34,14 +34,16 @@ export function partyCards(party: Unit[], plans: Record<string, Action[]>, selec
 /**
  * 持ち物の欄: 所持金・回復薬と食料の数・秘宝(持っている味方の名前)。予約中も再生中も盤面のすぐ下に出す
  */
-export function inventoryBar(gold: number, items: GameState['items'], relic: string | null, bank = 0, blessing = false): string {
+/** facility: 施設の部屋にいるとき、その施設の名前(右端にボタンを出す。押すと施設の画面) */
+export function inventoryBar(gold: number, items: GameState['items'], relic: string | null, bank = 0, blessing = false, facility?: string): string {
   const potions = (Object.keys(ITEMS) as ItemId[])
     .map((k) => `<span class="item${items?.[k] ? '' : ' none'}" title="${ITEMS[k].name}">${ITEMS[k].icon}${ITEMS[k].short} ×${items?.[k] ?? 0}</span>`)
     .join('');
   const treasure = relic !== null ? `<span class="item relic">💎${T.inv.relic(esc(relic))}</span>` : '';
   const saved = bank > 0 ? `<span class="item">🏦${T.inv.bank(bank)}</span>` : '';
   const holy = blessing ? `<span class="item relic">✝${T.inv.blessing}</span>` : '';
-  return `<div class="inv"><span class="item gold">💰${T.gold(gold)}</span>${saved}${potions}${treasure}${holy}</div>`;
+  const fac = facility ? `<button class="act small fac" data-fac>${esc(facility)}</button>` : '';
+  return `<div class="inv"><span class="item gold">💰${T.gold(gold)}</span>${saved}${potions}${treasure}${holy}${fac}</div>`;
 }
 
 export function actionLabel(a: Action, nameOf: (id: string) => string): string {

@@ -4,9 +4,9 @@ import { fillPlan, RULES } from '../src/core/actions';
 import { planEnemies } from '../src/core/ai';
 import { DISGUISE_RATE, generateGame, TOWN_RESIDENTS } from '../src/core/generate';
 import { resolveTurn } from '../src/core/resolve';
-import { makeRumor, RUMOR_COOLDOWN } from '../src/core/rumors';
+import { applyRumors, makeRumor, RUMOR_COOLDOWN } from '../src/core/rumors';
 import { Rng } from '../src/core/rng';
-import type { GameState, Unit } from '../src/core/types';
+import type { GameEvent, GameState, Unit, UnitSnapshot } from '../src/core/types';
 import { isNeutral, visibleFoes } from '../src/core/vision';
 import { MONSTERS } from '../src/data/units';
 import { DIR_LIST, isWalkable, step } from '../src/core/map';
@@ -60,6 +60,38 @@ describe('住人', () => {
     const b = resolveTurn(a.state, { ...partyWait(a.state), [r.id]: fillPlan([], 'wait') });
     expect(b.events.some((e) => e.type === 'rumor')).toBe(false);
     expect(RUMOR_COOLDOWN).toBeGreaterThan(1);
+  });
+
+  it('ターンの途中で隣を通り過ぎただけでも噂を話す', () => {
+    const { s, w, r } = withResident(36);
+    // ティック 1 だけ隣にいて、ターンの終わりには離れている
+    const far = { x: r.x + 5, y: r.y };
+    const snap = (u: Unit, p: { x: number; y: number }) => ({ id: u.id, x: p.x, y: p.y, down: false }) as UnitSnapshot;
+    const frames = [
+      [snap(w, far), snap(r, r)],
+      [snap(w, w), snap(r, r)],
+      [snap(w, far), snap(r, r)],
+    ];
+    const events: GameEvent[] = [];
+    applyRumors(s, events, frames);
+    expect(events.some((e) => e.type === 'rumor' && e.id === r.id)).toBe(true);
+    // 一度も隣に来なければ話さない
+    const none: GameEvent[] = [];
+    applyRumors(withResident(36).s, none, [frames[0], frames[2]]);
+    expect(none.length).toBe(0);
+  });
+
+  it('隣に住人が 2 人いれば、同じターンに 2 人とも話す(化けた盗人も話す)', () => {
+    const s = generateGame(37, 'normal');
+    const w = s.units[0];
+    const [a, b] = s.units.filter((u) => u.defId === 'resident');
+    const free = DIR_LIST.map((d) => step(w, d)).filter((p) => isWalkable(s.map, p.x, p.y) && !s.units.some((u) => u.x === p.x && u.y === p.y));
+    Object.assign(a, free[0], { ai: { mode: 'idle' } });
+    Object.assign(b, free[1], { ai: { mode: 'idle', disguise: true } });
+    s.units = s.units.filter((u) => u.side === 'party' || u === a || u === b);
+    const events: GameEvent[] = [];
+    applyRumors(s, events);
+    expect(events.filter((e) => e.type === 'rumor').map((e) => (e as { id: string }).id).sort()).toEqual([a.id, b.id].sort());
   });
 
   it('噂には本当の話と嘘があり、化けた盗人はいつも嘘をつく', () => {

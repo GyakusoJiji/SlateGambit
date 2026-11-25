@@ -8,7 +8,7 @@ import { generateGame, MAP_H, MAP_W } from '../src/core/generate';
 import { isWalkable, step, DIR_LIST, tileAt } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
 import { stats } from '../src/core/stats';
-import { bankDay, buyItem, churchCost, clinicCost, deposit, FACILITY_TILE, facilityHere, generateTown, innCost, TOWN, useChurch, useClinic, useInn, useStable, withdraw } from '../src/core/town';
+import { bankDay, buyItem, churchCost, clinicCost, deposit, FACILITY_TILE, facilityHere, generateTown, innCost, ROOM_SIZE, roomFacility, TOWN, useChurch, useClinic, useInn, useStable, withdraw } from '../src/core/town';
 import type { GameState, Pos } from '../src/core/types';
 import { ITEMS } from '../src/data/units';
 
@@ -70,6 +70,24 @@ describe('地上の城', () => {
     expect(t.facilities.church.y).toBe(t.facilities.bank.y);
     expect(t.start.x - t.facilities.inn.x).toBe(t.facilities.clinic.x - t.start.x);
   });
+
+  it('施設の部屋の中は ROOM_SIZE × ROOM_SIZE で、中のどのマスでもその施設になる', () => {
+    const t = generateTown(1, MAP_W, MAP_H);
+    const half = Math.floor(ROOM_SIZE / 2);
+    for (const [id, p] of Object.entries(t.facilities)) {
+      for (let dy = -half; dy <= half; dy++)
+        for (let dx = -half; dx <= half; dx++) expect(roomFacility(t.map, { x: p.x + dx, y: p.y + dy })).toBe(id);
+      // 部屋の外側(上下は壁、左右は壁か扉)
+      for (const q of [{ x: p.x, y: p.y - half - 1 }, { x: p.x, y: p.y + half + 1 }, { x: p.x - half - 1, y: p.y }, { x: p.x + half + 1, y: p.y }])
+        expect(['#', 'D']).toContain(tileAt(t.map, q.x, q.y));
+    }
+    // 大広間・扉の上・入口は、どの施設でもない
+    expect(roomFacility(t.map, t.start)).toBeNull();
+    expect(roomFacility(t.map, t.down)).toBeNull();
+    const door = { x: t.facilities.inn.x + half + 1, y: t.facilities.inn.y };
+    expect(tileAt(t.map, door.x, door.y)).toBe('D');
+    expect(roomFacility(t.map, door)).toBeNull();
+  });
 });
 
 /** 地上から始めたゲームで、施設 c のマスに戦士を立たせる */
@@ -83,11 +101,14 @@ function at(c: string, seed = 21): GameState {
 }
 
 describe('施設', () => {
-  it('施設のマスに立っている味方がいれば、その施設を使える', () => {
+  it('施設の部屋の中に立っている味方がいれば、その施設を使える(施設のマスでなくてよい)', () => {
     expect(facilityHere(at('I'))).toBe('inn');
     expect(facilityHere(at('C'))).toBe('clinic');
-    const s = generateGame(21, 'normal');
-    expect(facilityHere(s)).toBeNull();
+    const s = at('T');
+    s.units[0].x += 1;
+    s.units[0].y -= 2;
+    expect(facilityHere(s)).toBe('shop');
+    expect(facilityHere(generateGame(21, 'normal'))).toBeNull();
   });
 
   it('宿: 宿代(レベルの合計 × 額)を払うと、立っている全員が全快する', () => {

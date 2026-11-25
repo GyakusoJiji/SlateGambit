@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { generateGame } from '../src/core/generate';
 import { resolveTurn } from '../src/core/resolve';
 import { planEnemies } from '../src/core/ai';
-import { clearSave, loadGame, saveGame } from '../src/ui/save';
+import { clearInn, clearSave, loadGame, loadInn, saveGame, saveInn } from '../src/ui/save';
 
 // テスト環境には localStorage が無いので、メモリ上の代わりを置く
 const store = new Map<string, string>();
@@ -49,5 +49,29 @@ describe('自動保存', () => {
     saveGame(generateGame(1, 'easy'));
     clearSave();
     expect(loadGame()).toBeNull();
+  });
+
+  it('宿・馬小屋の保存は、ターンごとの自動保存では上書きされず、全滅しても残る', () => {
+    const s0 = generateGame(7, 'hard');
+    saveGame(s0);
+    saveInn(s0);
+    const s1 = resolveTurn(s0, planEnemies(s0)).state;
+    saveGame(s1);
+    expect(loadGame()).toEqual(s1);
+    expect(loadInn()).toEqual(s0);
+    saveGame({ ...s1, status: 'lost' });
+    expect(loadGame()).toBeNull();
+    expect(loadInn()).toEqual(s0);
+    // 読むたびに別のオブジェクトなので、遊んで書き換えても保存は変わらない
+    loadInn()!.turn = 99;
+    expect(loadInn()!.turn).toBe(s0.turn);
+    clearInn();
+    expect(loadInn()).toBeNull();
+  });
+
+  it('壊れた宿・馬小屋の保存は読まずに捨てる', () => {
+    store.set('slate-gambit/inn', JSON.stringify({ version: 0, state: generateGame(1, 'easy') }));
+    expect(loadInn()).toBeNull();
+    expect(store.has('slate-gambit/inn')).toBe(false);
   });
 });

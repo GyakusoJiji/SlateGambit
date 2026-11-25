@@ -4,7 +4,7 @@
 import { MONSTERS } from '../data/units';
 import { FLOORS, generateFloor } from './generate';
 import { Rng, hashSeed } from './rng';
-import type { Dir, GameEvent, GameState, Rumor, Unit } from './types';
+import type { Dir, GameEvent, GameState, Rumor, Unit, UnitSnapshot } from './types';
 import { TICKS_PER_TURN } from './types';
 
 /** 住人が本当のことを言う確率 */
@@ -16,21 +16,31 @@ export const RUMOR_COOLDOWN = 6;
 const RUMOR_MONSTERS = Object.keys(MONSTERS).filter((id) => !['resident', 'bandit', 'dragon', 'wyrm'].includes(id));
 const OPPOSITE: Record<Dir, Dir> = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
-/** ターンの終わり: 立っている味方の隣(斜めを含む)にいる住人が 1 人、噂を話す(1 ターンに 1 つまで) */
-export function applyRumors(state: GameState, events: GameEvent[]): void {
+/**
+ * ターンの終わり: このターンのどこかのティックで、立っている味方の隣(斜めを含む)に来た住人
+ * (住人に化けた盗人を含む)が、それぞれ噂を話す。同じ住人は RUMOR_COOLDOWN ターンに 1 回まで。
+ * frames はティックごとの位置(通り過ぎただけでも隣に来れば話す)。無ければターンの終わりの位置だけを見る
+ */
+export function applyRumors(state: GameState, events: GameEvent[], frames?: UnitSnapshot[][]): void {
   if ((state.floor ?? 1) !== 0) return;
-  const party = state.units.filter((u) => u.side === 'party' && !u.down);
-  const talker = state.units.find(
-    (u) =>
-      u.defId === 'resident' &&
-      !u.down &&
-      state.turn - (u.ai?.talked ?? -Infinity) >= RUMOR_COOLDOWN &&
-      party.some((p) => Math.max(Math.abs(p.x - u.x), Math.abs(p.y - u.y)) === 1),
-  );
-  if (!talker) return;
-  (talker.ai ??= { mode: 'idle' }).talked = state.turn;
-  const rng = new Rng(hashSeed('rumor', state.seed, state.turn, talker.id));
-  events.push({ tick: TICKS_PER_TURN, type: 'rumor', id: talker.id, rumor: makeRumor(state, talker, rng) });
+  const side = new Map(state.units.map((u) => [u.id, u.side]));
+  const ticks: Pick<UnitSnapshot, 'id' | 'x' | 'y' | 'down'>[][] = frames ?? [state.units];
+  const met = new Set<string>();
+  for (const f of ticks) {
+    const party = f.filter((s) => !s.down && side.get(s.id) === 'party');
+    for (const s of f) {
+      if (s.down || met.has(s.id) || side.get(s.id) === 'party') continue;
+      if (party.some((p) => Math.max(Math.abs(p.x - s.x), Math.abs(p.y - s.y)) === 1)) met.add(s.id);
+    }
+  }
+  for (const talker of state.units) {
+    // 正体を現した盗人(野盗)は、もう話さない
+    if (talker.defId !== 'resident' || talker.down || !met.has(talker.id)) continue;
+    if (state.turn - (talker.ai?.talked ?? -Infinity) < RUMOR_COOLDOWN) continue;
+    (talker.ai ??= { mode: 'idle' }).talked = state.turn;
+    const rng = new Rng(hashSeed('rumor', state.seed, state.turn, talker.id));
+    events.push({ tick: TICKS_PER_TURN, type: 'rumor', id: talker.id, rumor: makeRumor(state, talker, rng) });
+  }
 }
 
 /** 噂を 1 つ作る。truth は本当の話か(化けた盗人はいつも嘘) */
