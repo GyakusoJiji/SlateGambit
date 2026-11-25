@@ -44,6 +44,10 @@ export interface AiMemory {
   alarmRaised?: boolean;
   /** 警報役: 止めた宝を渡し終えた */
   bountyPaid?: boolean;
+  /** 野盗: パーティから盗んだゴールド(盗んだ後は逃げる) */
+  stolen?: number;
+  /** 野盗: 盗んだ後、パーティに見られずに過ごしたターン数 */
+  unseen?: number;
 }
 
 export interface Unit {
@@ -205,6 +209,12 @@ export type GameEvent =
   | { tick: number; type: 'ration'; food: boolean }
   /** 倒した敵からゴールドを得た */
   | { tick: number; type: 'loot'; gold: number }
+  /** 野盗(id)にゴールドを盗まれた */
+  | { tick: number; type: 'steal'; id: string; gold: number }
+  /** 盗んだ野盗(id)を倒して、ゴールドを取り返した */
+  | { tick: number; type: 'recover'; id: string; gold: number }
+  /** 盗んだ野盗(id)に逃げ切られた(盗まれたゴールドは戻らない) */
+  | { tick: number; type: 'escape'; id: string; gold: number }
   /** 担がれている間に意識を取り戻した */
   | { tick: number; type: 'wake'; id: string }
   /** 眠っていた敵が目を覚ました */

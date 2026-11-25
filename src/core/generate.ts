@@ -21,6 +21,8 @@ export const FLOORS = 5;
  */
 export const MONSTER_GEN: Record<string, { cost: number; from: number; to?: number; weight: number }> = {
   slime: { cost: 1, from: 1, to: 2, weight: 3 },
+  /** 野盗は地上(階 0)と地下 1〜2 階だけ */
+  bandit: { cost: 2, from: 0, to: 2, weight: 2 },
   bat: { cost: 2, from: 1, to: 3, weight: 3 },
   goblin: { cost: 2, from: 1, to: 4, weight: 4 },
   archer: { cost: 2, from: 1, to: 4, weight: 3 },
@@ -125,9 +127,9 @@ export function generateGame(seed: number, difficulty: Difficulty = 'normal', st
 /** 1 つの階を作る(階 0 は地上の町) */
 export function generateFloor(seed: number, difficulty: Difficulty, floor: number): GeneratedFloor {
   if (floor <= 0) {
-    // 地上: 迷路の町。up は町の入口(新しいゲームの開始位置)
+    // 地上: 迷路の町。up は町の入口(新しいゲームの開始位置)。モンスターはおらず、野盗が少しうろつく
     const t = generateTown(seed, MAP_W, MAP_H);
-    return { map: t.map, enemies: [], up: t.start, down: t.down, treasureAt: null };
+    return { map: t.map, enemies: townBandits(seed, difficulty, t.map, t.start), up: t.start, down: t.down, treasureAt: null };
   }
   const rng = new Rng(floor === 1 ? hashSeed('map', seed) : hashSeed('map', seed, floor));
   const { tiles, rooms } = carveRooms(rng);
@@ -164,6 +166,24 @@ export function generateFloor(seed: number, difficulty: Difficulty, floor: numbe
 
   const enemies = placeEnemies(rng, map, rooms, startRoom, farRoom, floor, difficulty, d, taken);
   return { map, enemies, up, down, treasureAt };
+}
+
+/** 地上の野盗の数(難易度ごと) */
+export const TOWN_BANDITS: Record<Difficulty, number> = { easy: 1, normal: 2, hard: 3 };
+
+/** 地上の野盗: 町の入口から歩いて 15 マス以上離れた通路に、難易度ごとの数だけ置く。ID は 0n1, 0n2… */
+function townBandits(seed: number, difficulty: Difficulty, map: FloorMap, start: Pos): Unit[] {
+  const rng = new Rng(hashSeed('bandit', seed));
+  const dist = bfs(map, start);
+  const cells: Pos[] = [];
+  for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) if (map.tiles[y][x] === '.' && dist[y * map.w + x] >= 15) cells.push({ x, y });
+  const m = MONSTERS.bandit;
+  const out: Unit[] = [];
+  for (let i = 1; i <= TOWN_BANDITS[difficulty] && cells.length > 0; i++) {
+    const p = cells.splice(rng.int(0, cells.length - 1), 1)[0];
+    out.push({ id: `0n${i}`, side: 'enemy', defId: 'bandit', name: m.name, x: p.x, y: p.y, hp: m.maxHp, mp: m.maxMp, down: false, ai: { mode: 'idle' } });
+  }
+  return out;
 }
 
 /** 宝箱のゴールド(開ける順番に左右されないよう、場所から決める) */
@@ -336,7 +356,7 @@ function placeEnemies(
   const units: Unit[] = [];
   const counts: Record<string, number> = {};
   const PREFIX: Record<string, string> = {
-    slime: 's', bat: 'v', goblin: 'g', archer: 'a', shaman: 'm', orc: 'o', darkelf: 'e', troll: 't', ogre: 'b', dragon: 'd', wyrm: 'd', warlock: 'k', hornblower: 'h',
+    slime: 's', bandit: 'n', bat: 'v', goblin: 'g', archer: 'a', shaman: 'm', orc: 'o', darkelf: 'e', troll: 't', ogre: 'b', dragon: 'd', wyrm: 'd', warlock: 'k', hornblower: 'h',
   };
   const spawn = (defId: string, p: Pos, ai: AiMemory = { mode: 'idle' }) => {
     const m = MONSTERS[defId];

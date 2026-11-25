@@ -37,6 +37,11 @@ export const MONSTERS: Record<string, UnitDef> = {
   bat: { id: 'bat', name: '大コウモリ', icon: 'bat', maxHp: 10, maxMp: 0, atk: 6, dmgVar: 2, def: 0, range: 1, sight: 9, spells: [], exp: 4, gold: 2 },
   goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 20, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [], exp: 6, gold: 3 },
   archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [], exp: 6, gold: 3 },
+  /**
+   * 野盗(地上・地下 1〜2 階)。近接攻撃が当たるとパーティのゴールドを盗み、逃げる。
+   * 見られずに 2 ターン過ごすと逃げ切り、倒せば盗まれた分を取り返せる
+   */
+  bandit: { id: 'bandit', name: '野盗', icon: 'bandit', maxHp: 16, maxMp: 0, atk: 5, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 6, gold: 8 },
   /** 火球を使う。MP が尽きたら杖で殴る */
   shaman: { id: 'shaman', name: 'ゴブリン呪術師', icon: 'shaman', maxHp: 16, maxMp: 6, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'], exp: 9, gold: 5 },
   orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [], exp: 12, gold: 6 },

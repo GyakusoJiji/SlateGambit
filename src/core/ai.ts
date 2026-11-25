@@ -47,6 +47,26 @@ function planOne(state: GameState, e: Unit): Action[] {
     return plan;
   }
 
+  // 野盗: 盗んだ後は、パーティから逃げて視界の外へ出る(見られずに 2 ターン過ごすと逃げ切る)
+  if (e.defId === 'bandit' && e.ai?.stolen) {
+    const party = units.filter((p) => p.side === 'party' && !p.down);
+    const blockedBy = (p: Pos) => units.some((o) => o !== e && !o.down && o.x === p.x && o.y === p.y);
+    let at: Unit = e;
+    // 5 マスずつ、AP の続く限り逃げる
+    while (party.length > 0 && apLeft(plan) > 0) {
+      const path = retreatPath(state, at, party, blockedBy).slice(0, apLeft(plan));
+      if (path.length === 0) break;
+      let p: Pos = { x: at.x, y: at.y };
+      for (const d of path) {
+        plan.push({ type: 'move', dir: d });
+        p = step(p, d);
+      }
+      at = { ...at, x: p.x, y: p.y };
+    }
+    while (apLeft(plan) > 0) plan.push({ type: 'wait' });
+    return plan;
+  }
+
   // 警報役: 角笛を吹き終えるまでは、見えている味方から逃げて距離を取り、守りを固める
   if (e.defId === 'hornblower' && !e.ai?.alarmRaised) {
     const blockedBy = (p: Pos) => units.some((o) => o !== e && !o.down && o.x === p.x && o.y === p.y);

@@ -80,6 +80,7 @@ describe('施設', () => {
 
   it('宿: 宿代(レベルの合計 × 額)を払うと、立っている全員が全快する', () => {
     const s = at('I');
+    s.units = s.units.filter((u) => u.side === 'party');
     for (const u of s.units) {
       u.hp = 1;
       u.mp = 0;

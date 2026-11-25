@@ -508,7 +508,9 @@ export class Controller {
               b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS[b.spell].radius, tick: planCost(plan.slice(0, bi + 1)) } : undefined;
             // 警報役は、増援を呼ぶまでの残りターンを出す(例「笛2」)
             const left = u.ai?.alarm !== undefined && !u.ai.alarmRaised ? RULES.alarmTurns - u.ai.alarm : undefined;
-            return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area, label: left !== undefined ? `笛${left}` : undefined };
+            // 盗んだ野盗は「盗」の印(逃げている)
+            const label = left !== undefined ? `笛${left}` : u.ai?.stolen ? '盗' : undefined;
+            return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area, label };
           })
       : [];
     const treasureAt = treasureHere(st);
@@ -625,7 +627,8 @@ export class Controller {
     let gold = st.gold ?? 0;
     const items = { ...st.items };
     events.forEach((e, i) => {
-      if (e.type === 'chest' || e.type === 'bounty' || e.type === 'loot') gold += e.gold;
+      if (e.type === 'chest' || e.type === 'bounty' || e.type === 'loot' || e.type === 'recover') gold += e.gold;
+      if (e.type === 'steal') gold -= e.gold;
       if (e.type === 'ration' && e.food) items.food = Math.max(0, (items.food ?? 0) - 1);
       // 回復薬は、使った直後の回復の出来事で種類が分かる
       if (e.type === 'strike' && e.kind === 'potion') {

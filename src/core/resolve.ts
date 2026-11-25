@@ -289,6 +289,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   applyWakeUp(state, rng, events, frames);
   applyExp(state, foesAtStart, events, frames);
   applyLoot(state, foesAtStart, events);
+  applyBanditEscape(state, events);
   updateAiMemory(state, attackedBy, events);
   applyAlarm(state, rng, events, new Set(events.filter((e) => e.type === 'stun').map((e) => e.id)), enemiesSawParty);
   // 開いた扉の時間経過(閉まった扉は最後のフレームの地形にも反映する)
@@ -712,6 +713,7 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
       if (!adjacent(map, u, target)) return fizzle(REACH.adjacent);
       events.push({ tick, type: 'strike', id: u.id, kind: 'melee', target: target.id, hitId: target.id, end: pos(target), reaction });
       dealDamage(ctx, u, target, def.atk, def.dmgVar, { mult: power, single: true, melee: true });
+      steal(ctx, u, target);
       return;
     }
     const far = rangedProblem(map, u, target, def.range);
@@ -820,6 +822,37 @@ function scatterTile(ctx: StrikeCtx, aim: Pos): Pos {
   if (cells.length === 0) return aim;
   const p = cells[ctx.rng.int(0, cells.length - 1)];
   return p.x === aim.x && p.y === aim.y ? aim : p;
+}
+
+/**
+ * 野盗の近接攻撃が味方に当たったら、パーティのゴールドを盗む(1 体につき 1 回。最大 10 + 階 × 10 G)。
+ * 盗んだ野盗は次のターンから逃げる(ai.ts)
+ */
+function steal(ctx: StrikeCtx, u: Unit, target: Unit): void {
+  if (u.defId !== 'bandit' || !u.ai || u.ai.stolen || target.side !== 'party') return;
+  const gold = Math.min(ctx.state.gold ?? 0, RULES.stealBase + RULES.stealPerFloor * currentFloor(ctx.state));
+  if (gold <= 0) return;
+  ctx.state.gold = (ctx.state.gold ?? 0) - gold;
+  u.ai.stolen = gold;
+  u.ai.unseen = 0;
+  ctx.events.push({ tick: ctx.tick, type: 'steal', id: u.id, gold });
+}
+
+/**
+ * 盗んだ野盗の逃走: パーティの誰にも見られずにターンを終えた回数を数え、
+ * RULES.banditEscapeTurns 回に達したら逃げ切る(地図から消え、盗まれたゴールドは戻らない)
+ */
+function applyBanditEscape(state: GameState, events: GameEvent[]): void {
+  const seen = visibleFoes(state.map, state.units, 'party');
+  const gone = new Set<string>();
+  for (const e of state.units) {
+    if (e.side !== 'enemy' || e.down || !e.ai?.stolen) continue;
+    e.ai.unseen = seen.has(e.id) ? 0 : (e.ai.unseen ?? 0) + 1;
+    if (e.ai.unseen < RULES.banditEscapeTurns) continue;
+    gone.add(e.id);
+    events.push({ tick: TICKS_PER_TURN, type: 'escape', id: e.id, gold: e.ai.stolen });
+  }
+  if (gone.size > 0) state.units = state.units.filter((u) => !gone.has(u.id));
 }
 
 /** 狙いが倒れたときに移る先: 届く敵のうち最も近い者 */
@@ -962,9 +995,17 @@ function applyExp(state: GameState, foesAtStart: Unit[], events: GameEvent[], fr
   }
 }
 
-/** このターンに倒れた敵のゴールドを、パーティの所持金に加える */
+/** このターンに倒れた敵のゴールドを、パーティの所持金に加える。盗んだ野盗を倒したら、盗まれた分も取り返す */
 function applyLoot(state: GameState, foesAtStart: Unit[], events: GameEvent[]): void {
-  const gold = foesAtStart.filter((u) => u.down).reduce((a, u) => a + (unitDef(u.defId).gold ?? 0), 0);
+  const dead = foesAtStart.filter((u) => u.down);
+  for (const u of dead) {
+    const stolen = u.ai?.stolen ?? 0;
+    if (stolen <= 0) continue;
+    u.ai!.stolen = 0;
+    state.gold = (state.gold ?? 0) + stolen;
+    events.push({ tick: TICKS_PER_TURN, type: 'recover', id: u.id, gold: stolen });
+  }
+  const gold = dead.reduce((a, u) => a + (unitDef(u.defId).gold ?? 0), 0);
   if (gold <= 0) return;
   state.gold = (state.gold ?? 0) + gold;
   events.push({ tick: TICKS_PER_TURN, type: 'loot', gold });

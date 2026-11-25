@@ -162,6 +162,10 @@ export class Playback {
         // 倒した敵のゴールドは、立っている味方の先頭の頭上に出す
         const s = this.result.frames[tick].find((x) => !x.down && this.before.units.find((u) => u.id === x.id)?.side === 'party');
         if (s) out.push({ kind: 'text', at: { x: s.x, y: s.y }, text: `+${e.gold}G`, color: '#ffd23a', rise: 0.7 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'steal') {
+        out.push({ kind: 'text', at: posOf(e.id), text: `-${e.gold}G`, color: '#ff9a3a', rise: 0.6 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'recover') {
+        out.push({ kind: 'text', at: posOf(e.id), text: `+${e.gold}G`, color: '#ffd23a', rise: 0.9 + k * 0.5, alpha: 1 });
       } else if (e.type === 'dry') {
         out.push({ kind: 'text', at: e.at, text: '枯れた', color: '#c8b080', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'levelup') {

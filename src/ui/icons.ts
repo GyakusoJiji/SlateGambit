@@ -27,6 +27,11 @@ const ICONS: Record<string, Icon> = {
     palette: { W: '#ecece4', K: DARK, F: SKIN, Y: '#e8c040' },
     rows: ['..WWWW..', '.WFFFFW.', '.WKFFKW.', '..FFFF..', '.WWYWWW.', 'WWYYYWWW', '.WWYWWW.', '.WWWWWW.'],
   },
+  // 野盗: 頭巾と覆面、腰にゴールドの袋
+  bandit: {
+    palette: { H: '#4a3a5a', K: DARK, F: SKIN, M: '#2a2030', Y: '#e8c040', L: BOOT },
+    rows: ['..HHHH..', '.HHHHHH.', '.HKFFKH.', '..MMMM..', '.HHHHHHY', 'HHHHHHYY', '.HHHH...', '.LL..LL.'],
+  },
   goblin: {
     palette: { G: '#6aa84f', E: '#3f7a2f', R: '#ff3b3b', K: DARK },
     rows: ['........', '.E....E.', '.GGGGGG.', '.GRGGRG.', '..GGGG..', '.GGGGGGK', '..GGGG.K', '..G..G..'],

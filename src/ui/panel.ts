@@ -310,6 +310,15 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
       case 'loot':
         lines.push(T.log.loot(e.gold));
         break;
+      case 'steal':
+        lines.push(T.log.steal(nameOf(e.id), e.gold));
+        break;
+      case 'recover':
+        lines.push(T.log.recover(nameOf(e.id), e.gold));
+        break;
+      case 'escape':
+        lines.push(T.log.escape(nameOf(e.id), e.gold));
+        break;
       case 'dry':
         lines.push(T.log.dry);
         break;
