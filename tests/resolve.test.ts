@@ -4,7 +4,7 @@ import { planEnemies } from '../src/core/ai';
 import { parseMap } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
 import { createTestGame } from '../src/core/scenario';
-import type { Action, GameState, Unit } from '../src/core/types';
+import type { Action, GameState, Plans, Unit } from '../src/core/types';
 import { CLASSES, MONSTERS, SPELLS } from '../src/data/units';
 
 const OPEN = [
@@ -105,11 +105,13 @@ describe('移動', () => {
     expect(new Set(tiles).size).toBe(tiles.length);
   });
 
-  it('残り AP は待機で埋まる', () => {
+  it('残り AP はただの待機(回復しない)で埋まり、全員休憩は休憩で埋まる', () => {
     const plan: Action[] = [...moves('E', 2), { type: 'attack', target: 'g1' }];
-    expect(fillPlan(plan).slice(3)).toEqual([{ type: 'wait' }, { type: 'wait' }, { type: 'wait' }]);
+    const idle = { type: 'wait', idle: true };
+    expect(fillPlan(plan).slice(3)).toEqual([idle, idle, idle]);
     expect(plan).toHaveLength(3);
-    expect(fillPlan([]).every((a) => a.type === 'wait')).toBe(true);
+    expect(fillPlan([]).every((a) => a.type === 'wait' && a.idle)).toBe(true);
+    expect(fillPlan([], 'rest').every((a) => a.type === 'wait' && !a.idle)).toBe(true);
   });
 
   it('敵のマスは通り抜けられず、敵とのすれ違いもできない', () => {
@@ -496,13 +498,19 @@ describe('休憩', () => {
     '#.....#......#',
     '##############',
   ];
-  it('敵が見えない状態で全員が待機すると HP と MP が回復する', () => {
+  const rest = fillPlan([], 'rest');
+  it('敵が見えない状態で休憩を予約すると HP と MP が回復する。余った AP の待機・予約なしでは回復しない', () => {
     const m = mk('p3', 'mage', 1, 1);
     m.hp = 5;
     m.mp = 0;
-    const r = resolveTurn(game([m, mk('g1', 'goblin', 10, 1)], rows), {});
+    const r = resolveTurn(game([m, mk('g1', 'goblin', 10, 1)], rows), { p3: rest });
     expect(u(r.state, 'p3').hp).toBeGreaterThan(5);
     expect(u(r.state, 'p3').mp).toBeGreaterThan(0);
+    for (const plans of [{}, { p3: fillPlan([]) }] as Plans[]) {
+      const n = resolveTurn(game([{ ...m }, mk('g1', 'goblin', 10, 1)], rows), plans);
+      expect(u(n.state, 'p3').hp).toBe(5);
+      expect(n.state.items?.food).toBe(99);
+    }
   });
 
   it('倒れた敵が見えていても休憩できる', () => {
@@ -511,7 +519,7 @@ describe('休憩', () => {
     const g = mk('g1', 'goblin', 3, 1);
     g.down = true;
     g.hp = 0;
-    const r = resolveTurn(game([m, g], rows), {});
+    const r = resolveTurn(game([m, g], rows), { p3: rest });
     expect(u(r.state, 'p3').hp).toBeGreaterThan(5);
   });
 
@@ -522,9 +530,10 @@ describe('休憩', () => {
     w.hp = 10;
     const w2 = mk('p4', 'priest', 1, 2);
     w2.hp = 10;
-    // 魔法使いは何も予約しない(8 ティック休憩)、戦士は 4 マス動いて残り 4 ティック休憩、僧侶は 8 マス往復で休憩なし
+    // 魔法使いは 8 ティック休憩、戦士は 4 マス動いて 4 ティック休憩、僧侶は 8 マス往復で休憩なし
     const r = resolveTurn(game([m, w, w2, mk('g1', 'goblin', 12, 1)], rows), {
-      p1: moves('E', 4),
+      p3: rest,
+      p1: fillPlan(moves('E', 4), 'rest'),
       p4: [...moves('E', 4), ...moves('W', 4)],
     });
     const full = Math.round(CLASSES.mage.maxHp * RULES.restHpRatio);
@@ -537,7 +546,7 @@ describe('休憩', () => {
     const m = mk('p3', 'mage', 1, 1);
     m.hp = 5;
     const g = Array(8).fill({ type: 'guard' });
-    const r = resolveTurn(game([m, mk('g1', 'goblin', 4, 1)], rows), { g1: g });
+    const r = resolveTurn(game([m, mk('g1', 'goblin', 4, 1)], rows), { g1: g, p3: rest });
     expect(u(r.state, 'p3').hp).toBe(5 + Math.round(CLASSES.mage.maxHp * RULES.restHpRatio * RULES.combatRestRatio));
   });
 

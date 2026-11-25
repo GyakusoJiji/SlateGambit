@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { RULES, apLeft, canAppend } from '../src/core/actions';
+import { RULES, apLeft, canAppend, fillPlan } from '../src/core/actions';
 import { resolveTurn } from '../src/core/resolve';
 import { createTestGame } from '../src/core/scenario';
 import type { Action, GameEvent, GameState } from '../src/core/types';
@@ -127,7 +127,7 @@ describe('休憩の物音', () => {
     s.items = { food: 9 };
     for (const u of s.units.filter((u) => u.side === 'party')) u.hp = Math.max(1, u.hp - 10);
     const before = s.units.length;
-    const r = resolveTurn(s, {});
+    const r = resolveTurn(s, Object.fromEntries(s.units.filter((u) => u.side === 'party').map((u) => [u.id, fillPlan([], 'rest')])));
     const added = r.state.units.slice(before);
     expect(added.length).toBeGreaterThan(0);
     expect(r.events.some((e) => e.type === 'wander')).toBe(true);

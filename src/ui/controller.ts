@@ -11,6 +11,7 @@ import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors
 import { quickMovePlans } from '../core/quickmove';
 import {
   anyTired,
+  bankDay,
   buyItem,
   churchCost,
   clinicCost,
@@ -235,7 +236,7 @@ export class Controller {
     while (r.left > 0) {
       const before = this.state;
       const party: Plans = {};
-      for (const u of this.party()) if (!u.down) party[u.id] = fillPlan([], 'wait');
+      for (const u of this.party()) if (!u.down) party[u.id] = fillPlan([], 'rest');
       const result = resolveTurn(before, { ...planEnemies(before), ...party });
       this.pushHistory(before, result);
       this.state = result.state;
@@ -322,10 +323,14 @@ export class Controller {
     if (persist) saveGame(this.state);
   }
 
-  /** 自動保存から続きを始める */
+  /** 自動保存から続きを始める。起動 1 回ごとに、銀行の預金に利息が付く(まれに暴落する) */
   resume(state: GameState): void {
+    const day = bankDay(state, Math.random());
+    if (day && !state.scenario) saveGame(state);
     this.begin(state);
-    this.toast(T.toast.resumed(state.turn));
+    const notes = [T.toast.resumed(state.turn)];
+    if (day) notes.push(day.crash ? T.facility.bank.crash(day.amount) : T.facility.bank.interest(day.amount));
+    this.toast(notes.join('\n'));
   }
 
   private begin(state: GameState): void {
@@ -625,7 +630,7 @@ export class Controller {
       ? potionButton(this.potionKind, this.state.items, this.mode === 'potion', this.potionOff(sel, acts))
       : potionButton(this.potionKind, this.state.items, false, true);
     const hasPlan = active && acts.length > 0;
-    const actions = active ? actionButtons(sel, acts, this.mode, { potion }) : idleButtons({ potion });
+    const actions = active ? actionButtons(sel, acts, this.mode, { potion, noMagic: currentFloor(this.state) === 0 }) : idleButtons({ potion });
     const o = this.state.objective;
     this.el.panel.innerHTML = `
       ${this.inventory(this.state, [], o?.kind === 'treasure' ? o.holder ?? null : null)}
@@ -1154,7 +1159,7 @@ export class Controller {
   /** 予約に足す。advance=false なら、AP を使い切っても次のキャラへ移らない */
   private append(u: Unit, a: Action, advance = true): boolean {
     const list = this.plans[u.id];
-    const err = canAppend(u, list, a);
+    const err = canAppend(u, list, a, currentFloor(this.state));
     if (err) {
       this.toast(err);
       return false;

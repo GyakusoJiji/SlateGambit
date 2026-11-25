@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEncounter, ENCOUNTER_LEVEL, ENCOUNTERS } from '../src/core/encounters';
 import { resolveTurn } from '../src/core/resolve';
+import { fillPlan } from '../src/core/actions';
 import type { GameState } from '../src/core/types';
 
 describe('固定遭遇', () => {
@@ -54,14 +55,14 @@ describe('固定遭遇', () => {
     let st = s;
     for (let i = 0; i < 30; i++) {
       st.units[0].hp = 1;
-      st = resolveTurn(st, {}).state;
+      st = resolveTurn(st, { [st.units[0].id]: fillPlan([], 'rest') }).state;
     }
     expect(st.units.some((u) => /^w\d/.test(u.id))).toBe(false);
     // 比べるため、固定遭遇の印を外すと現れる
     let free: GameState = { ...s, scenario: undefined };
     for (let i = 0; i < 30; i++) {
       free.units[0].hp = 1;
-      free = resolveTurn(free, {}).state;
+      free = resolveTurn(free, { [free.units[0].id]: fillPlan([], 'rest') }).state;
     }
     expect(free.units.some((u) => /^w\d/.test(u.id))).toBe(true);
   });

@@ -17,7 +17,7 @@ function game(units: Unit[], rows = ['########', '#......#', '#......#', '######
   return { seed: 1, rng: 1, turn: 1, map, units, explored: new Array(map.w * map.h).fill(1), status: 'playing', items, gold: 0 };
 }
 
-const rest = () => fillPlan([], 'wait');
+const rest = () => fillPlan([], 'rest');
 const u = (s: GameState, id: string) => s.units.find((x) => x.id === id)!;
 
 describe('食料と休憩', () => {

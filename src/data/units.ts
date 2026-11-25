@@ -38,15 +38,15 @@ export const MONSTERS: Record<string, UnitDef> = {
   goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 20, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [], exp: 6, gold: 3 },
   archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [], exp: 6, gold: 3 },
   /**
-   * 野盗(地上・地下 1〜2 階)。近接攻撃が当たるとパーティのゴールドを盗み、逃げる。
+   * 野盗(地下 1〜2 階。地上では住人に化ける)。人間なので打たれ弱く、力も弱い。近接攻撃が当たるとパーティのゴールドを盗み、逃げる。
    * 見られずに 2 ターン過ごすと逃げ切り、倒せば盗まれた分を取り返せる
    */
-  bandit: { id: 'bandit', name: '野盗', icon: 'bandit', maxHp: 16, maxMp: 0, atk: 5, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 6, gold: 8 },
+  bandit: { id: 'bandit', name: '野盗', icon: 'bandit', maxHp: 10, maxMp: 0, atk: 3, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 4, gold: 8 },
   /**
    * 地上の住人。戦わず、隣に来た味方に噂を話す(敵として扱わない)。
    * 住人に化けた盗人も、正体を現すまではこの定義を使う(見かけ・HP で見分けられないよう、能力は野盗と同じ)
    */
-  resident: { id: 'resident', name: '住人', icon: 'resident', maxHp: 16, maxMp: 0, atk: 5, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 0, gold: 0 },
+  resident: { id: 'resident', name: '住人', icon: 'resident', maxHp: 10, maxMp: 0, atk: 3, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 0, gold: 0 },
   /** 火球を使う。MP が尽きたら杖で殴る */
   shaman: { id: 'shaman', name: 'ゴブリン呪術師', icon: 'shaman', maxHp: 16, maxMp: 6, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'], exp: 9, gold: 5 },
   orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [], exp: 12, gold: 6 },

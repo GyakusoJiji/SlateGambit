@@ -1,12 +1,14 @@
 // 地上の町(迷路・施設)のテスト
 import { describe, expect, it } from 'vitest';
-import { fillPlan } from '../src/core/actions';
+import { canAppend, fillPlan, RULES } from '../src/core/actions';
+
+const TOWN_DAMAGE = RULES.surfaceDamageRatio;
 import { changeFloor, findTile } from '../src/core/floors';
 import { generateGame, MAP_H, MAP_W } from '../src/core/generate';
 import { isWalkable, step, DIR_LIST, tileAt } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
 import { stats } from '../src/core/stats';
-import { buyItem, churchCost, clinicCost, deposit, FACILITY_TILE, facilityHere, generateTown, innCost, TOWN, useChurch, useClinic, useInn, useStable, withdraw } from '../src/core/town';
+import { bankDay, buyItem, churchCost, clinicCost, deposit, FACILITY_TILE, facilityHere, generateTown, innCost, TOWN, useChurch, useClinic, useInn, useStable, withdraw } from '../src/core/town';
 import type { GameState, Pos } from '../src/core/types';
 import { ITEMS } from '../src/data/units';
 
@@ -225,5 +227,52 @@ describe('地上と地下の行き来', () => {
     const r = resolveTurn(s, { p1: [{ type: 'stairs' }] });
     expect(r.state.floor).toBe(1);
     expect(r.events.some((e) => e.type === 'stairs' && e.from === 0 && e.to === 1)).toBe(true);
+  });
+});
+
+describe('地上の決まり', () => {
+  it('地上では、味方が受けるダメージが抑えられる', () => {
+    const near = (s: GameState) => {
+      const w = s.units[0];
+      const g = { ...w, id: 'gx', side: 'enemy' as const, defId: 'goblin', name: 'ゴブリン', hp: 20, mp: 0, level: undefined, exp: undefined, ai: { mode: 'idle' as const } };
+      const p = DIR_LIST.map((d) => step(w, d)).find((q) => isWalkable(s.map, q.x, q.y) && !s.units.some((u) => u.x === q.x && u.y === q.y))!;
+      g.x = p.x;
+      g.y = p.y;
+      s.units = [...s.units.filter((u) => u.side === 'party'), g];
+      return resolveTurn(s, { gx: [{ type: 'attack', target: w.id }] }).events.find((e) => e.type === 'damage')!;
+    };
+    let surface = 0;
+    let below = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const a = near(generateGame(seed, 'normal'));
+      const b = near(generateGame(seed, 'normal', 1));
+      if (a.type === 'damage') surface += a.amount;
+      if (b.type === 'damage') below += b.amount;
+    }
+    expect(surface).toBeLessThan(below * (TOWN_DAMAGE + 0.15));
+  });
+
+  it('地上では魔法を予約できず、実行しても不発になる(足払いなどの特技は使える)', () => {
+    const s = generateGame(41, 'normal');
+    const mage = s.units.find((u) => u.defId === 'mage')!;
+    expect(canAppend(mage, [], { type: 'spell', spell: 'fireball', tile: { x: mage.x, y: mage.y - 3 } }, 0)).toBe('地上では魔法は使えない');
+    const thief = s.units.find((u) => u.defId === 'thief')!;
+    const someone = s.units.find((u) => u.side === 'enemy')!;
+    expect(canAppend(thief, [], { type: 'spell', spell: 'trip', target: someone.id }, 0)).toBeNull();
+    const r = resolveTurn(s, { [mage.id]: [{ type: 'spell', spell: 'fireball', tile: { x: mage.x, y: mage.y - 3 } }] });
+    expect(r.events.some((e) => e.type === 'fizzle' && e.id === mage.id && e.reason === '地上では魔法は使えない')).toBe(true);
+    expect(r.state.units.find((u) => u.id === mage.id)!.mp).toBe(mage.mp);
+  });
+
+  it('銀行: 起動のたびに 5% の利息が付き、1% の確率で暴落して 30% を失う', () => {
+    const s = generateGame(42, 'normal');
+    expect(bankDay(s, 0.5)).toBeNull();
+    s.bank = 200;
+    expect(bankDay(s, 0.5)).toEqual({ crash: false, amount: 10 });
+    expect(s.bank).toBe(210);
+    expect(bankDay(s, 0.005)).toEqual({ crash: true, amount: 63 });
+    expect(s.bank).toBe(147);
+    s.bank = 5;
+    expect(bankDay(s, 0.5)?.amount).toBe(1);
   });
 });

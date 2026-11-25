@@ -2,7 +2,10 @@
 import { ITEMS, MONSTERS, SPELLS, unitDef } from '../data/units';
 import { applyIntrusion, applyStairs, applyWander, currentFloor, openChests, treasureHere } from './floors';
 import { gainExp, spellBonus, spellMp, spellRange, stats } from './stats';
-import { RULES, expandPlan, restTicks, type Step } from './actions';
+import { MAGIC, RULES, expandPlan, restTicks, type Step } from './actions';
+
+/** 地上で魔法を使おうとしたときの不発の理由 */
+const T_SURFACE_MAGIC = '地上では魔法は使えない';
 import { hasLos, linePoints } from './los';
 import { adjacent, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from './map';
 import { findPath } from './path';
@@ -679,6 +682,8 @@ function rollDamage(ctx: StrikeCtx, base: number, variance: number, target: Unit
   let amount = Math.max(1, Math.round((base + ctx.rng.int(0, variance)) * mult) - def);
   const guarded = ctx.guard.has(target.id);
   if (guarded) amount = Math.ceil(amount / 2);
+  // 地上では味方のゲージの減りを抑える
+  if (target.side === 'party' && currentFloor(ctx.state) === 0) amount = Math.max(1, Math.ceil(amount * RULES.surfaceDamageRatio));
   return { amount, guarded };
 }
 
@@ -767,7 +772,8 @@ function performStrike(ctx: StrikeCtx, st: StrikeIntent): void {
     return;
   }
 
-  // 魔法
+  // 魔法(地上では使えない)
+  if (currentFloor(ctx.state) === 0 && MAGIC.has(action.spell)) return fizzle(T_SURFACE_MAGIC);
   const sd = SPELLS[action.spell];
   const cost = spellMp(u, action.spell);
   const range = spellRange(u, action.spell);

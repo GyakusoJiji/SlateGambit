@@ -30,6 +30,10 @@ export const TOWN = {
   blessingHpRatio: 0.5,
   /** 銀行: 1 回に預ける・引き出す額(全額の操作もある) */
   bankStep: 50,
+  /** 銀行: ゲームを起動するたびに付く利息の率と、暴落する確率・失う割合 */
+  bankInterest: 0.05,
+  bankCrashChance: 0.01,
+  bankCrashLoss: 0.3,
 };
 
 /**
@@ -198,6 +202,24 @@ export function withdraw(state: GameState, amount: number): number {
   state.bank = (state.bank ?? 0) - n;
   state.gold = (state.gold ?? 0) + n;
   return n;
+}
+
+/**
+ * 起動 1 回ごとの預金の増減。roll(0 以上 1 未満の乱数)が TOWN.bankCrashChance 未満なら暴落して
+ * 預金の TOWN.bankCrashLoss を失い、それ以外は TOWN.bankInterest の利息が付く(1 G 以上)。
+ * 預金が無ければ null
+ */
+export function bankDay(state: GameState, roll: number): { crash: boolean; amount: number } | null {
+  const bank = state.bank ?? 0;
+  if (bank <= 0) return null;
+  if (roll < TOWN.bankCrashChance) {
+    const loss = Math.round(bank * TOWN.bankCrashLoss);
+    state.bank = bank - loss;
+    return { crash: true, amount: loss };
+  }
+  const gain = Math.max(1, Math.floor(bank * TOWN.bankInterest));
+  state.bank = bank + gain;
+  return { crash: false, amount: gain };
 }
 
 /** 道具屋で 1 つ買う。買えたら true */

@@ -30,6 +30,8 @@ export const RULES = {
   /** 野盗が盗むゴールド(基本 + 階 × 1 階あたり。所持金が少なければ所持金まで) */
   stealBase: 10,
   stealPerFloor: 10,
+  /** 地上で味方が受けるダメージの倍率(地上ではゲージの減りを抑える) */
+  surfaceDamageRatio: 0.5,
   /** 地上(城の中)に、ターンごとに魔物が入り込む確率(ごくまれ)と、その点数 */
   intrudeChance: 0.01,
   intrudeBudget: 2,
@@ -64,6 +66,9 @@ export const RULES = {
   /** 警報役が気付いてから増援を呼ぶまでのターン数 */
   alarmTurns: 3,
 };
+
+/** 魔法(地上では使えない)。足払い・かばう・強攻撃は特技なので使える */
+export const MAGIC = new Set<SpellId>(['fireball', 'heal', 'revive', 'smite', 'hellfire', 'breath']);
 
 /** 魔法の AP(業火のような遅い大技は多い) */
 export function spellCost(id: SpellId): number {
@@ -118,19 +123,22 @@ export function apLeft(actions: Action[]): number {
 }
 
 /**
- * 予約の残り AP を待機で埋めた計画を返す(元の配列は変えない)。
- * 戦闘中はただの待機、敵が見えないときの待機は休憩になる(resolve の applyRest)
+ * 予約の残り AP を埋めた計画を返す(元の配列は変えない)。
+ * - 'wait': ただの待機(idle。食料を使わず、回復もしない)。予約で余った AP や全員移動はこれで埋める
+ * - 'rest': 休憩(食料を 1 つ使って回復する。全員休憩)
+ * - 'guard': 防御(敵が見えているとき)
  */
-export function fillPlan(actions: Action[], filler: 'wait' | 'guard' = 'wait'): Action[] {
+export function fillPlan(actions: Action[], filler: 'wait' | 'rest' | 'guard' = 'wait'): Action[] {
   const out = [...actions];
-  for (let n = apLeft(out); n > 0; n--) out.push({ type: filler });
+  const a: Action = filler === 'guard' ? { type: 'guard' } : filler === 'rest' ? { type: 'wait' } : { type: 'wait', idle: true };
+  for (let n = apLeft(out); n > 0; n--) out.push(a);
   return out;
 }
 
-/** 休憩に数えるティック数(待機と、予約していない AP) */
+/** 休憩に数えるティック数(自分で予約した休憩だけ。余った AP の待機・予約していない AP は数えない) */
 export function restTicks(actions: Action[] | undefined): number {
-  if (!actions) return AP_PER_TURN;
-  return actions.filter((a) => a.type === 'wait').length + Math.max(0, apLeft(actions));
+  if (!actions) return 0;
+  return actions.filter((a) => a.type === 'wait' && !a.idle).length;
 }
 
 /** 予約全体の MP 消費 */
@@ -139,8 +147,10 @@ export function planMp(actions: Action[], unit?: { perks?: string[] }): number {
 }
 
 /** 予約に action を追加できるか。できない場合は理由を返す */
-export function canAppend(unit: Unit, actions: Action[], action: Action): string | null {
+/** floor: 今いる階(0 = 地上では魔法を予約できない) */
+export function canAppend(unit: Unit, actions: Action[], action: Action, floor?: number): string | null {
   if (unit.down) return '気絶している';
+  if (floor === 0 && action.type === 'spell' && MAGIC.has(action.spell)) return '地上では魔法は使えない';
   if (actionCost(action) > apLeft(actions)) return 'AP が足りない';
   // 残り AP 全部を使う行動は、AP が 0 なら予約しない
   if ((action.type === 'charge' || action.type === 'overwatch' || action.type === 'intercept') && action.ticks <= 0) return 'AP が足りない';
@@ -170,7 +180,8 @@ export type Step =
   | { k: 'cover' }
   /** 足払いで動けない */
   | { k: 'stun' }
-  | { k: 'wait' }
+  /** idle=true は、予約で余った AP を埋めるただの待機(表示用) */
+  | { k: 'wait'; idle?: boolean }
   | { k: 'watch'; mode: 'overwatch' | 'intercept' }
   | { k: 'charge'; target: string }
   | { k: 'carry'; target: string }
@@ -205,7 +216,7 @@ export function expandPlan(actions: Action[]): Step[] {
         for (let i = 0; i < RULES.coverCost; i++) steps.push({ k: 'cover' });
         break;
       case 'wait':
-        steps.push({ k: 'wait' });
+        steps.push(a.idle ? { k: 'wait', idle: true } : { k: 'wait' });
         break;
       case 'attack':
       case 'spell':

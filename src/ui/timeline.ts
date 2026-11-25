@@ -48,6 +48,7 @@ const ARROW = { N: '↑', E: '→', S: '↓', W: '←' } as const;
 
 /** 1 人分の 8 ティックの表示。filler は予約していない AP の扱い(敵が見えていれば防御) */
 export function tickCells(actions: Action[], filler: 'guard' | 'wait'): TickCell[] {
+  // 余った AP は、敵が見えていれば防御、見えていなければただの待機(回復しない)
   const used = planCost(actions);
   const steps = expandPlan(fillPlan(actions, filler));
   return steps.slice(0, AP_PER_TURN).map((s, i) => ({ glyph: glyphOf(s), hit: s.k === 'strike', fill: i >= used }));
@@ -66,7 +67,7 @@ function glyphOf(s: Step): string {
     case 'cover':
       return 'か';
     case 'wait':
-      return '休';
+      return s.idle ? '待' : '休';
     case 'watch':
       return '迎';
     case 'charge':

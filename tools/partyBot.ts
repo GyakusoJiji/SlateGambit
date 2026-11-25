@@ -111,7 +111,8 @@ export function planParty(state: GameState): Plans {
       return u.hp / d.maxHp < 0.6 || (d.maxMp > 0 && u.mp / d.maxMp < 0.5);
     });
     // 眠っている敵が見えている間・食料が無いときは休憩しても回復しないので、休まずに進む
-    if (tired && seenIds.size === 0 && (state.items?.food ?? 0) > 0) return {};
+    // 休憩は自分で予約した分だけ回復する(予約していない AP はただの待機)
+    if (tired && seenIds.size === 0 && (state.items?.food ?? 0) > 0) return Object.fromEntries(party.map((u) => [u.id, fillPlan([], 'rest')]));
     return explore(state, party);
   }
 

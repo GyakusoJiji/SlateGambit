@@ -1,5 +1,5 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
-import { RULES, apLeft, carryingAfter, planCost, spellCost } from '../core/actions';
+import { MAGIC, RULES, apLeft, carryingAfter, planCost, spellCost } from '../core/actions';
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type GameState, type ItemId, type PotionId, type Rumor, type SpellId, type StrikeKind, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { ITEMS, MONSTERS, SPELLS } from '../data/units';
@@ -79,7 +79,8 @@ export function actionLabel(a: Action, nameOf: (id: string) => string): string {
 /** 連続する移動を 1 つのチップにまとめて表示する */
 export function planChips(actions: Action[], nameOf: (id: string) => string, inCombat: boolean): string {
   const rest = apLeft(actions);
-  const filler = inCombat ? T.act.guard : T.act.wait;
+  // 余った AP は、敵が見えていれば防御、見えていなければただの待機(回復しない)
+  const filler = inCombat ? T.act.guard : T.act.idle;
   const tail = rest > 0 ? `<span class="chip empty">${T.restFill(filler, rest, actions.length === 0)}</span>` : '';
   const out: string[] = [];
   let arrows = '';
@@ -124,7 +125,7 @@ const ACTION_ROWS: (string | null)[][] = [
 ];
 
 /** controller が作るボタン(持ち物は controller が知っているため) */
-export type ExtraButtons = { potion: string };
+export type ExtraButtons = { potion: string; /** 地上では魔法を使えない */ noMagic?: boolean };
 
 /** キャラを選んでいないときの、全部グレーのボタン */
 export function idleButtons(extra: ExtraButtons): string {
@@ -139,7 +140,7 @@ export function actionButtons(u: Unit, actions: Action[], mode: Mode, extra: Ext
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
   const need = (s: SpellId) => (s === 'power' ? RULES.powerCost : s === 'cover' ? RULES.coverCost : spellCost(s));
-  const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= need(s) && u.mp >= spellMp(u, s);
+  const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= need(s) && u.mp >= spellMp(u, s) && !(extra.noMagic && MAGIC.has(s));
   const button = (id: string): string => {
     switch (id) {
       case 'potion':

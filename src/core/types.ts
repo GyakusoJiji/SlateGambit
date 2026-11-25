@@ -157,7 +157,8 @@ export type Action =
   /** 階段を使う(0 AP)。ターンの終わりに階段の上にいれば、全員で別の階へ移る。行き先に階段を選んだときだけ予約する */
   | { type: 'stairs' }
   | { type: 'guard' }
-  | { type: 'wait' }
+  /** 休憩(食料を使って回復する)。idle=true は、予約で余った AP を埋めるただの待機(回復しない) */
+  | { type: 'wait'; idle?: boolean }
   | { type: 'spell'; spell: SpellId; target?: string; tile?: Pos }
   /** 回復薬を飲む・飲ませる(2 AP。自分か隣の立っている味方。2 ティック目に効く) */
   | { type: 'item'; item: PotionId; target: string }
