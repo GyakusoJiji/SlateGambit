@@ -124,6 +124,7 @@ describe('休憩の物音', () => {
   it('休憩で回復したターンに、遠くから警戒した敵が現れる', () => {
     RULES.wanderChance = 1;
     const s = createTestGame(1);
+    s.items = { food: 9 };
     for (const u of s.units.filter((u) => u.side === 'party')) u.hp = Math.max(1, u.hp - 10);
     const before = s.units.length;
     const r = resolveTurn(s, {});

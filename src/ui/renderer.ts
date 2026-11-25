@@ -247,6 +247,20 @@ export class Renderer {
       g.fillStyle = '#9ad8ff';
       g.fillRect(px + z * 0.32, py + z * 0.4, z * 0.14, z * 0.06);
       g.fillRect(px + z * 0.52, py + z * 0.56, z * 0.14, z * 0.06);
+    } else if (t === 'h') {
+      // 枯れた泉(乾いた窪みとひび)
+      g.fillStyle = '#3a3428';
+      g.beginPath();
+      g.ellipse(px + z / 2, py + z / 2, z * 0.38, z * 0.3, 0, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = '#6a5e48';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(px + z * 0.3, py + z * 0.45);
+      g.lineTo(px + z * 0.45, py + z * 0.55);
+      g.lineTo(px + z * 0.6, py + z * 0.42);
+      g.lineTo(px + z * 0.7, py + z * 0.55);
+      g.stroke();
     } else if (t === 'S') {
       // 上り階段(上ほど細い段)
       g.fillStyle = COLORS.stairs;

@@ -56,6 +56,10 @@ export const DIFFICULTY: Record<Difficulty, { budget: number[]; group: number; o
   hard: { budget: [25, 36, 50, 63, 56], group: 14, ogres: 3, wander: 1 },
 };
 
+/** 始めたときの所持金と食料(休憩 1 ターンに 1 つ使う) */
+export const START_GOLD = 50;
+export const START_FOOD = 5;
+
 /** 途中の階から始めるとき(デバッグ・自動対戦用)のパーティのレベル */
 export const START_LEVEL = [1, 2, 3, 4, 5];
 
@@ -107,7 +111,8 @@ export function generateGame(seed: number, difficulty: Difficulty = 'normal', st
     status: 'playing',
     floor: startFloor,
     floors: {},
-    gold: 0,
+    gold: START_GOLD,
+    items: { food: START_FOOD },
     deepest: startFloor,
   };
   placeParty(state, f.up);

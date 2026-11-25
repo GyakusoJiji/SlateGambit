@@ -11,10 +11,10 @@ export type Side = 'party' | 'enemy';
 
 /**
  * マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'D'=扉(閉), 'S'=上り階段(地下 1 階では入口), '>'=下り階段,
- * 'H'=回復の泉, '$'=宝箱, 'c'=開けた宝箱
+ * 'H'=回復の泉, 'h'=枯れた泉(地上から潜り直すと戻る), '$'=宝箱, 'c'=開けた宝箱
  * 閉じた扉は視線を遮るが、通ることはできる(隣に立ったユニットが開けるため)
  */
-export type TileChar = '#' | '.' | '+' | 'D' | 'S' | '>' | 'H' | '$' | 'c';
+export type TileChar = '#' | '.' | '+' | 'D' | 'S' | '>' | 'H' | 'h' | '$' | 'c';
 
 export interface FloorMap {
   w: number;
@@ -124,8 +124,10 @@ export interface GameState {
   items?: Partial<Record<ItemId, number>>;
 }
 
-/** 回復薬の種類 */
-export type ItemId = 'hp' | 'mp';
+/** 持ち物の種類(回復薬と食料)。食料は休憩 1 ターンごとに 1 つ使う */
+export type ItemId = PotionId | 'food';
+/** 回復薬の種類(戦闘中に使える持ち物) */
+export type PotionId = 'hp' | 'mp';
 
 // ---- 行動(予約リストの要素) ----
 
@@ -146,7 +148,7 @@ export type Action =
   | { type: 'wait' }
   | { type: 'spell'; spell: SpellId; target?: string; tile?: Pos }
   /** 回復薬を飲む・飲ませる(2 AP。自分か隣の立っている味方。2 ティック目に効く) */
-  | { type: 'item'; item: ItemId; target: string }
+  | { type: 'item'; item: PotionId; target: string }
   | { type: 'overwatch'; ticks: number }
   | { type: 'intercept'; ticks: number };
 
@@ -197,6 +199,12 @@ export type GameEvent =
   | { tick: number; type: 'carry'; id: string; target: string }
   | { tick: number; type: 'drop'; id: string; target: string }
   | { tick: number; type: 'spring'; id: string; revived: boolean }
+  /** 回復の泉が枯れた */
+  | { tick: number; type: 'dry'; at: Pos }
+  /** 休憩で食料を使った(food=false なら、食料が無くて休憩しても回復しなかった) */
+  | { tick: number; type: 'ration'; food: boolean }
+  /** 倒した敵からゴールドを得た */
+  | { tick: number; type: 'loot'; gold: number }
   /** 担がれている間に意識を取り戻した */
   | { tick: number; type: 'wake'; id: string }
   /** 眠っていた敵が目を覚ました */

@@ -9,7 +9,7 @@ import { FLOORS, generateGame } from '../core/generate';
 import { createEncounter, encounterDef, ENCOUNTERS } from '../core/encounters';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
-import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, Pos, TurnResult, Unit } from '../core/types';
+import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, PotionId, Pos, TurnResult, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { ITEMS, PERKS, SPELLS } from '../data/units';
@@ -43,7 +43,7 @@ export class Controller {
   private playback: Playback | null = null;
   private lastPlayback: Playback | null = null;
   /** 回復薬のボタンで選んでいる薬の種類 */
-  private potionKind: ItemId = 'hp';
+  private potionKind: PotionId = 'hp';
   /** 時間軸で選んでいるティック(盤面にその時点の予定位置を出す)。null なら出さない */
   private timelineTick: number | null = null;
   /** 最近のターンの出来事(履歴の画面用。保存はしない) */
@@ -260,6 +260,7 @@ export class Controller {
   private restStopReason(events: GameEvent[]): string | null {
     if (this.state.status !== 'playing') return '';
     if (events.some((e) => e.type === 'damage' && this.unit(e.id)?.side === 'party')) return T.toast.restHurt;
+    if (events.some((e) => e.type === 'ration' && !e.food)) return T.toast.restNoFood;
     const st = this.state;
     const near = st.units.some((f) => f.side === 'enemy' && !f.down && this.party().some((p) => !p.down && adjacent(st.map, p, f)));
     if (near) return T.toast.restFoeNear;
@@ -612,7 +613,8 @@ export class Controller {
     let gold = st.gold ?? 0;
     const items = { ...st.items };
     events.forEach((e, i) => {
-      if (e.type === 'chest' || e.type === 'bounty') gold += e.gold;
+      if (e.type === 'chest' || e.type === 'bounty' || e.type === 'loot') gold += e.gold;
+      if (e.type === 'ration' && e.food) items.food = Math.max(0, (items.food ?? 0) - 1);
       // 回復薬は、使った直後の回復の出来事で種類が分かる
       if (e.type === 'strike' && e.kind === 'potion') {
         const h = events[i + 1];
@@ -993,7 +995,7 @@ export class Controller {
   }
 
   /** 予約済みの回復薬の数(全員分) */
-  private reservedItems(kind: ItemId): number {
+  private reservedItems(kind: PotionId): number {
     return Object.values(this.plans)
       .flat()
       .filter((a) => a.type === 'item' && a.item === kind).length;

@@ -1,6 +1,6 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
 import { RULES, apLeft, carryingAfter, planCost, spellCost } from '../core/actions';
-import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type GameState, type ItemId, type SpellId, type StrikeKind, type Unit } from '../core/types';
+import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type GameState, type ItemId, type PotionId, type SpellId, type StrikeKind, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
 import { ITEMS, SPELLS } from '../data/units';
 import { expProgress, spellMp, stats } from '../core/stats';
@@ -32,11 +32,11 @@ export function partyCards(party: Unit[], plans: Record<string, Action[]>, selec
 }
 
 /**
- * 持ち物の欄: 所持金・回復薬の数・秘宝(持っている味方の名前)。予約中も再生中も盤面のすぐ下に出す
+ * 持ち物の欄: 所持金・回復薬と食料の数・秘宝(持っている味方の名前)。予約中も再生中も盤面のすぐ下に出す
  */
 export function inventoryBar(gold: number, items: GameState['items'], relic: string | null): string {
   const potions = (Object.keys(ITEMS) as ItemId[])
-    .map((k) => `<span class="item${items?.[k] ? '' : ' none'}" title="${ITEMS[k].name}">🧪${ITEMS[k].short} ×${items?.[k] ?? 0}</span>`)
+    .map((k) => `<span class="item${items?.[k] ? '' : ' none'}" title="${ITEMS[k].name}">${ITEMS[k].icon}${ITEMS[k].short} ×${items?.[k] ?? 0}</span>`)
     .join('');
   const treasure = relic !== null ? `<span class="item relic">💎${T.inv.relic(esc(relic))}</span>` : '';
   return `<div class="inv"><span class="item gold">💰${T.gold(gold)}</span>${potions}${treasure}</div>`;
@@ -102,7 +102,7 @@ const GAP = '<span class="act-gap"></span>';
  * 回復薬のボタン。押すたびに HP 薬と MP 薬を切り替える(選んでいる方を表示し、右下に残り数)。
  * どちらも持っていない・AP が足りない・担いでいるときはグレー
  */
-export function potionButton(kind: ItemId, items: GameState['items'], on: boolean, off: boolean): string {
+export function potionButton(kind: PotionId, items: GameState['items'], on: boolean, off: boolean): string {
   const it = ITEMS[kind];
   const n = items?.[kind] ?? 0;
   const cls = ['act', on ? 'on' : '', off ? 'off' : ''].filter(Boolean).join(' ');
@@ -306,6 +306,15 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'chest':
         lines.push(T.log.chest(nameOf(e.id), e.gold));
+        break;
+      case 'loot':
+        lines.push(T.log.loot(e.gold));
+        break;
+      case 'dry':
+        lines.push(T.log.dry);
+        break;
+      case 'ration':
+        if (!e.food) lines.push(T.log.noFood);
         break;
       case 'exp':
         lines.push(T.log.exp(e.amount));

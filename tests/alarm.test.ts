@@ -52,7 +52,8 @@ describe('警報役', () => {
     const s = game([mk('p1', 'warrior', 1, 2), h]);
     const r = resolveTurn(s, { p1: [{ type: 'attack', target: 'h1' }], h1: [] });
     expect(r.events.some((e) => e.type === 'bounty' && e.gold === alarmBounty(1))).toBe(true);
-    expect(r.state.gold).toBe(alarmBounty(1));
+    // 警報役を倒したゴールドも入る
+    expect(r.state.gold).toBe(alarmBounty(1) + (MONSTERS.hornblower.gold ?? 0));
     // 2 回は手に入らない
     const r2 = resolveTurn(r.state, {});
     expect(r2.events.some((e) => e.type === 'bounty')).toBe(false);

@@ -17,6 +17,8 @@ export const BOT = {
   potionAt: 0.3,
   /** 泉で HP 回復薬をこの数まで買う */
   potionStock: 3,
+  /** 泉で食料をこの数まで買う */
+  foodStock: 8,
   /** 成長の二択で選ぶもの */
   perk: 'fireMp',
   descendAt: 0.7,
@@ -27,17 +29,21 @@ export const BOT = {
 const ORDER = ['warrior', 'thief', 'priest', 'mage'];
 
 /**
- * 泉の店: 敵が見えない間に誰かが泉にいれば、HP 回復薬を BOT.potionStock 個まで買う(状態を直接書き換える)。
+ * 泉の店: 敵が見えない間に誰かが泉にいれば、食料を BOT.foodStock 個まで、HP 回復薬を BOT.potionStock 個まで買う(状態を直接書き換える)。
  * 自動対戦の進行役が、計画を立てる前に呼ぶ
  */
 export function botShop(state: GameState): void {
   if (visibleFoes(state.map, state.units, 'party').size > 0) return;
   if (!state.units.some((u) => u.side === 'party' && !u.down && tileAt(state.map, u.x, u.y) === 'H')) return;
-  const it = ITEMS.hp;
-  while ((state.items?.hp ?? 0) < BOT.potionStock && (state.gold ?? 0) >= it.price) {
-    state.gold = (state.gold ?? 0) - it.price;
-    state.items = { ...state.items, hp: (state.items?.hp ?? 0) + 1 };
-  }
+  // 休憩に要る食料を先に買い、残りで HP 回復薬を買う
+  const buy = (k: 'hp' | 'food', upTo: number) => {
+    while ((state.items?.[k] ?? 0) < upTo && (state.gold ?? 0) >= ITEMS[k].price) {
+      state.gold = (state.gold ?? 0) - ITEMS[k].price;
+      state.items = { ...state.items, [k]: (state.items?.[k] ?? 0) + 1 };
+    }
+  };
+  buy('food', BOT.foodStock);
+  buy('hp', BOT.potionStock);
 }
 
 /** 成長の二択: まだ選んでいなければ BOT.perk(無ければ最初の候補)を選ぶ(状態を直接書き換える) */
@@ -72,8 +78,8 @@ export function planParty(state: GameState): Plans {
       const d = stats(u);
       return u.hp / d.maxHp < 0.6 || (d.maxMp > 0 && u.mp / d.maxMp < 0.5);
     });
-    // 眠っている敵が見えている間は休憩しても回復しないので、休まずに進む
-    if (tired && seenIds.size === 0) return {};
+    // 眠っている敵が見えている間・食料が無いときは休憩しても回復しないので、休まずに進む
+    if (tired && seenIds.size === 0 && (state.items?.food ?? 0) > 0) return {};
     return explore(state, party);
   }
 

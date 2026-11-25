@@ -165,6 +165,8 @@ export function createEncounter(id: string, seed: number): GameState | null {
     floor: 1,
     floors: {},
     gold: 0,
+    // 固定遭遇は戦い方を試す場なので、休憩の食料は十分に持たせる
+    items: { food: 99 },
     deepest: 1,
     scenario: id,
   };

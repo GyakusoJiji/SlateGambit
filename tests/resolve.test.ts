@@ -35,7 +35,8 @@ function mk(id: string, defId: string, x: number, y: number): Unit {
 
 function game(units: Unit[], rows = OPEN, seed = 1): GameState {
   const map = parseMap(rows);
-  return { seed, rng: seed, turn: 1, map, units, explored: new Array(map.w * map.h).fill(0), status: 'playing' };
+  // 休憩には食料が要るので、十分に持たせておく
+  return { seed, rng: seed, turn: 1, map, units, explored: new Array(map.w * map.h).fill(0), status: 'playing', items: { food: 99 } };
 }
 
 const u = (s: GameState, id: string) => s.units.find((x) => x.id === id)!;

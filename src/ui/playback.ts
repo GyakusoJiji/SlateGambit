@@ -158,6 +158,12 @@ export class Playback {
       } else if (e.type === 'chest') {
         out.push({ kind: 'burst', at: e.at, radius: 0, color: '#ffd23a', alpha });
         out.push({ kind: 'text', at: e.at, text: `+${e.gold}G`, color: '#ffd23a', rise: 0.3 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'loot') {
+        // 倒した敵のゴールドは、立っている味方の先頭の頭上に出す
+        const s = this.result.frames[tick].find((x) => !x.down && this.before.units.find((u) => u.id === x.id)?.side === 'party');
+        if (s) out.push({ kind: 'text', at: { x: s.x, y: s.y }, text: `+${e.gold}G`, color: '#ffd23a', rise: 0.7 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'dry') {
+        out.push({ kind: 'text', at: e.at, text: '枯れた', color: '#c8b080', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'levelup') {
         out.push({ kind: 'burst', at: posOf(e.id), radius: 0, color: '#fff080', alpha });
         out.push({ kind: 'text', at: posOf(e.id), text: 'Lv UP!', color: '#fff080', rise: 0.5 + k * 0.6, alpha: 1 });

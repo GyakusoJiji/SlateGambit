@@ -285,9 +285,10 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     const inCombat = seenAtStart.party.size > 0 || visibleFoes(state.map, state.units, 'party').size > 0;
     if (!inCombat) applyWander(state, rng, share, events);
   }
-  applySpring(state, events, frames);
+  applySpring(state, rng, events, frames);
   applyWakeUp(state, rng, events, frames);
   applyExp(state, foesAtStart, events, frames);
+  applyLoot(state, foesAtStart, events);
   updateAiMemory(state, attackedBy, events);
   applyAlarm(state, rng, events, new Set(events.filter((e) => e.type === 'stun').map((e) => e.id)), enemiesSawParty);
   // 開いた扉の時間経過(閉まった扉は最後のフレームの地形にも反映する)
@@ -511,10 +512,12 @@ function applyWakeUp(state: GameState, rng: Rng, events: GameEvent[], frames: Un
 /**
  * 回復の泉: ターンの終わりに泉のマスにいる味方は、気絶から復帰し、HP と MP が全回復する。
  * 担がれている味方は、担いでいる者が泉にいれば回復する。
+ * 誰かが回復した泉は RULES.springDryChance の確率で枯れる('h' になる。地上から潜り直すと戻る)
  */
-function applySpring(state: GameState, events: GameEvent[], frames: UnitSnapshot[][]): void {
+function applySpring(state: GameState, rng: Rng, events: GameEvent[], frames: UnitSnapshot[][]): void {
   const { map, units } = state;
   let changed = false;
+  const used = new Map<string, Pos>();
   for (const u of units) {
     if (u.side !== 'party' || tileAt(map, u.x, u.y) !== 'H') continue;
     const d = stats(u);
@@ -524,8 +527,15 @@ function applySpring(state: GameState, events: GameEvent[], frames: UnitSnapshot
     u.hp = d.maxHp;
     u.mp = d.maxMp;
     events.push({ tick: TICKS_PER_TURN, type: 'spring', id: u.id, revived });
+    used.set(key(u), pos(u));
     if (revived) standUp(map, units, u, events, TICKS_PER_TURN);
     changed = true;
+  }
+  for (const at of used.values()) {
+    if (rng.next() >= RULES.springDryChance) continue;
+    const row = map.tiles[at.y];
+    map.tiles[at.y] = row.slice(0, at.x) + 'h' + row.slice(at.x + 1);
+    events.push({ tick: TICKS_PER_TURN, type: 'dry', at });
   }
   if (!changed) return;
   frames[frames.length - 1] = snapshot(units, new Set(), new Set());
@@ -909,6 +919,16 @@ function applyRest(state: GameState, plans: Plans, foesAtStart: boolean, events:
   if (party.length === 0) return;
   const combat = foesAtStart || visibleFoes(state.map, state.units, 'party').size > 0;
   const ratio = combat ? RULES.combatRestRatio : 1;
+  // 休憩で回復するには、パーティで食料を 1 つ使う(誰かが休憩して、回復する余地がある者がいるときだけ)
+  const resting = party.some((u) => restTicks(plans[u.id]) > 0 && (u.hp < stats(u).maxHp || u.mp < stats(u).maxMp));
+  if (!resting) return;
+  const items = (state.items ??= {});
+  if (!items.food) {
+    events.push({ tick: TICKS_PER_TURN, type: 'ration', food: false });
+    return;
+  }
+  items.food -= 1;
+  events.push({ tick: TICKS_PER_TURN, type: 'ration', food: true });
   for (const u of party) {
     const k = (restTicks(plans[u.id]) / TICKS_PER_TURN) * ratio;
     if (k <= 0) continue;
@@ -939,6 +959,14 @@ function applyExp(state: GameState, foesAtStart: Unit[], events: GameEvent[], fr
     s.hp = u.hp;
     s.mp = u.mp;
   }
+}
+
+/** このターンに倒れた敵のゴールドを、パーティの所持金に加える */
+function applyLoot(state: GameState, foesAtStart: Unit[], events: GameEvent[]): void {
+  const gold = foesAtStart.filter((u) => u.down).reduce((a, u) => a + (unitDef(u.defId).gold ?? 0), 0);
+  if (gold <= 0) return;
+  state.gold = (state.gold ?? 0) + gold;
+  events.push({ tick: TICKS_PER_TURN, type: 'loot', gold });
 }
 
 function judge(state: GameState): GameState['status'] {
