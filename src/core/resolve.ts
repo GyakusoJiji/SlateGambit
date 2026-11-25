@@ -300,7 +300,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   applyIntrusion(state, rng, events);
   // 酸の泉は、このターンの泉の判定(回復の泉が酸に変わる)より先に見る
   applyAcid(state, rng, events, frames, tiles);
-  applySpring(state, rng, events, frames);
+  applySpring(state, rng, events, frames, tiles);
   applyWakeUp(state, rng, events, frames);
   applyExp(state, foesAtStart, events, frames);
   applyLoot(state, foesAtStart, events);
@@ -532,7 +532,7 @@ function applyWakeUp(state: GameState, rng: Rng, events: GameEvent[], frames: Un
  * 担がれている味方は、担いでいる者が泉にいれば回復する。
  * 誰かが回復した泉は RULES.springDryChance の確率で酸の泉に変わる('h' になる。地上から潜り直すと戻る)
  */
-function applySpring(state: GameState, rng: Rng, events: GameEvent[], frames: UnitSnapshot[][]): void {
+function applySpring(state: GameState, rng: Rng, events: GameEvent[], frames: UnitSnapshot[][], tiles: string[][]): void {
   const { map, units } = state;
   let changed = false;
   const used = new Map<string, Pos>();
@@ -554,6 +554,8 @@ function applySpring(state: GameState, rng: Rng, events: GameEvent[], frames: Un
     const row = map.tiles[at.y];
     map.tiles[at.y] = row.slice(0, at.x) + 'h' + row.slice(at.x + 1);
     events.push({ tick: TICKS_PER_TURN, type: 'dry', at });
+    // 最後のフレームの地形にも反映する(再生の終わりで酸の泉に見えるように)
+    tiles[tiles.length - 1] = map.tiles.slice();
   }
   if (!changed) return;
   frames[frames.length - 1] = snapshot(units, new Set(), new Set());
@@ -1016,9 +1018,18 @@ function applyRest(state: GameState, plans: Plans, foesAtStart: boolean, events:
   if (party.length === 0) return;
   const combat = foesAtStart || visibleFoes(state.map, state.units, 'party').size > 0;
   const ratio = combat ? RULES.combatRestRatio : 1;
-  // 休憩で回復するには、パーティで食料を 1 つ使う(誰かが休憩して、回復する余地がある者がいるときだけ)
-  const resting = party.some((u) => restTicks(plans[u.id]) > 0 && (u.hp < stats(u).maxHp || u.mp < stats(u).maxMp));
-  if (!resting) return;
+  // 先に、各自が実際に回復する量を求める(休憩しても回復が 0 の者は数えない)
+  const gains: { u: Unit; hp: number; mp: number }[] = [];
+  for (const u of party) {
+    const k = (restTicks(plans[u.id]) / TICKS_PER_TURN) * ratio;
+    if (k <= 0) continue;
+    const d = stats(u);
+    const hp = Math.max(0, Math.min(d.maxHp - u.hp, Math.max(1, Math.round(d.maxHp * RULES.restHpRatio * k))));
+    const mp = Math.max(0, Math.min(d.maxMp - u.mp, Math.round(RULES.restMp * k)));
+    if (hp > 0 || mp > 0) gains.push({ u, hp, mp });
+  }
+  // 休憩で回復するには、パーティで食料を 1 つ使う(実際に誰かが回復するときだけ。回復が 0 なら使わない)
+  if (gains.length === 0) return;
   const items = (state.items ??= {});
   if (!items.food) {
     events.push({ tick: TICKS_PER_TURN, type: 'ration', food: false });
@@ -1026,13 +1037,7 @@ function applyRest(state: GameState, plans: Plans, foesAtStart: boolean, events:
   }
   items.food -= 1;
   events.push({ tick: TICKS_PER_TURN, type: 'ration', food: true });
-  for (const u of party) {
-    const k = (restTicks(plans[u.id]) / TICKS_PER_TURN) * ratio;
-    if (k <= 0) continue;
-    const d = stats(u);
-    const hp = Math.min(d.maxHp - u.hp, Math.max(1, Math.round(d.maxHp * RULES.restHpRatio * k)));
-    const mp = Math.min(d.maxMp - u.mp, Math.round(RULES.restMp * k));
-    if (hp <= 0 && mp <= 0) continue;
+  for (const { u, hp, mp } of gains) {
     u.hp += hp;
     u.mp += mp;
     events.push({ tick: TICKS_PER_TURN, type: 'rest', id: u.id, hp, mp });

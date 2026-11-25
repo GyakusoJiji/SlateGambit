@@ -30,9 +30,11 @@ export function findTile(map: GameState['map'], c: string): Pos | null {
 
 /**
  * p の階段を使ったときに移る先の階。下り階段('>')なら下の階、上り階段('S')なら上の階
- * (地下 1 階の 'S' は地上(階 0)へ出る。秘宝を持って地上へ出れば勝ち)。階段でなければ null
+ * (地下 1 階の 'S' は地上(階 0)へ出る。秘宝を持って地上へ出れば勝ち)。階段でなければ null。
+ * 固定遭遇・ミニゲーム・チュートリアル(state.scenario)の 'S' は救出の出口で、階を移る階段ではないので null
  */
 export function stairsDest(state: GameState, p: Pos): number | null {
+  if (state.scenario) return null;
   const cur = currentFloor(state);
   const t = tileAt(state.map, p.x, p.y);
   return t === '>' && cur < FLOORS ? cur + 1 : t === 'S' && cur > 0 ? cur - 1 : null;

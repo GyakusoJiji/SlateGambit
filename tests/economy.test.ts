@@ -42,6 +42,18 @@ describe('食料と休憩', () => {
     expect(r.state.items?.food).toBe(3);
   });
 
+  it('休憩しても回復が 0 なら、食料は減らない(HP 満タン・MP 0 の魔法使いが 1 ティックだけ休む)', () => {
+    const m = { ...mk('p3', 'mage', 1, 1), mp: 0 };
+    const r = resolveTurn(game([m], undefined, { food: 3 }), { p3: [{ type: 'wait' }] });
+    expect(r.state.items?.food).toBe(3);
+    expect(r.events.some((e) => e.type === 'ration' || e.type === 'rest')).toBe(false);
+    expect(u(r.state, 'p3').mp).toBe(0);
+    // 長く休めば MP が回復し、食料を使う
+    const r2 = resolveTurn(game([{ ...m }], undefined, { food: 3 }), { p3: rest() });
+    expect(r2.state.items?.food).toBe(2);
+    expect(u(r2.state, 'p3').mp).toBe(RULES.restMp);
+  });
+
   it('新しいゲームは所持金と食料を持って始まる', () => {
     const s = generateGame(5, 'normal');
     expect(s.gold).toBe(START_GOLD);
@@ -60,6 +72,11 @@ describe('回復の泉と酸の泉', () => {
       if (tileAt(r.state.map, 2, 1) === 'h') {
         dried++;
         expect(r.events.some((e) => e.type === 'dry')).toBe(true);
+        // 再生の最後のフレームの地形も酸の泉になっている(途中のフレームは回復の泉のまま)
+        expect(r.tiles!.at(-1)![1][2]).toBe('h');
+        expect(r.tiles![0][1][2]).toBe('H');
+      } else {
+        expect(r.tiles!.at(-1)![1][2]).toBe('H');
       }
     }
     expect(dried / N).toBeGreaterThan(RULES.springDryChance - 0.1);

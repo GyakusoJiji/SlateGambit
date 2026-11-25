@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { createEncounter, createFromDef, encounterDef } from '../src/core/encounters';
 import { resolveTurn } from '../src/core/resolve';
 import { LESSONS, lessonDef, TUTORIAL_ID, TUTORIAL_PAGES, type CoachInput } from '../src/core/tutorial';
+import { planEnemies } from '../src/core/ai';
+import { stairsDest } from '../src/core/floors';
+import { spellRange } from '../src/core/stats';
+import { unitSees } from '../src/core/vision';
 
 const base: CoachInput = { turn: 1, plans: [], foeInSight: false, carrying: false, besideDown: false };
 
@@ -82,6 +86,46 @@ describe('チュートリアル', () => {
     w.x = priest.x;
     w.y = priest.y;
     expect(resolveTurn(s, { p4: [{ type: 'move', dir: 'N', slow: true }] }).state.status).toBe('won');
+  });
+
+  it('レッスン 4: 何も運んでいない味方が出口(S)に乗っても、階を移らずステージが続く', () => {
+    const s = createEncounter('tut-carry', 1)!;
+    const exit = { x: 1, y: 2 };
+    expect(stairsDest(s, exit)).toBeNull();
+    // 盗賊(p2)が出口へ 1 歩動き、階段を使う予約もしておく
+    const before = s.map.tiles.join('/');
+    const r = resolveTurn(s, { p2: [{ type: 'move', dir: 'W' }, { type: 'stairs' }] });
+    expect(r.state.units.find((u) => u.id === 'p2')).toMatchObject(exit);
+    expect(r.events.some((e) => e.type === 'stairs')).toBe(false);
+    expect(r.state.floor).toBe(1);
+    expect(r.state.scenario).toBe('tut-carry');
+    expect(r.state.map.tiles.join('/')).toBe(before);
+    expect(r.state.status).toBe('playing');
+  });
+
+  it('レッスン 3: ゴブリンは始めは気付いておらず、射程ぎりぎりの探索済みのマスへの火球で 3 体を巻き込める', () => {
+    const s = createEncounter('tut-fire', 1)!;
+    const party = s.units.filter((u) => u.side === 'party');
+    const foes = s.units.filter((u) => u.side === 'enemy');
+    for (const f of foes) for (const p of party) expect(unitSees(s.map, f, p), `${f.id} → ${p.id}`).toBe(false);
+    const mage = party.find((u) => u.defId === 'mage')!;
+    // 案内どおり、ゴブリンの列のすぐ手前(魔法使いから射程ちょうど)を狙う
+    const tile = { x: mage.x + spellRange(mage, 'fireball'), y: mage.y };
+    expect(s.explored[tile.y * s.map.w + tile.x]).toBe(1);
+    expect(foes.filter((f) => f.x === tile.x + 1).length).toBe(3);
+    const r = resolveTurn(s, { ...planEnemies(s), [mage.id]: [{ type: 'spell', spell: 'fireball', tile }] });
+    const hit = new Set(r.events.filter((e) => e.type === 'damage' && foes.some((f) => f.id === e.id)).map((e) => (e as { id: string }).id));
+    expect(hit.size).toBe(3);
+  });
+
+  it('レッスン 5: 1 ターン目に盗賊が角笛ゴブリンへ足払いをすると、逃げられる前に届く', () => {
+    const s = createEncounter('tut-trip', 1)!;
+    const thief = s.units.find((u) => u.defId === 'thief')!;
+    const horn = s.units.find((u) => u.defId === 'hornblower')!;
+    expect(s.explored[horn.y * s.map.w + horn.x]).toBe(1);
+    const r = resolveTurn(s, { ...planEnemies(s), [thief.id]: [{ type: 'spell', spell: 'trip', target: horn.id }] });
+    expect(r.events.some((e) => e.type === 'stun' && e.id === horn.id)).toBe(true);
+    expect(r.events.some((e) => e.type === 'fizzle')).toBe(false);
   });
 
   it('レッスン 2〜3 と 5 は、敵を全滅させる目的', () => {
