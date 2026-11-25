@@ -80,6 +80,43 @@ body {
   cursor: pointer;
 }
 
+/* チュートリアルの練習戦で、次にやることを盤面の上に出す */
+#coach {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: #000d;
+  font-size: 13px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+#coach[hidden] {
+  display: none;
+}
+#coach b {
+  color: var(--accent);
+}
+/* 操作ガイド */
+.guide ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.guide .pager {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 #toast {
   position: absolute;
   left: 50%;
@@ -547,6 +584,23 @@ body {
 .start .note,
 .perk .note {
   margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* ミニゲームの評価 */
+.rank {
+  margin: 0;
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  color: var(--accent);
+}
+.rank.rank-B {
+  color: var(--muted);
+}
+.start .menu-sub {
+  margin: -6px 0 0;
   color: var(--muted);
   font-size: 12px;
 }

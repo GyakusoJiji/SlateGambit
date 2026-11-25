@@ -7,6 +7,7 @@ import { parseMap } from './map';
 import { hashSeed } from './rng';
 import { stats } from './stats';
 import type { GameState, Objective, Unit } from './types';
+import { TUTORIAL } from './tutorial';
 import { updateExplored } from './vision';
 
 /** 固定遭遇のパーティのレベル */
@@ -32,7 +33,18 @@ export interface EncounterDef {
   desc: string;
   rows: string[];
   objective: Objective;
+  /** ミニゲームのステージ: 目安のターン数(これ以内で勝つと評価が上がる) */
+  par?: number;
 }
+
+/** ミニゲームで次のステージへ持ち越す、味方 1 人の状態 */
+export interface CarryUnit {
+  hp: number;
+  mp: number;
+  perks?: string[];
+}
+/** 味方の ID(p1〜p4)ごとの持ち越し */
+export type Carry = Record<string, CarryUnit>;
 
 /** 編成の比較に使う部屋(同じ地形に、違う編成を置く) */
 const HALL = (marks: Record<string, string>): string[] =>
@@ -119,13 +131,21 @@ export const ENCOUNTERS: EncounterDef[] = [
 ];
 
 export function encounterDef(id: string): EncounterDef | undefined {
-  return ENCOUNTERS.find((e) => e.id === id);
+  return id === TUTORIAL.id ? TUTORIAL : ENCOUNTERS.find((e) => e.id === id);
 }
 
 /** 固定遭遇を始める。シードは乱数(ダメージの揺れなど)だけに使う */
 export function createEncounter(id: string, seed: number): GameState | null {
   const def = encounterDef(id);
-  if (!def) return null;
+  return def ? createFromDef(def, def.id, seed) : null;
+}
+
+/**
+ * 部屋の定義から遭遇を作る(固定遭遇とミニゲームのステージで共通)。scenario は state.scenario に入れる ID。
+ * carry があれば、味方の HP・MP・成長を前のステージから引き継ぐ(気絶して始める戦士は気絶のまま)
+ */
+export function createFromDef(def: EncounterDef, scenario: string, seed: number, carry?: Carry): GameState {
+  const id = scenario;
   const units: Unit[] = [];
   const counts: Record<string, number> = {};
   const rows = def.rows.map((row, y) =>
@@ -152,6 +172,16 @@ export function createEncounter(id: string, seed: number): GameState | null {
   units.sort((a, b) => (a.side === b.side ? 0 : a.side === 'party' ? -1 : 1));
   const party = units.filter((u) => u.side === 'party').sort((a, b) => order.indexOf(a.defId) - order.indexOf(b.defId));
   party.forEach((u, i) => (u.id = `p${i + 1}`));
+  if (carry) {
+    for (const u of party) {
+      const c = carry[u.id];
+      if (!c) continue;
+      if (c.perks) u.perks = [...c.perks];
+      const st = stats(u);
+      if (!u.down) u.hp = Math.max(1, Math.min(st.maxHp, c.hp));
+      u.mp = Math.min(st.maxMp, c.mp);
+    }
+  }
   const state: GameState = {
     seed,
     difficulty: 'normal',

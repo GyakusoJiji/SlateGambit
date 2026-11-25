@@ -12,7 +12,8 @@ import { planEnemies } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
 import { DIFFICULTY, FLOORS, GEN, generateGame } from '../src/core/generate';
 import { createTestGame } from '../src/core/scenario';
-import { createEncounter, ENCOUNTERS } from '../src/core/encounters';
+import { createEncounter, createFromDef, ENCOUNTERS } from '../src/core/encounters';
+import { MINIGAMES, stageScenario } from '../src/core/minigames';
 import type { Difficulty, GameEvent, GameState } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
@@ -155,6 +156,9 @@ const VARIANTS: Variant[] = (process.env.VARIANTS === 'feat'
   : process.env.VARIANTS === 'enc'
   ? // 固定遭遇をボットで遊ぶ(編成や新しい仕組みの比べ方の目安。ボットは足払いなどを狙って使わない)
     ENCOUNTERS.map((e) => ({ name: e.title.slice(0, 20), setup: () => {}, game: (seed: number) => createEncounter(e.id, seed)! }))
+  : process.env.VARIANTS === 'mg'
+  ? // ミニゲームの各ステージをボットで遊ぶ(持ち越しなし。目安)
+    MINIGAMES.flatMap((m) => m.stages.map((d, i) => ({ name: `${m.id}${i + 1} ${d.title}`.slice(0, 20), setup: () => {}, game: (seed: number) => createFromDef(d, stageScenario(m.id, i), seed) })))
   : process.env.VARIANTS === 'all'
   ? [
       ...BASE,

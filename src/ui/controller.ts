@@ -6,7 +6,8 @@ import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
-import { createEncounter, encounterDef, ENCOUNTERS } from '../core/encounters';
+import { createEncounter, createFromDef, encounterDef, ENCOUNTERS, type Carry } from '../core/encounters';
+import { carryOver, MINIGAMES, minigameDef, rankOf, stageScenario, type MinigameDef } from '../core/minigames';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
 import {
@@ -37,7 +38,8 @@ import { actButton, actionButtons, eventLog, idleButtons, inventoryBar, levelUpN
 import { reachInfo, tickPositions, tickCells } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
-import { saveGame } from './save';
+import { loadGame, saveGame } from './save';
+import { coachStep, TUTORIAL, TUTORIAL_ID, TUTORIAL_PAGES, TUTORIAL_STEPS } from '../core/tutorial';
 
 interface Settings {
   hints: boolean;
@@ -138,6 +140,16 @@ export class Controller {
   private focusOn(p: Pos): void {
     this.camGoal = { x: p.x, y: p.y };
     this.dirty = true;
+  }
+
+  /** 味方から見えている敵が画面の外にいれば、味方と敵の間へカメラを寄せる(止まった理由の敵を見せる) */
+  private frameFoes(): void {
+    const seen = visibleFoes(this.state.map, this.state.units, 'party');
+    const foes = this.state.units.filter((u) => seen.has(u.id));
+    if (foes.length === 0 || foes.every((f) => this.renderer.inView(f, 0.1))) return;
+    const a = centroid(this.party());
+    const b = centroid(foes);
+    this.focusOn({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
   }
 
   /** 毎フレーム、カメラを目標へ近づける。再生中は動いている味方が画面の内側に収まるよう追う */
@@ -291,25 +303,120 @@ export class Controller {
     if (this.history.length > HISTORY_TURNS) this.history.shift();
   }
 
-  /** 難易度選択の画面を出す。選ぶとそのシードで新しいゲームを始める */
-  showStart(seed: number): void {
+  /** メインメニュー(キャンペーン / ミニゲーム)。seed は、キャンペーンをはじめから始めるときのマップのシード */
+  showMenu(seed: number = randomSeed()): void {
     this.pendingSeed = seed;
     this.el.overlay.hidden = false;
+    this.el.overlay.innerHTML = `<div class="sheet start menu">
+      <h2>${T.menu.title}</h2>
+      <p class="menu-sub">${T.menu.subtitle}</p>
+      <button class="act diff" data-ov="tutorial"><b>${T.menu.tutorial}</b><small>${T.menu.tutorialDesc}</small></button>
+      <button class="act diff" data-ov="campaign"><b>${T.menu.campaign}</b><small>${T.menu.campaignDesc}</small></button>
+      <button class="act diff" data-ov="minigames"><b>${T.menu.minigames}</b><small>${T.menu.minigamesDesc}</small></button>
+    </div>`;
+  }
+
+  /** キャンペーンの画面: 保存があれば続きから、または難易度を選んではじめから */
+  private showCampaign(): void {
+    const saved = loadGame();
     const btn = (d: Difficulty) => `<button class="act diff" data-ov="diff" data-diff="${d}">
         <b>${T.difficulty[d]}</b><small>${T.difficultyDesc[d]}</small></button>`;
     this.el.overlay.innerHTML = `<div class="sheet start">
-      <h2>${T.start.title}</h2>
+      <h2>${T.menu.campaign}</h2>
+      ${saved ? `<button class="act diff primary" data-ov="continue"><b>${T.menu.continue}</b><small>${T.menu.continueDesc(T.floor(currentFloor(saved)), saved.turn)}</small></button>` : ''}
+      <h3>${T.menu.newGame}</h3>
       ${btn('easy')}${btn('normal')}${btn('hard')}
       <p class="note">${T.start.note}<br>${T.difficultyDesc.boss}</p>
-      <h3>${T.start.encounters}</h3>
-      ${ENCOUNTERS.map((e) => `<button class="act diff" data-ov="encounter" data-id="${e.id}"><b>${e.title}</b><small>${e.desc}</small></button>`).join('')}
+      <button class="act" data-ov="menu">${T.menu.back}</button>
     </div>`;
   }
+
+  /** ミニゲームの画面: 短い連戦の一覧と、単発の固定遭遇(練習) */
+  private showMinigames(): void {
+    const mg = (m: MinigameDef) =>
+      `<button class="act diff" data-ov="mg-start" data-id="${m.id}"><b>${m.title}</b><small>${T.menu.stages(m.stages.length, m.minutes)}</small><small>${m.desc}</small></button>`;
+    this.el.overlay.innerHTML = `<div class="sheet start">
+      <h2>${T.menu.minigames}</h2>
+      ${MINIGAMES.map(mg).join('')}
+      <h3>${T.menu.practice}</h3>
+      ${ENCOUNTERS.map((e) => `<button class="act diff" data-ov="encounter" data-id="${e.id}"><b>${e.title}</b><small>${e.desc}</small></button>`).join('')}
+      <button class="act" data-ov="menu">${T.menu.back}</button>
+    </div>`;
+  }
+
+  /** チュートリアルの操作ガイド(ページ送り)。最後のページから練習戦を始められる */
+  private showTutorialGuide(page = 0): void {
+    const n = TUTORIAL_PAGES.length;
+    const i = Math.max(0, Math.min(n - 1, page));
+    const p = TUTORIAL_PAGES[i];
+    this.el.overlay.hidden = false;
+    this.el.overlay.innerHTML = `<div class="sheet start guide">
+      <p class="pager">${T.tutorial.pager(i + 1, n)}</p>
+      <h2>${p.title}</h2>
+      <ul>${p.lines.map((l) => `<li>${l}</li>`).join('')}</ul>
+      ${i + 1 < n ? `<button class="act primary" data-ov="tut-go" data-page="${i + 1}">${T.tutorial.next}</button>` : `<button class="act primary" data-ov="tut-start">${T.tutorial.start}</button>`}
+      ${i > 0 ? `<button class="act" data-ov="tut-go" data-page="${i - 1}">${T.tutorial.prev}</button>` : ''}
+      <button class="act" data-ov="menu">${T.tutorial.toMenu}</button>
+    </div>`;
+  }
+
+  /** チュートリアルの練習戦を始める(自動保存しない) */
+  startTutorial(): void {
+    this.mg = null;
+    const st = createFromDef(TUTORIAL, TUTORIAL_ID, 1);
+    // 成長の二択(魔法使いの Lv 2)は、初めての人には早いので、あらかじめ選んだ状態で始める
+    for (const u of st.units) if (u.defId === 'mage') u.perks = ['fireMp'];
+    this.begin(st);
+    this.toast(T.tutorial.intro);
+  }
+
+  /** 練習戦の間だけ、盤面の上に「次にやること」を出す */
+  private updateCoach(): void {
+    const el = document.querySelector<HTMLElement>('#coach');
+    if (!el) return;
+    const st = this.state;
+    if (st.scenario !== TUTORIAL_ID || st.status !== 'playing' || this.playback) {
+      el.hidden = true;
+      return;
+    }
+    const plans = Object.values(this.plans).flat();
+    const step = coachStep({
+      turn: st.turn,
+      hasMovePlan: plans.some((a) => a.type === 'move'),
+      hasAttackPlan: plans.some((a) => a.type === 'attack' || a.type === 'charge'),
+      foeInSight: this.foesInSight(),
+    });
+    el.innerHTML = T.tutorial.coach(step + 1, TUTORIAL_STEPS.length, TUTORIAL_STEPS[step]);
+    el.hidden = false;
+  }
+
+  /** URL を、再読み込みで同じ画面から始められる形にする(指定した以外の開始用の指定は消す) */
+  private setUrl(params: Record<string, string>): void {
+    const url = new URL(location.href);
+    for (const k of ['seed', 'diff', 'floor', 'scenario', 'minigame', 'stage', 'tutorial']) url.searchParams.delete(k);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    history.replaceState(null, '', url);
+  }
+
+  /** ミニゲームの 1 ステージを始める(自動保存しない)。見つからなければ false。carry は前のステージからの持ち越し */
+  startMinigame(id: string, index = 0, carry?: Carry, results: number[] = [], seed: number = randomSeed()): boolean {
+    const def = minigameDef(id);
+    const stage = def?.stages[index];
+    if (!def || !stage) return false;
+    this.mg = { def, index, startCarry: carry, results };
+    this.begin(createFromDef(stage, stageScenario(id, index), seed, carry));
+    this.toast(T.minigame.stageIntro(index + 1, def.stages.length, stage.title, stage.desc));
+    return true;
+  }
+
+  /** 今のミニゲーム(固定遭遇・キャンペーンのときは null)。results は勝ったステージごとのターン数 */
+  private mg: { def: MinigameDef; index: number; startCarry?: Carry; results: number[] } | null = null;
 
   /** 固定遭遇を始める(自動保存しない)。見つからなければ false */
   startEncounter(id: string, seed: number = randomSeed()): boolean {
     const st = createEncounter(id, seed);
     if (!st) return false;
+    this.mg = null;
     this.begin(st);
     return true;
   }
@@ -319,6 +426,7 @@ export class Controller {
   /** persist=false は難易度選択の後ろに映すだけの仮のゲーム(保存しない) */
   /** startFloor: デバッグ用に途中の階から始める(URL の &floor=) */
   start(seed: number, difficulty: Difficulty = 'normal', persist = true, startFloor = 0): void {
+    this.mg = null;
     this.begin(generateGame(seed, difficulty, Math.max(0, Math.min(FLOORS, startFloor))));
     if (persist) saveGame(this.state);
   }
@@ -327,6 +435,7 @@ export class Controller {
   resume(state: GameState): void {
     const day = bankDay(state, Math.random());
     if (day && !state.scenario) saveGame(state);
+    this.mg = null;
     this.begin(state);
     const notes = [T.toast.resumed(state.turn)];
     if (day) notes.push(day.crash ? T.facility.bank.crash(day.amount) : T.facility.bank.interest(day.amount));
@@ -373,6 +482,7 @@ export class Controller {
     // 選んでいるキャラが画面の外なら、そこへ盤面を寄せる
     const sel = this.selected ? this.unit(this.selected) : undefined;
     if (sel && !this.renderer.inView(sel, 0.1)) this.focusOn(sel);
+    this.frameFoes();
     this.refresh();
     if (this.state.status !== 'playing') return this.showResult();
     this.continueAuto();
@@ -577,6 +687,7 @@ export class Controller {
     const o = st.objective;
     const goal = o?.kind === 'treasure' ? T.objectiveShort[o.holder ? 'treasureHeld' : 'treasure'] : T.objectiveShort[o?.kind ?? 'annihilate'];
     // 固定遭遇は階とゴールドの代わりに遭遇の名前を出す
+    if (this.mg) return `${this.mg.def.title} ${this.mg.index + 1}/${this.mg.def.stages.length}·${T.turnShort(st.turn)}·${goal}`;
     if (st.scenario) return `${encounterDef(st.scenario)?.title ?? st.scenario}·${T.turnShort(st.turn)}·${goal}`;
     return `${T.floor(currentFloor(st))}·${T.turnShort(st.turn)}·${goal}`;
   }
@@ -588,6 +699,7 @@ export class Controller {
     this.panelKey = key;
     const nameOf = (id: string) => this.names.get(id) ?? id;
 
+    this.updateCoach();
     const turnEl = this.el.topbar.querySelector<HTMLElement>('.turn')!;
     turnEl.textContent = this.statusLine();
     turnEl.title = `${T.floorLong(currentFloor(this.state))} · ${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.objective[this.state.objective?.kind ?? 'annihilate']}`;
@@ -691,6 +803,23 @@ export class Controller {
     this.focusOn(centroid(this.party()));
     const won = this.state.status === 'won';
     this.el.overlay.hidden = false;
+    if (this.mg) return this.showStageResult(won);
+    if (this.state.scenario === TUTORIAL_ID) {
+      this.el.overlay.innerHTML = won
+        ? `<div class="sheet result won">
+        <h2>${T.tutorial.doneTitle}</h2>
+        <p>${T.tutorial.doneBody}</p>
+        <button class="act primary" data-ov="campaign">${T.tutorial.toCampaign}</button>
+        <button class="act" data-ov="retry">${T.tutorial.retry}</button>
+        <button class="act" data-ov="menu">${T.tutorial.toMenu}</button>
+      </div>`
+        : `<div class="sheet result lost">
+        <h2>${T.tutorial.lost}</h2>
+        <button class="act primary" data-ov="retry">${T.tutorial.retry}</button>
+        <button class="act" data-ov="menu">${T.tutorial.toMenu}</button>
+      </div>`;
+      return;
+    }
     this.el.overlay.innerHTML = `<div class="sheet result ${won ? 'won' : 'lost'}">
       <h2>${won ? (({ treasure: T.result.wonTreasure, escape: T.result.wonEscape }) as Record<string, string>)[this.state.objective?.kind ?? ''] ?? T.result.won : T.result.lost}</h2>
       <p>${T.difficulty[this.state.difficulty ?? 'normal']} · ${T.turn(this.state.turn - 1)} で決着</p>
@@ -699,6 +828,49 @@ export class Controller {
       ${this.state.scenario ? `<button class="act primary" data-ov="retry">${T.result.retry}</button>` : ''}
       <button class="act${this.state.scenario ? '' : ' primary'}" data-ov="new">${T.settings.newGame}</button>
       <button class="act" data-ov="close">${T.settings.close}</button>
+    </div>`;
+  }
+
+  /** ミニゲームの 1 ステージが終わったときの画面: 途中なら次へ、最後なら評価、負けたらやり直し */
+  private showStageResult(won: boolean): void {
+    const mg = this.mg!;
+    const n = mg.def.stages.length;
+    const stage = mg.def.stages[mg.index];
+    const par = stage.par ?? 0;
+    const turns = this.state.turn - 1;
+    if (won) mg.results[mg.index] = turns;
+    const menu = `<button class="act" data-ov="menu">${T.minigame.toMenu}</button>`;
+    if (!won) {
+      this.el.overlay.innerHTML = `<div class="sheet result lost">
+        <h2>${T.minigame.lost(mg.index + 1, n)}</h2>
+        <button class="act primary" data-ov="retry">${T.minigame.retryStage}</button>
+        ${menu}
+      </div>`;
+      return;
+    }
+    if (mg.index + 1 < n) {
+      this.el.overlay.innerHTML = `<div class="sheet result won">
+        <h2>${T.minigame.stageClear(mg.index + 1, n, stage.title)}</h2>
+        <p>${T.minigame.stageTurns(turns, par)}</p>
+        <p>${T.minigame.breakNote}</p>
+        <button class="act primary" data-ov="mg-next">${T.minigame.next}</button>
+        ${menu}
+      </div>`;
+      return;
+    }
+    const total = mg.results.reduce((s, t) => s + t, 0);
+    const totalPar = mg.def.stages.reduce((s, g) => s + (g.par ?? 0), 0);
+    const rank = rankOf(mg.def, total);
+    const alive = this.party().every((u) => !u.down);
+    this.el.overlay.innerHTML = `<div class="sheet result won">
+      <h2>${T.minigame.allClear(mg.def.title)}</h2>
+      <p class="rank rank-${rank}">${rank}</p>
+      <p>${T.minigame.total(total, totalPar)}</p>
+      <p>${mg.def.stages.map((g, i) => `${g.title} ${mg.results[i]}/${g.par}`).join(' · ')}</p>
+      ${alive ? `<p>${T.minigame.allAlive}</p>` : ''}
+      <p class="note">${T.minigame.rankNote}</p>
+      <button class="act primary" data-ov="mg-again">${T.minigame.again}</button>
+      ${menu}
     </div>`;
   }
 
@@ -919,24 +1091,49 @@ export class Controller {
       // 設定画面でシードを書き換えた場合だけそのシード、それ以外は毎回新しいマップ
       const input = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]');
       const typed = input && input.value && Number(input.value) !== this.state.seed;
-      this.showStart(typed ? Number(input.value) : randomSeed());
+      this.showMenu(typed ? Number(input.value) : randomSeed());
     }
-    if (b.dataset.ov === 'encounter' || b.dataset.ov === 'retry') {
+    if (b.dataset.ov === 'menu') this.showMenu(this.pendingSeed);
+    if (b.dataset.ov === 'tutorial') this.showTutorialGuide(0);
+    if (b.dataset.ov === 'tut-go') this.showTutorialGuide(Number(b.dataset.page));
+    if (b.dataset.ov === 'tut-start') {
+      this.setUrl({ tutorial: '1' });
+      this.startTutorial();
+    }
+    if (b.dataset.ov === 'campaign') this.showCampaign();
+    if (b.dataset.ov === 'minigames') this.showMinigames();
+    if (b.dataset.ov === 'continue') {
+      const saved = loadGame();
+      if (saved) {
+        this.setUrl({});
+        this.resume(saved);
+      }
+    }
+    if (b.dataset.ov === 'mg-start' || b.dataset.ov === 'mg-again') {
+      const id = b.dataset.ov === 'mg-again' ? this.mg!.def.id : b.dataset.id!;
+      this.setUrl({ minigame: id });
+      this.startMinigame(id);
+    }
+    if (b.dataset.ov === 'mg-next' && this.mg) {
+      const { def, index, results } = this.mg;
+      this.setUrl({ minigame: def.id, stage: String(index + 1) });
+      this.startMinigame(def.id, index + 1, carryOver(this.state), results);
+    }
+    if (b.dataset.ov === 'retry' && this.mg) {
+      const { def, index, startCarry, results } = this.mg;
+      this.startMinigame(def.id, index, startCarry, results.slice(0, index));
+    } else if (b.dataset.ov === 'retry' && this.state.scenario === TUTORIAL_ID) {
+      this.startTutorial();
+    } else if (b.dataset.ov === 'encounter' || b.dataset.ov === 'retry') {
       const id = b.dataset.ov === 'retry' ? this.state.scenario! : b.dataset.id!;
       // 再読み込みで同じ固定遭遇から始められるよう、URL に残す
-      const url = new URL(location.href);
-      for (const k of ['seed', 'diff', 'floor']) url.searchParams.delete(k);
-      url.searchParams.set('scenario', id);
-      history.replaceState(null, '', url);
+      this.setUrl({ scenario: id });
       this.startEncounter(id);
     }
     if (b.dataset.ov === 'diff') {
       const diff = b.dataset.diff as Difficulty;
       // 再読み込みで同じゲームから始められるよう、シードと難易度を URL に残す
-      const url = new URL(location.href);
-      url.searchParams.set('seed', String(this.pendingSeed));
-      url.searchParams.set('diff', diff);
-      history.replaceState(null, '', url);
+      this.setUrl({ seed: String(this.pendingSeed), diff });
       this.start(this.pendingSeed, diff);
     }
   }
