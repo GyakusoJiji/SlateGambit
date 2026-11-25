@@ -7,7 +7,7 @@ import { unitDef } from '../data/units';
 import { hasLos, linePoints } from './los';
 import { adjacent, dist2 } from './map';
 import type { FloorMap, Pos, Unit } from './types';
-import { unitSees } from './vision';
+import { hostile, unitSees } from './vision';
 
 /** from から target を撃ったとき、射線上で最初に当たるのが target か(味方などが間にいないか) */
 export function clearShot(units: Unit[], shooter: Unit, from: Pos, target: Unit): boolean {
@@ -19,13 +19,13 @@ export function clearShot(units: Unit[], shooter: Unit, from: Pos, target: Unit)
 /** 迎撃の狙いの候補: 隣接(斜めを含む)する倒れていない敵(ID 順。乱数で選ぶときの並びを固定する) */
 export function interceptCandidates(map: FloorMap, u: Unit, units: Unit[]): Unit[] {
   return units
-    .filter((f) => f.side !== u.side && !f.down && adjacent(map, u, f))
+    .filter((f) => hostile(u, f) && !f.down && adjacent(map, u, f))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** 警戒射撃の狙い: このティックに動いた敵のうち、射程・射線・視界の中で最も近い敵 */
 export function overwatchTarget(map: FloorMap, u: Unit, units: Unit[], moved: Set<string>): Unit | undefined {
-  const foes = units.filter((f) => f.side !== u.side && !f.down && moved.has(f.id));
+  const foes = units.filter((f) => hostile(u, f) && !f.down && moved.has(f.id));
   const range = unitDef(u.defId).range;
   // 自動で撃つ条件付き行動は、射線上で最初に当たるのが狙う敵のとき(味方越しでないとき)だけ発動する
   const cands = foes.filter((f) => dist2(u, f) <= range * range && hasLos(map, u, f) && unitSees(map, u, f) && clearShot(units, u, u, f));

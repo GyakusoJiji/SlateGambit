@@ -162,6 +162,10 @@ export class Playback {
         // 倒した敵のゴールドは、立っている味方の先頭の頭上に出す
         const s = this.result.frames[tick].find((x) => !x.down && this.before.units.find((u) => u.id === x.id)?.side === 'party');
         if (s) out.push({ kind: 'text', at: { x: s.x, y: s.y }, text: `+${e.gold}G`, color: '#ffd23a', rise: 0.7 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'rumor') {
+        out.push({ kind: 'text', at: posOf(e.id), text: '噂', color: '#d8d8a0', rise: 0.6 + k * 0.3, alpha: 1 });
+      } else if (e.type === 'unmask') {
+        out.push({ kind: 'text', at: posOf(e.id), text: '正体!', color: '#ff9a3a', rise: 0.9 + k * 0.4, alpha: 1 });
       } else if (e.type === 'blessing') {
         out.push({ kind: 'burst', at: posOf(e.id), radius: 0, color: '#fff0a0', alpha });
         out.push({ kind: 'text', at: posOf(e.id), text: '加護!', color: '#fff0a0', rise: 0.6 + k * 0.5, alpha: 1 });

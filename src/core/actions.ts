@@ -30,6 +30,9 @@ export const RULES = {
   /** 野盗が盗むゴールド(基本 + 階 × 1 階あたり。所持金が少なければ所持金まで) */
   stealBase: 10,
   stealPerFloor: 10,
+  /** 地上(城の中)に、ターンごとに魔物が入り込む確率(ごくまれ)と、その点数 */
+  intrudeChance: 0.01,
+  intrudeBudget: 2,
   /** 盗んだ野盗が、見られずに何ターン過ごすと逃げ切るか */
   banditEscapeTurns: 2,
   /** 回復の泉を使ったときに枯れる確率(地上から潜り直すと戻る) */

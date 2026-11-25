@@ -27,12 +27,12 @@ import {
   type FacilityId,
 } from '../core/town';
 import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, PotionId, Pos, TurnResult, Unit } from '../core/types';
-import { sideVisibleMask, visibleFoes } from '../core/vision';
+import { isNeutral, sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
 import { ITEMS, PERKS, SPELLS } from '../data/units';
 import { pendingPerk, stats } from '../core/stats';
 import { attachInput } from './input';
-import { actButton, actionButtons, eventLog, idleButtons, inventoryBar, levelUpNote, partyCards, planChips, playbackControls, potionButton, timeline, turnSummary, type Mode } from './panel';
+import { actButton, actionButtons, eventLog, idleButtons, inventoryBar, levelUpNote, rumorText, partyCards, planChips, playbackControls, potionButton, timeline, turnSummary, type Mode } from './panel';
 import { reachInfo, tickPositions, tickCells } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
@@ -279,7 +279,7 @@ export class Controller {
     if (events.some((e) => e.type === 'damage' && this.unit(e.id)?.side === 'party')) return T.toast.restHurt;
     if (events.some((e) => e.type === 'ration' && !e.food)) return T.toast.restNoFood;
     const st = this.state;
-    const near = st.units.some((f) => f.side === 'enemy' && !f.down && this.party().some((p) => !p.down && adjacent(st.map, p, f)));
+    const near = st.units.some((f) => f.side === 'enemy' && !f.down && !isNeutral(f) && this.party().some((p) => !p.down && adjacent(st.map, p, f)));
     if (near) return T.toast.restFoeNear;
     if (!this.tired()) return T.toast.rested;
     return null;
@@ -414,6 +414,14 @@ export class Controller {
       this.stopAuto();
       notes.push(T.log.stairs(moved.from, moved.to));
     }
+    // 正体を現した盗人は、以後「野盗」と呼ぶ
+    for (const e of events) {
+      if (e.type !== 'unmask') continue;
+      const u = this.unit(e.id);
+      if (u) this.names.set(u.id, u.name);
+    }
+    // 住人の噂は通知にも出す(ログは流れてしまうので)
+    for (const e of events) if (e.type === 'rumor') notes.push(rumorText(this.names.get(e.id) ?? e.id, e.rumor));
     const lv = levelUpNote(events, (id) => this.names.get(id) ?? id, this.party().length);
     if (lv) notes.push(lv);
     if (this.restNote) notes.push(this.restNote);
@@ -514,7 +522,7 @@ export class Controller {
     }
     const hints = this.settings.hints
       ? st.units
-          .filter((u) => u.side === 'enemy' && !u.down && seen(u))
+          .filter((u) => u.side === 'enemy' && !u.down && seen(u) && !isNeutral(u))
           .map((u) => {
             const plan = this.enemyPlans[u.id] ?? [];
             // ブレス・火球・業火は着弾予定の範囲と、発動するティックも見せる(読んでよければ避けられる・止められる)
@@ -1112,7 +1120,7 @@ export class Controller {
           return true;
       }
     };
-    const adjacentFoe = st.units.some((f) => f.side === 'enemy' && !f.down && adjacent(st.map, u, f));
+    const adjacentFoe = st.units.some((f) => f.side === 'enemy' && !f.down && !isNeutral(f) && adjacent(st.map, u, f));
     const preferred: Mode = adjacentFoe || this.foesInSight() ? 'attack' : 'group';
     if (usable(preferred)) return preferred;
     const last = this.lastMode.get(u.id);
@@ -1166,7 +1174,7 @@ export class Controller {
     const visible = this.settings.noFog ? null : sideVisibleMask(st.map, st.units, 'party');
     const at = st.units.filter((u) => samePos(u, tile) && (u.side === 'party' || !visible || visible[tile.y * st.map.w + tile.x]));
     const ally = at.find((u) => u.side === 'party');
-    const foe = at.find((u) => u.side === 'enemy' && !u.down);
+    const foe = at.find((u) => u.side === 'enemy' && !u.down && !isNeutral(u));
     const u = this.selected ? this.unit(this.selected) : undefined;
 
     // クイック移動: 行き先をタップすると、選んでいるキャラを先頭に全員が自動で向かう

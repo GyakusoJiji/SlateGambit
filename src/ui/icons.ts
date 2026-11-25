@@ -27,6 +27,11 @@ const ICONS: Record<string, Icon> = {
     palette: { W: '#ecece4', K: DARK, F: SKIN, Y: '#e8c040' },
     rows: ['..WWWW..', '.WFFFFW.', '.WKFFKW.', '..FFFF..', '.WWYWWW.', 'WWYYYWWW', '.WWYWWW.', '.WWWWWW.'],
   },
+  // 地上の住人(茶色の服と帽子。化けた盗人も同じ見かけ)
+  resident: {
+    palette: { H: '#8a6a3a', K: DARK, F: SKIN, C: '#a08060', A: '#6a5038', L: BOOT },
+    rows: ['..HHHH..', '.HHHHHH.', '..KFFK..', '..FFFF..', '.CCCCCC.', 'CCACCACC', '.CCCCCC.', '.LL..LL.'],
+  },
   // 野盗: 頭巾と覆面、腰にゴールドの袋
   bandit: {
     palette: { H: '#4a3a5a', K: DARK, F: SKIN, M: '#2a2030', Y: '#e8c040', L: BOOT },

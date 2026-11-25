@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { changeFloor, findTile } from '../src/core/floors';
-import { BACK_LINE, FLOORS, GEN, generateFloor, generateGame, MAP_H, MAP_W, TOWN_BANDITS } from '../src/core/generate';
+import { BACK_LINE, FLOORS, GEN, generateFloor, generateGame, MAP_H, MAP_W, TOWN_RESIDENTS } from '../src/core/generate';
 import { DIR_LIST, isWalkable, step, tileAt } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
 import { quickMovePlans } from '../src/core/quickmove';
@@ -94,10 +94,10 @@ describe('マップ生成', () => {
   it('新しいゲームは地上の町の入口から始まり、目的は秘宝', () => {
     const t = generateGame(7, 'normal');
     expect(t.floor).toBe(0);
-    // 地上の敵は野盗だけ(難易度ごとの数)
-    const foes = t.units.filter((u) => u.side === 'enemy');
-    expect(foes.length).toBe(TOWN_BANDITS.normal);
-    expect(foes.every((u) => u.defId === 'bandit')).toBe(true);
+    // 地上にはモンスターはおらず、住人(一部は化けた盗人)だけ
+    const others = t.units.filter((u) => u.side === 'enemy');
+    expect(others.length).toBe(TOWN_RESIDENTS.normal);
+    expect(others.every((u) => u.defId === 'resident')).toBe(true);
     expect(findTile(t.map, '>')).not.toBeNull();
     expect(t.objective).toEqual({ kind: 'treasure', at: null, floor: FLOORS });
   });

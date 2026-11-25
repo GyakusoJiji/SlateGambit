@@ -1,6 +1,6 @@
 // 同時解決エンジン。全ユニットの予約を 1 ティックずつ同時に処理する。
-import { ITEMS, SPELLS, unitDef } from '../data/units';
-import { applyStairs, applyWander, currentFloor, openChests, treasureHere } from './floors';
+import { ITEMS, MONSTERS, SPELLS, unitDef } from '../data/units';
+import { applyIntrusion, applyStairs, applyWander, currentFloor, openChests, treasureHere } from './floors';
 import { gainExp, spellBonus, spellMp, spellRange, stats } from './stats';
 import { RULES, expandPlan, restTicks, type Step } from './actions';
 import { hasLos, linePoints } from './los';
@@ -23,7 +23,8 @@ import {
   type Unit,
   type UnitSnapshot,
 } from './types';
-import { unitSees, updateExplored, visibleFoes } from './vision';
+import { hostile, isNeutral, unitSees, updateExplored, visibleFoes } from './vision';
+import { applyRumors } from './rumors';
 
 const key = (p: Pos) => `${p.x},${p.y}`;
 
@@ -128,7 +129,7 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
       if (m.status !== 'ok' || s?.k !== 'move' || !s.action.stop) continue;
       const u = m.unit;
       const newFoe = units.some(
-        (f) => f.side !== u.side && !f.down && !seenAtStart[u.side].has(f.id) && unitSees(map, u, f),
+        (f) => hostile(u, f) && !f.down && !seenAtStart[u.side].has(f.id) && unitSees(map, u, f),
       );
       if (newFoe) {
         const list = steps.get(u.id)!;
@@ -293,11 +294,13 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     const inCombat = seenAtStart.party.size > 0 || visibleFoes(state.map, state.units, 'party').size > 0;
     if (!inCombat) applyWander(state, rng, share, events);
   }
+  applyIntrusion(state, rng, events);
   applySpring(state, rng, events, frames);
   applyWakeUp(state, rng, events, frames);
   applyExp(state, foesAtStart, events, frames);
   applyLoot(state, foesAtStart, events);
   applyBanditEscape(state, events);
+  applyRumors(state, events);
   updateAiMemory(state, attackedBy, events);
   applyAlarm(state, rng, events, new Set(events.filter((e) => e.type === 'stun').map((e) => e.id)), enemiesSawParty);
   // 開いた扉の時間経過(閉まった扉は最後のフレームの地形にも反映する)
@@ -837,6 +840,13 @@ function scatterTile(ctx: StrikeCtx, aim: Pos): Pos {
  * 盗んだ野盗は次のターンから逃げる(ai.ts)
  */
 function steal(ctx: StrikeCtx, u: Unit, target: Unit): void {
+  if (u.ai?.disguise && target.side === 'party') {
+    // 住人に化けていた盗人が正体を現す(以後は野盗)
+    u.ai.disguise = false;
+    u.defId = 'bandit';
+    u.name = MONSTERS.bandit.name;
+    ctx.events.push({ tick: ctx.tick, type: 'unmask', id: u.id });
+  }
   if (u.defId !== 'bandit' || !u.ai || u.ai.stolen || target.side !== 'party') return;
   const gold = Math.min(ctx.state.gold ?? 0, RULES.stealBase + RULES.stealPerFloor * currentFloor(ctx.state));
   if (gold <= 0) return;
@@ -867,7 +877,7 @@ function applyBanditEscape(state: GameState, events: GameEvent[]): void {
 function nextTarget(ctx: StrikeCtx, u: Unit, range: number): Unit | undefined {
   const reach = (f: Unit) => (range <= 1 ? adjacent(ctx.map, u, f) : dist2(u, f) <= range * range && hasLos(ctx.map, u, f));
   return ctx.units
-    .filter((f) => f.side !== u.side && !f.down && reach(f))
+    .filter((f) => hostile(u, f) && !f.down && reach(f))
     .sort((a, b) => dist2(u, a) - dist2(u, b) || a.id.localeCompare(b.id))[0];
 }
 
@@ -891,6 +901,8 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>, event
   const treasureTaken = state.objective?.kind === 'treasure' && !!state.objective.holder;
   for (const e of units) {
     if (e.side !== 'enemy' || e.down || !e.ai) continue;
+    // 本物の住人は戦わないので、警戒もしない(化けた盗人は相手を覚えて近づく)
+    if (isNeutral(e) && !e.ai.disguise) continue;
     // 眠っている敵: 近く(射線が通る wakeRange 以内)で姿を見る・攻撃される・宝を拾われると起きる。仲間に呼ばれても起きない
     if (e.ai.asleep) {
       const near = units
@@ -936,9 +948,9 @@ function updateAiMemory(state: GameState, attackedBy: Map<string, string>, event
 
   // 仲間を呼ぶ: パーティを見た・攻撃された敵の近くにいる、まだ気付いていない敵も同じ場所へ向かう
   if (RULES.aiCallRange <= 0) return;
-  const callers = units.filter((e) => e.side === 'enemy' && !e.down && e.ai?.alerted && e.ai.lastSeen);
+  const callers = units.filter((e) => e.side === 'enemy' && !e.down && !isNeutral(e) && e.ai?.alerted && e.ai.lastSeen);
   for (const e of units) {
-    if (e.side !== 'enemy' || e.down || !e.ai || e.ai.alerted || e.ai.asleep) continue;
+    if (e.side !== 'enemy' || e.down || !e.ai || e.ai.alerted || e.ai.asleep || isNeutral(e)) continue;
     const caller = callers.find((c) => c !== e && manhattan(c, e) <= RULES.aiCallRange);
     if (!caller) continue;
     e.ai.alerted = true;

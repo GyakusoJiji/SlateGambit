@@ -127,9 +127,9 @@ export function generateGame(seed: number, difficulty: Difficulty = 'normal', st
 /** 1 つの階を作る(階 0 は地上の城) */
 export function generateFloor(seed: number, difficulty: Difficulty, floor: number): GeneratedFloor {
   if (floor <= 0) {
-    // 地上: 城の中。up は城の入口(新しいゲームの開始位置)。モンスターはおらず、野盗が少しうろつく
+    // 地上: 城の中。up は城の入口(新しいゲームの開始位置)。モンスターはおらず、住人(一部は化けた盗人)がうろつく
     const t = generateTown(seed, MAP_W, MAP_H);
-    return { map: t.map, enemies: townBandits(seed, difficulty, t.map, t.start), up: t.start, down: t.down, treasureAt: null };
+    return { map: t.map, enemies: townResidents(seed, difficulty, t.map, t.start), up: t.start, down: t.down, treasureAt: null };
   }
   const rng = new Rng(floor === 1 ? hashSeed('map', seed) : hashSeed('map', seed, floor));
   const { tiles, rooms } = carveRooms(rng);
@@ -168,20 +168,25 @@ export function generateFloor(seed: number, difficulty: Difficulty, floor: numbe
   return { map, enemies, up, down, treasureAt };
 }
 
-/** 地上の野盗の数(難易度ごと) */
-export const TOWN_BANDITS: Record<Difficulty, number> = { easy: 1, normal: 2, hard: 3 };
+/** 地上の住人の数(難易度ごと)と、そのうち盗人が化けている確率 */
+export const TOWN_RESIDENTS: Record<Difficulty, number> = { easy: 5, normal: 6, hard: 7 };
+export const DISGUISE_RATE = 0.2;
 
-/** 地上の野盗: 城の入口から歩いて 15 マス以上離れた床に、難易度ごとの数だけ置く。ID は 0n1, 0n2… */
-function townBandits(seed: number, difficulty: Difficulty, map: FloorMap, start: Pos): Unit[] {
-  const rng = new Rng(hashSeed('bandit', seed));
+/**
+ * 地上の住人: 城の入口から歩いて 5 マス以上離れた床に、難易度ごとの数だけ置く。ID は 0r1, 0r2…
+ * それぞれ DISGUISE_RATE の確率で、住人に化けた盗人にする(見かけ・ID では見分けられない)
+ */
+function townResidents(seed: number, difficulty: Difficulty, map: FloorMap, start: Pos): Unit[] {
+  const rng = new Rng(hashSeed('resident', seed));
   const dist = bfs(map, start);
   const cells: Pos[] = [];
-  for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) if (map.tiles[y][x] === '.' && dist[y * map.w + x] >= 15) cells.push({ x, y });
-  const m = MONSTERS.bandit;
+  for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) if (map.tiles[y][x] === '.' && dist[y * map.w + x] >= 5) cells.push({ x, y });
+  const m = MONSTERS.resident;
   const out: Unit[] = [];
-  for (let i = 1; i <= TOWN_BANDITS[difficulty] && cells.length > 0; i++) {
+  for (let i = 1; i <= TOWN_RESIDENTS[difficulty] && cells.length > 0; i++) {
     const p = cells.splice(rng.int(0, cells.length - 1), 1)[0];
-    out.push({ id: `0n${i}`, side: 'enemy', defId: 'bandit', name: m.name, x: p.x, y: p.y, hp: m.maxHp, mp: m.maxMp, down: false, ai: { mode: 'idle' } });
+    const disguise = rng.next() < DISGUISE_RATE;
+    out.push({ id: `0r${i}`, side: 'enemy', defId: 'resident', name: m.name, x: p.x, y: p.y, hp: m.maxHp, mp: m.maxMp, down: false, ai: { mode: 'idle', ...(disguise ? { disguise } : {}) } });
   }
   return out;
 }

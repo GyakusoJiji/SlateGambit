@@ -161,7 +161,9 @@ describe('銀行と教会', () => {
     s.gold = 100;
     deposit(s, 80);
     const w = s.units[0];
-    const n = s.units.find((u) => u.defId === 'bandit')!;
+    // 住人の 1 人を化けた盗人にする
+    const n = s.units.find((u) => u.defId === 'resident')!;
+    n.ai = { mode: 'idle', disguise: true };
     n.x = w.x + 1;
     n.y = w.y;
     s.units = s.units.filter((u) => u.side === 'party' || u === n);

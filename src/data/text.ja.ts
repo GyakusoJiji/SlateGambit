@@ -137,6 +137,8 @@ export const T = {
     chest: (a: string, gold: number) => `${a} が宝箱を開けた(+${gold} G)`,
     loot: (gold: number) => `倒した敵から +${gold} G を手に入れた`,
     blessing: (a: string) => `${a} は教会の加護で持ち直した!`,
+    unmask: (a: string) => `${a} は住人に化けた盗人だった!`,
+    intrude: (n: number) => `城の中に魔物が ${n} 体入り込んだ!`,
     steal: (a: string, gold: number) => `${a} に ${gold} G 盗まれた! 逃げられる前に倒せば取り返せる`,
     recover: (a: string, gold: number) => `${a} から盗まれた ${gold} G を取り返した`,
     escape: (a: string, gold: number) => `${a} に逃げ切られた(${gold} G は戻らない)`,
@@ -279,6 +281,15 @@ export const T = {
     title: '難易度を選んでください',
     encounters: '固定遭遇(同じ部屋で作戦を試す。Lv 3・保存しない)',
     note: '地下 5 階まであるダンジョンは毎回ランダムに作られます。階段を行き先に選んで誰か 1 人が着くと、全員で別の階へ移ります(通り過ぎるだけなら移りません)。宝箱でゴールドを集め、敵を倒して経験値をためるとレベルが上がります',
+  },
+
+  /** 住人の噂(本当のことも嘘もある) */
+  rumor: {
+    stairs: (a: string, f: number, dir: string) => `${a}「地下 ${f} 階の下り階段は、上り階段から${dir}のほうにあるらしいよ」`,
+    monster: (a: string, f: number, m: string) => `${a}「地下 ${f} 階で${m}を見たって人がいたよ」`,
+    chests: (a: string, f: number, n: number) => `${a}「地下 ${f} 階には宝箱が ${n} 個あるって話だ」`,
+    thief: (a: string, yes: boolean) => (yes ? `${a}「この城には、住人のふりをした盗人がいるらしい。気をつけな」` : `${a}「この城は平和なもんさ。盗人なんていないよ」`),
+    dragon: (a: string, asleep: boolean) => (asleep ? `${a}「地下の一番奥で、竜が秘宝を抱いて眠っているそうだ」` : `${a}「地下の竜なら、もう退治されたって聞いたよ」`),
   },
 
   /** 持ち物の欄 */

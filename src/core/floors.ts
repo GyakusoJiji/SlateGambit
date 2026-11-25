@@ -118,8 +118,8 @@ export function openChests(state: GameState, events: GameEvent[], tick: number):
  * 確率は、その階の休憩に使った割合(休憩のティック数 ÷ 全ティック)に比例する
  */
 export function applyWander(state: GameState, rng: Rng, restShare: number, events: GameEvent[]): void {
-  // 固定遭遇では起きない(部屋の中だけで比べるため)
-  if (RULES.wanderChance <= 0 || restShare <= 0 || state.scenario) return;
+  // 固定遭遇・地上では起きない(地上の魔物は applyIntrusion)
+  if (RULES.wanderChance <= 0 || restShare <= 0 || state.scenario || currentFloor(state) <= 0) return;
   if (!events.some((e) => e.type === 'rest' && (e.hp > 0 || e.mp > 0))) return;
   const k = DIFFICULTY[state.difficulty ?? 'normal'].wander;
   if (rng.next() >= RULES.wanderChance * k * restShare) return;
@@ -128,11 +128,24 @@ export function applyWander(state: GameState, rng: Rng, restShare: number, event
 }
 
 /**
+ * 地上(城の中)に、ごくまれに魔物が入り込む(ターンごとに RULES.intrudeChance)。
+ * 地下 1 階の種類の魔物が、点数 RULES.intrudeBudget 分、パーティから離れた場所に現れて向かってくる
+ */
+export function applyIntrusion(state: GameState, rng: Rng, events: GameEvent[]): void {
+  if (currentFloor(state) > 0 || state.scenario || RULES.intrudeChance <= 0) return;
+  if (rng.next() >= RULES.intrudeChance) return;
+  const count = spawnFoes(state, rng, RULES.intrudeBudget, `i${state.turn}_`, 12, 1);
+  if (count > 0) events.push({ tick: TICKS_PER_TURN, type: 'intrude', count });
+}
+
+/**
  * 遠く(どの味方からもマンハッタン距離 minDistance 以上。無ければなるべく遠く)の 1 か所の周りに、
  * 点数 budget 分の敵を出す。敵はすでにパーティの居場所へ向かっている(警戒状態)。出した数を返す
  */
-export function spawnFoes(state: GameState, rng: Rng, budget: number, idTag: string, minDistance: number): number {
+export function spawnFoes(state: GameState, rng: Rng, budget: number, idTag: string, minDistance: number, kindsFloor?: number): number {
   const floor = currentFloor(state);
+  /** 出す種類を選ぶ階(地上に入り込む魔物は地下 1 階の種類) */
+  const from = kindsFloor ?? floor;
   const party = state.units.filter((u) => u.side === 'party' && !u.down);
   if (party.length === 0) return 0;
   const { map } = state;
@@ -151,7 +164,7 @@ export function spawnFoes(state: GameState, rng: Rng, budget: number, idTag: str
     far = cells.filter((c) => c.d >= max - 2).map((c) => c.p);
   }
   if (far.length === 0) return 0;
-  const kinds = Object.keys(MONSTER_GEN).filter((t) => floor >= MONSTER_GEN[t].from && floor <= (MONSTER_GEN[t].to ?? 99) && t !== 'ogre');
+  const kinds = Object.keys(MONSTER_GEN).filter((t) => from >= MONSTER_GEN[t].from && from <= (MONSTER_GEN[t].to ?? 99) && t !== 'ogre' && t !== 'bandit');
   const origin = far[rng.int(0, far.length - 1)];
   const target = [...party].sort((a, b) => manhattan(a, origin) - manhattan(b, origin))[0];
   let count = 0;

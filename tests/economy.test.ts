@@ -79,7 +79,7 @@ describe('敵のゴールド', () => {
     expect(r.events.some((e) => e.type === 'loot' && e.gold === MONSTERS.goblin.gold)).toBe(true);
   });
 
-  it('すべてのモンスターにゴールドが設定されている', () => {
-    for (const m of Object.values(MONSTERS)) expect(m.gold, m.id).toBeGreaterThan(0);
+  it('すべてのモンスターにゴールドが設定されている(住人は戦わないので除く)', () => {
+    for (const m of Object.values(MONSTERS)) if (m.id !== 'resident') expect(m.gold, m.id).toBeGreaterThan(0);
   });
 });

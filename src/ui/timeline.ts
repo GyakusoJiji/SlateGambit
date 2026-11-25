@@ -6,6 +6,7 @@ import { chargeRoute, inReach } from '../core/resolve';
 import { spellRange, stats } from '../core/stats';
 import { AP_PER_TURN, type Action, type GameState, type Pos, type Unit } from '../core/types';
 import { SPELLS } from '../data/units';
+import { hostile } from '../core/vision';
 import type { Mode } from './panel';
 
 /**
@@ -123,8 +124,8 @@ export function reachInfo(st: GameState, u: Unit, from: Pos, mode: Mode): { tile
   }
   const others = st.units.filter((o) => o.id !== u.id);
   let targets: Unit[] = [];
-  if (mode === 'attack' || mode === 'power') targets = others.filter((o) => o.side !== u.side && !o.down && inReach(map, u, from, o, others));
-  else if (mode === 'trip') targets = others.filter((o) => o.side !== u.side && !o.down && ok(o));
+  if (mode === 'attack' || mode === 'power') targets = others.filter((o) => hostile(u, o) && !o.down && inReach(map, u, from, o, others));
+  else if (mode === 'trip') targets = others.filter((o) => hostile(u, o) && !o.down && ok(o));
   else if (mode === 'heal') targets = [u, ...others].filter((o) => o.side === u.side && !o.down && ok(o));
   else if (mode === 'potion') targets = [u, ...others].filter((o) => o.side === u.side && !o.down && ok(o));
   else if (near) targets = others.filter((o) => o.side === u.side && o.down && ok(o));

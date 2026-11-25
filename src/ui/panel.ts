@@ -1,8 +1,8 @@
 // 操作パネルの HTML 生成。イベントは controller 側で data-* 属性を使って受ける。
 import { RULES, apLeft, carryingAfter, planCost, spellCost } from '../core/actions';
-import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type GameState, type ItemId, type PotionId, type SpellId, type StrikeKind, type Unit } from '../core/types';
+import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameEvent, type GameState, type ItemId, type PotionId, type Rumor, type SpellId, type StrikeKind, type Unit } from '../core/types';
 import { T } from '../data/text.ja';
-import { ITEMS, SPELLS } from '../data/units';
+import { ITEMS, MONSTERS, SPELLS } from '../data/units';
 import { expProgress, spellMp, stats } from '../core/stats';
 import { iconUrl } from './icons';
 import { tickCells } from './timeline';
@@ -229,6 +229,23 @@ export function levelUpNote(events: GameEvent[], nameOf: (id: string) => string,
   return [...byLevel].map(([lv, ids]) => T.log.levelup(ids.map(nameOf).join('・'), lv)).join(' ');
 }
 
+/** 住人の噂の 1 行(本当か嘘かは書かない) */
+export function rumorText(who: string, r: Rumor): string {
+  const dir = { N: '北', S: '南', E: '東', W: '西' } as const;
+  switch (r.kind) {
+    case 'stairs':
+      return T.rumor.stairs(who, r.floor, dir[r.dir]);
+    case 'monster':
+      return T.rumor.monster(who, r.floor, MONSTERS[r.monster]?.name ?? r.monster);
+    case 'chests':
+      return T.rumor.chests(who, r.floor, r.n);
+    case 'thief':
+      return T.rumor.thief(who, r.claim);
+    case 'dragon':
+      return T.rumor.dragon(who, r.asleep);
+  }
+}
+
 /** 範囲魔法の種類 */
 const AREA_KINDS = new Set<StrikeKind>(['fireball', 'smite', 'breath', 'hellfire']);
 
@@ -314,6 +331,15 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'blessing':
         lines.push(T.log.blessing(nameOf(e.id)));
+        break;
+      case 'unmask':
+        lines.push(T.log.unmask(nameOf(e.id)));
+        break;
+      case 'intrude':
+        lines.push(T.log.intrude(e.count));
+        break;
+      case 'rumor':
+        lines.push(rumorText(nameOf(e.id), e.rumor));
         break;
       case 'steal':
         lines.push(T.log.steal(nameOf(e.id), e.gold));

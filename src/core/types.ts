@@ -48,6 +48,10 @@ export interface AiMemory {
   stolen?: number;
   /** 野盗: 盗んだ後、パーティに見られずに過ごしたターン数 */
   unseen?: number;
+  /** 地上の住人に化けた盗人(見かけは住人と同じ。攻撃が当たった時点で野盗の正体を現す) */
+  disguise?: boolean;
+  /** 住人が最後に噂を話したターン */
+  talked?: number;
 }
 
 export interface Unit {
@@ -211,6 +215,12 @@ export type GameEvent =
   | { tick: number; type: 'dry'; at: Pos }
   /** 休憩で食料を使った(food=false なら、食料が無くて休憩しても回復しなかった) */
   | { tick: number; type: 'ration'; food: boolean }
+  /** 地上の住人(id)が噂を話した */
+  | { tick: number; type: 'rumor'; id: string; rumor: Rumor }
+  /** 住人に化けていた盗人(id)が正体を現した */
+  | { tick: number; type: 'unmask'; id: string }
+  /** 地上(城の中)に魔物が入り込んだ */
+  | { tick: number; type: 'intrude'; count: number }
   /** 教会の加護で、気絶するはずだった id がその場で持ち直した */
   | { tick: number; type: 'blessing'; id: string }
   /** 倒した敵からゴールドを得た */
@@ -234,6 +244,14 @@ export type GameEvent =
   | { tick: number; type: 'levelup'; id: string; level: number }
   /** 階段で別の階へ移った(id=階段に入った味方) */
   | { tick: number; type: 'stairs'; id: string; from: number; to: number };
+
+/** 住人の噂。truth は本当の話か(画面には出さない。テスト・確認用) */
+export type Rumor =
+  | { kind: 'stairs'; floor: number; dir: Dir; truth: boolean }
+  | { kind: 'monster'; floor: number; monster: string; truth: boolean }
+  | { kind: 'chests'; floor: number; n: number; truth: boolean }
+  | { kind: 'thief'; claim: boolean; truth: boolean }
+  | { kind: 'dragon'; asleep: boolean; truth: boolean };
 
 export interface UnitSnapshot {
   id: string;

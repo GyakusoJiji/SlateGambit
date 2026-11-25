@@ -41,6 +41,9 @@ function planOne(state: GameState, e: Unit): Action[] {
   const targets = units.filter((p) => p.side === 'party' && !p.down && unitSees(map, e, p));
   const plan: Action[] = [];
 
+  // 住人: うろうろ歩く。化けた盗人は、味方が見えれば普通の敵のように近づいて殴る(当たると正体を現して盗む)
+  if (e.defId === 'resident' && !(e.ai?.disguise && targets.length > 0)) return wander(state, e, rng);
+
   // 眠っている間は何もしない
   if (e.ai?.asleep) {
     while (apLeft(plan) > 0) plan.push({ type: 'wait' });
@@ -249,6 +252,26 @@ function retreatPath(state: GameState, e: Unit, foes: Unit[], blocked: (p: Pos) 
     k = link.from;
   }
   return dirs;
+}
+
+/** 住人の散歩: 0〜3 マス、空いている床をでたらめに歩き、残りは待つ */
+function wander(state: GameState, e: Unit, rng: Rng): Action[] {
+  const plan: Action[] = [];
+  const taken = new Set(state.units.filter((u) => u !== e && !u.down).map((u) => `${u.x},${u.y}`));
+  let p: Pos = { x: e.x, y: e.y };
+  const steps = rng.int(0, 3);
+  for (let i = 0; i < steps; i++) {
+    const opts = DIR_LIST.filter((d) => {
+      const n = step(p, d);
+      return state.map.tiles[n.y]?.[n.x] === '.' && !taken.has(`${n.x},${n.y}`);
+    });
+    if (opts.length === 0) break;
+    const d = opts[rng.int(0, opts.length - 1)];
+    plan.push({ type: 'move', dir: d });
+    p = step(p, d);
+  }
+  while (apLeft(plan) > 0) plan.push({ type: 'wait' });
+  return plan;
 }
 
 function patrolGoal(e: Unit): Pos | null {
