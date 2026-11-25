@@ -26,13 +26,13 @@ const saved = loadGame();
 const scenario = params.get('scenario');
 // ?minigame=ID(&stage=N)でミニゲームのステージから始める(持ち越しなし。毎回最初から)
 const minigame = params.get('minigame');
-// ?tutorial=1 でチュートリアルの練習戦から始める
+// ?tutorial=1(または ?tutorial=レッスンID)でチュートリアルのレッスンから始める
 const tutorial = params.get('tutorial');
 const sameGame = saved && (!params.get('seed') || (saved.seed === seed && (saved.difficulty ?? 'normal') === diff));
 if (scenario && controller.startEncounter(scenario)) {
   // 固定遭遇を始めた
-} else if (tutorial) {
-  controller.startTutorial();
+} else if (tutorial && controller.startTutorial(tutorial === '1' ? undefined : tutorial)) {
+  // レッスンを始めた
 } else if (minigame && controller.startMinigame(minigame, Number(params.get('stage') ?? 0) || 0)) {
   // ミニゲームを始めた
 } else if (saved && sameGame) {

@@ -6,7 +6,7 @@ import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
-import { createEncounter, createFromDef, encounterDef, ENCOUNTERS, type Carry } from '../core/encounters';
+import { createEncounter, createFromDef, encounterDef, type Carry } from '../core/encounters';
 import { carryOver, MINIGAMES, minigameDef, rankOf, stageScenario, type MinigameDef } from '../core/minigames';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
@@ -39,7 +39,7 @@ import { reachInfo, tickPositions, tickCells } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
 import { loadGame, saveGame } from './save';
-import { coachStep, TUTORIAL, TUTORIAL_ID, TUTORIAL_PAGES, TUTORIAL_STEPS } from '../core/tutorial';
+import { LESSONS, lessonDef, TUTORIAL_ID, TUTORIAL_PAGES } from '../core/tutorial';
 
 interface Settings {
   hints: boolean;
@@ -331,15 +331,13 @@ export class Controller {
     </div>`;
   }
 
-  /** ミニゲームの画面: 短い連戦の一覧と、単発の固定遭遇(練習) */
+  /** ミニゲームの画面: 短い連戦の一覧 */
   private showMinigames(): void {
     const mg = (m: MinigameDef) =>
       `<button class="act diff" data-ov="mg-start" data-id="${m.id}"><b>${m.title}</b><small>${T.menu.stages(m.stages.length, m.minutes)}</small><small>${m.desc}</small></button>`;
     this.el.overlay.innerHTML = `<div class="sheet start">
       <h2>${T.menu.minigames}</h2>
       ${MINIGAMES.map(mg).join('')}
-      <h3>${T.menu.practice}</h3>
-      ${ENCOUNTERS.map((e) => `<button class="act diff" data-ov="encounter" data-id="${e.id}"><b>${e.title}</b><small>${e.desc}</small></button>`).join('')}
       <button class="act" data-ov="menu">${T.menu.back}</button>
     </div>`;
   }
@@ -354,20 +352,35 @@ export class Controller {
       <p class="pager">${T.tutorial.pager(i + 1, n)}</p>
       <h2>${p.title}</h2>
       <ul>${p.lines.map((l) => `<li>${l}</li>`).join('')}</ul>
-      ${i + 1 < n ? `<button class="act primary" data-ov="tut-go" data-page="${i + 1}">${T.tutorial.next}</button>` : `<button class="act primary" data-ov="tut-start">${T.tutorial.start}</button>`}
+      ${i + 1 < n ? `<button class="act primary" data-ov="tut-go" data-page="${i + 1}">${T.tutorial.next}</button>` : `<button class="act primary" data-ov="tut-lessons">${T.tutorial.start}</button>`}
       ${i > 0 ? `<button class="act" data-ov="tut-go" data-page="${i - 1}">${T.tutorial.prev}</button>` : ''}
       <button class="act" data-ov="menu">${T.tutorial.toMenu}</button>
     </div>`;
   }
 
-  /** チュートリアルの練習戦を始める(自動保存しない) */
-  startTutorial(): void {
+  /** レッスンの一覧(操作を 1 つずつ覚える練習戦) */
+  private showLessons(): void {
+    this.el.overlay.hidden = false;
+    this.el.overlay.innerHTML = `<div class="sheet start">
+      <h2>${T.tutorial.lessons}</h2>
+      <p class="note">${T.tutorial.lessonsNote}</p>
+      ${LESSONS.map((l) => `<button class="act diff" data-ov="tut-start" data-id="${l.id}"><b>${l.title}</b><small>${T.tutorial.learn(l.learn)}</small><small>${l.desc}</small></button>`).join('')}
+      <button class="act" data-ov="tutorial">${T.tutorial.toGuide}</button>
+      <button class="act" data-ov="menu">${T.tutorial.toMenu}</button>
+    </div>`;
+  }
+
+  /** チュートリアルのレッスンを始める(自動保存しない)。見つからなければ false */
+  startTutorial(id: string = TUTORIAL_ID): boolean {
+    const lesson = lessonDef(id);
+    if (!lesson) return false;
     this.mg = null;
-    const st = createFromDef(TUTORIAL, TUTORIAL_ID, 1);
+    const st = createFromDef(lesson, lesson.id, 1);
     // 成長の二択(魔法使いの Lv 2)は、初めての人には早いので、あらかじめ選んだ状態で始める
     for (const u of st.units) if (u.defId === 'mage') u.perks = ['fireMp'];
     this.begin(st);
-    this.toast(T.tutorial.intro);
+    this.toast(lesson.intro);
+    return true;
   }
 
   /** 練習戦の間だけ、盤面の上に「次にやること」を出す */
@@ -375,18 +388,22 @@ export class Controller {
     const el = document.querySelector<HTMLElement>('#coach');
     if (!el) return;
     const st = this.state;
-    if (st.scenario !== TUTORIAL_ID || st.status !== 'playing' || this.playback) {
+    const lesson = lessonDef(st.scenario ?? '');
+    if (!lesson || st.status !== 'playing' || this.playback) {
       el.hidden = true;
       return;
     }
     const plans = Object.values(this.plans).flat();
-    const step = coachStep({
+    const party = this.party();
+    const kinds = plans.map((a) => (a.type === 'spell' ? a.spell : a.type === 'charge' ? 'attack' : a.type));
+    const step = lesson.coach({
       turn: st.turn,
-      hasMovePlan: plans.some((a) => a.type === 'move'),
-      hasAttackPlan: plans.some((a) => a.type === 'attack' || a.type === 'charge'),
+      plans: kinds,
       foeInSight: this.foesInSight(),
+      carrying: party.some((u) => !!u.carrying),
+      besideDown: party.some((u) => !u.down && st.units.some((d) => d.side === 'party' && d.down && Math.max(Math.abs(d.x - u.x), Math.abs(d.y - u.y)) <= 1)),
     });
-    el.innerHTML = T.tutorial.coach(step + 1, TUTORIAL_STEPS.length, TUTORIAL_STEPS[step]);
+    el.innerHTML = T.tutorial.coach(step + 1, lesson.steps.length, lesson.steps[Math.min(step, lesson.steps.length - 1)]);
     el.hidden = false;
   }
 
@@ -804,18 +821,22 @@ export class Controller {
     const won = this.state.status === 'won';
     this.el.overlay.hidden = false;
     if (this.mg) return this.showStageResult(won);
-    if (this.state.scenario === TUTORIAL_ID) {
+    const lesson = lessonDef(this.state.scenario ?? '');
+    if (lesson) {
+      const next = LESSONS[LESSONS.indexOf(lesson) + 1];
       this.el.overlay.innerHTML = won
         ? `<div class="sheet result won">
-        <h2>${T.tutorial.doneTitle}</h2>
-        <p>${T.tutorial.doneBody}</p>
-        <button class="act primary" data-ov="campaign">${T.tutorial.toCampaign}</button>
+        <h2>${next ? T.tutorial.lessonDone(lesson.title) : T.tutorial.doneTitle}</h2>
+        <p>${next ? T.tutorial.lessonDoneBody(lesson.learn) : T.tutorial.doneBody}</p>
+        ${next ? `<button class="act primary" data-ov="tut-start" data-id="${next.id}">${T.tutorial.nextLesson(next.title)}</button>` : `<button class="act primary" data-ov="campaign">${T.tutorial.toCampaign}</button>`}
         <button class="act" data-ov="retry">${T.tutorial.retry}</button>
+        <button class="act" data-ov="tut-lessons">${T.tutorial.toLessons}</button>
         <button class="act" data-ov="menu">${T.tutorial.toMenu}</button>
       </div>`
         : `<div class="sheet result lost">
         <h2>${T.tutorial.lost}</h2>
         <button class="act primary" data-ov="retry">${T.tutorial.retry}</button>
+        <button class="act" data-ov="tut-lessons">${T.tutorial.toLessons}</button>
         <button class="act" data-ov="menu">${T.tutorial.toMenu}</button>
       </div>`;
       return;
@@ -1096,9 +1117,10 @@ export class Controller {
     if (b.dataset.ov === 'menu') this.showMenu(this.pendingSeed);
     if (b.dataset.ov === 'tutorial') this.showTutorialGuide(0);
     if (b.dataset.ov === 'tut-go') this.showTutorialGuide(Number(b.dataset.page));
+    if (b.dataset.ov === 'tut-lessons') this.showLessons();
     if (b.dataset.ov === 'tut-start') {
-      this.setUrl({ tutorial: '1' });
-      this.startTutorial();
+      this.setUrl({ tutorial: b.dataset.id! });
+      this.startTutorial(b.dataset.id!);
     }
     if (b.dataset.ov === 'campaign') this.showCampaign();
     if (b.dataset.ov === 'minigames') this.showMinigames();
@@ -1122,8 +1144,8 @@ export class Controller {
     if (b.dataset.ov === 'retry' && this.mg) {
       const { def, index, startCarry, results } = this.mg;
       this.startMinigame(def.id, index, startCarry, results.slice(0, index));
-    } else if (b.dataset.ov === 'retry' && this.state.scenario === TUTORIAL_ID) {
-      this.startTutorial();
+    } else if (b.dataset.ov === 'retry' && lessonDef(this.state.scenario ?? '')) {
+      this.startTutorial(this.state.scenario!);
     } else if (b.dataset.ov === 'encounter' || b.dataset.ov === 'retry') {
       const id = b.dataset.ov === 'retry' ? this.state.scenario! : b.dataset.id!;
       // 再読み込みで同じ固定遭遇から始められるよう、URL に残す
