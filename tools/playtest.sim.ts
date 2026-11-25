@@ -1,6 +1,6 @@
 // 自動対戦によるバランス検証。`npm run playtest` で実行する。
-// 1 戦 = 地下 1 階から潜り、地下 5 階の秘宝を地下 1 階の入口へ持ち帰るまで(または全滅・時間切れ)。
-//   GAMES=回数(既定 100)、MAX_TURNS=1 戦の上限ターン(既定 600)
+// 1 戦 = 地上の町から潜り、地下 5 階の秘宝を地上へ持ち帰るまで(または全滅・時間切れ)。食料が尽きれば地上へ戻って補給する。
+//   GAMES=回数(既定 100)、MAX_TURNS=1 戦の上限ターン(既定 1000)
 //   TRACE=シード DIFF=normal START=1 … 1 戦の経過をターンごとに表示
 //   VARIANTS=all  … 難易度ごとに加えて、途中の階から始める場合
 //   VARIANTS=budget BUDGET="normal.3=20,22 hard.5=30"
@@ -18,17 +18,17 @@ import { visibleFoes } from '../src/core/vision';
 import { CLASSES, MONSTERS, unitDef, type UnitDef } from '../src/data/units';
 import { stats } from '../src/core/stats';
 import { RULES } from '../src/core/actions';
-import { BOT, botPerks, botShop, planParty } from './partyBot';
+import { BOT, botPerks, botTown, planParty } from './partyBot';
 
 declare const process: { env: Record<string, string | undefined> };
 
 const GAMES = Number(process.env.GAMES ?? 100);
 const TRACE = process.env.TRACE;
-const MAX_TURNS = Number(process.env.MAX_TURNS ?? 600);
+const MAX_TURNS = Number(process.env.MAX_TURNS ?? 1000);
 
 /** 比較する調整案。setup で数値を書き換え、終了後に元へ戻す。game は 1 戦の初期状態を作る */
 type Variant = { name: string; setup: () => void; game: (seed: number) => GameState; teardown?: () => void };
-const gen = (d: Difficulty, start = 1) => (seed: number) => generateGame(seed, d, start);
+const gen = (d: Difficulty, start = 0) => (seed: number) => generateGame(seed, d, start);
 const cap = (d: string) => d[0].toUpperCase() + d.slice(1);
 /** BUDGET の指定から、ある階の点数を差し替えた調整案を作る */
 function budgetVariants(spec: string): Variant[] {
@@ -300,7 +300,7 @@ function runBatch(games: number, makeGame: (seed: number) => GameState): Stats {
     while (state.status === 'playing' && state.turn <= MAX_TURNS) {
       const hpBefore = new Map(state.units.map((u) => [u.id, u.hp / stats(u).maxHp]));
       const fight = visibleFoes(state.map, state.units, 'party').size > 0;
-      botShop(state);
+      botTown(state);
       botPerks(state);
       const r = resolveTurn(state, { ...planEnemies(state), ...planParty(state) });
       const lastHit = new Map<string, string>();
@@ -471,11 +471,13 @@ it.runIf(TRACE === undefined)(`調整案の比較(各 ${GAMES} 戦)`, () => {
 });
 
 it.runIf(TRACE !== undefined)('1 戦の経過', () => {
-  let state = generateGame(Number(TRACE), (process.env.DIFF ?? 'normal') as Difficulty, Number(process.env.START ?? 1));
+  let state = generateGame(Number(TRACE), (process.env.DIFF ?? 'normal') as Difficulty, Number(process.env.START ?? 0));
   console.log(state.map.tiles.join('\n'));
   const out: string[] = [];
   while (state.status === 'playing' && state.turn <= MAX_TURNS) {
     const f = state.floor ?? 1;
+    botTown(state);
+    botPerks(state);
     const party = planParty(state);
     const r = resolveTurn(state, { ...planEnemies(state), ...party });
     const pos = state.units.map((u) => `${u.id}${u.down ? 'x' : ''}(${u.x},${u.y})${u.hp}`).join(' ');

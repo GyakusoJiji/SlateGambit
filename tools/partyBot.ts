@@ -2,13 +2,14 @@
 // 敵の計画は見ない(プレイヤーと同じく、見えている敵の現在位置だけで判断する)。
 import { RULES, apLeft, fillPlan } from '../src/core/actions';
 import { hasLos, linePoints } from '../src/core/los';
-import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from '../src/core/map';
+import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step } from '../src/core/map';
 import { findPath, pathAdjacent, pathTo } from '../src/core/path';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from '../src/core/types';
 import { visibleFoes } from '../src/core/vision';
 import { ITEMS, SPELLS } from '../src/data/units';
 import { pendingPerk, spellMp, spellRange, stats } from '../src/core/stats';
 import { currentFloor, treasureHere } from '../src/core/floors';
+import { anyTired, buyItem, clinicCost, FACILITY_TILE, facilityHere, innCost, useClinic, useInn, useStable, type FacilityId } from '../src/core/town';
 import { FLOORS } from '../src/core/generate';
 
 /** 下り階段を見つけていれば、床のこの割合を探索した時点で降りる(宝箱・経験値と、時間の兼ね合い) */
@@ -17,8 +18,10 @@ export const BOT = {
   potionAt: 0.3,
   /** 泉で HP 回復薬をこの数まで買う */
   potionStock: 3,
-  /** 泉で食料をこの数まで買う */
+  /** 道具屋で食料をこの数まで買う */
   foodStock: 8,
+  /** 食料が尽きて、HP がこの割合未満の者がいれば地上へ戻る */
+  returnAt: 0.5,
   /** 成長の二択で選ぶもの */
   perk: 'fireMp',
   descendAt: 0.7,
@@ -29,21 +32,50 @@ export const BOT = {
 const ORDER = ['warrior', 'thief', 'priest', 'mage'];
 
 /**
- * 泉の店: 敵が見えない間に誰かが泉にいれば、食料を BOT.foodStock 個まで、HP 回復薬を BOT.potionStock 個まで買う(状態を直接書き換える)。
+ * 地上の施設を使う(状態を直接書き換える)。敵が見えない間に誰かが施設のマスにいれば、
+ * 療養所で気絶者を復帰させ、宿で全快し(お金が無ければ馬小屋)、道具屋で食料と HP 回復薬を買う。
  * 自動対戦の進行役が、計画を立てる前に呼ぶ
  */
-export function botShop(state: GameState): void {
+export function botTown(state: GameState): void {
   if (visibleFoes(state.map, state.units, 'party').size > 0) return;
-  if (!state.units.some((u) => u.side === 'party' && !u.down && tileAt(state.map, u.x, u.y) === 'H')) return;
-  // 休憩に要る食料を先に買い、残りで HP 回復薬を買う
-  const buy = (k: 'hp' | 'food', upTo: number) => {
-    while ((state.items?.[k] ?? 0) < upTo && (state.gold ?? 0) >= ITEMS[k].price) {
-      state.gold = (state.gold ?? 0) - ITEMS[k].price;
-      state.items = { ...state.items, [k]: (state.items?.[k] ?? 0) + 1 };
-    }
-  };
-  buy('food', BOT.foodStock);
-  buy('hp', BOT.potionStock);
+  const f = facilityHere(state);
+  if (f === 'clinic') for (const u of state.units.filter((x) => x.side === 'party' && x.down)) useClinic(state, u.id);
+  if (f === 'inn') useInn(state);
+  if (f === 'stable') useStable(state);
+  if (f === 'shop') {
+    // 休憩に要る食料を先に買い、残りで HP 回復薬を買う
+    while ((state.items?.food ?? 0) < BOT.foodStock && buyItem(state, 'food'));
+    while ((state.items?.hp ?? 0) < BOT.potionStock && buyItem(state, 'hp'));
+  }
+}
+
+/** 地上で次に向かう施設(用が無ければ null = 下り階段へ) */
+function townErrand(state: GameState): FacilityId | null {
+  const party = state.units.filter((u) => u.side === 'party');
+  const gold = state.gold ?? 0;
+  const downed = party.filter((u) => u.down);
+  if (downed.length > 0 && gold >= Math.min(...downed.map(clinicCost))) return 'clinic';
+  if (anyTired(state)) {
+    if (gold >= innCost(state)) return 'inn';
+    if (party.some((u) => !u.down && u.hp < stats(u).maxHp / 2)) return 'stable';
+  }
+  if ((state.items?.food ?? 0) < BOT.foodStock && gold >= ITEMS.food.price) return 'shop';
+  return null;
+}
+
+/**
+ * ダンジョンで、地上へ戻るべきか: 食料が尽きていて、戻れば直せるとき。
+ * 傷んでいれば(HP が BOT.returnAt 未満の者がいる)、無料の馬小屋でも半分までは戻せるので戻る。
+ * 気絶者を蘇生できないときは、療養所の費用があれば戻る(払えなければ戻っても直せないので進む)
+ */
+function shouldReturn(state: GameState): boolean {
+  if (currentFloor(state) <= 0 || (state.items?.food ?? 0) > 0) return false;
+  const party = state.units.filter((u) => u.side === 'party');
+  const priestU = party.find((u) => u.defId === 'priest' && !u.down);
+  const downed = party.filter((u) => u.down);
+  const stuckDown = downed.length > 0 && !(priestU && priestU.mp >= SPELLS.revive.mp);
+  if (stuckDown && (state.gold ?? 0) >= Math.min(...downed.map(clinicCost))) return true;
+  return party.some((u) => !u.down && u.hp / stats(u).maxHp < BOT.returnAt);
 }
 
 /** 成長の二択: まだ選んでいなければ BOT.perk(無ければ最初の候補)を選ぶ(状態を直接書き換える) */
@@ -353,9 +385,19 @@ function explore(state: GameState, party: Unit[]): Plans {
     candidates = [escapee];
     goalStair = 'S';
   } else if (holder) {
-    // 秘宝を持っていれば、持ち主を先頭に上り階段(地下 1 階では入口)へ
+    // 秘宝を持っていれば、持ち主を先頭に上り階段(地下 1 階では地上への階段)へ
     goal = (p: Pos) => tile(p) === 'S';
     candidates = [holder];
+    goalStair = 'S';
+  } else if (currentFloor(state) === 0) {
+    // 地上: 用のある施設へ寄ってから、下り階段へ(町の地図は分かっているものとする)
+    const errand = townErrand(state);
+    const c = errand ? FACILITY_TILE[errand] : '>';
+    goal = (p: Pos) => tile(p) === c;
+    goalStair = errand ? null : '>';
+  } else if (shouldReturn(state)) {
+    // 食料が尽きて傷んでいれば、地上へ戻る
+    goal = (p: Pos) => tile(p) === 'S';
     goalStair = 'S';
   } else if (treasure && seen(treasure)) {
     goal = (p: Pos) => p.x === treasure.x && p.y === treasure.y;
