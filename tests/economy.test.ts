@@ -49,8 +49,8 @@ describe('食料と休憩', () => {
   });
 });
 
-describe('回復の泉の枯渇', () => {
-  it(`使うたびに ${Math.round(RULES.springDryChance * 100)}% 前後の確率で枯れ、枯れた泉では回復しない`, () => {
+describe('回復の泉と酸の泉', () => {
+  it(`使うたびに ${Math.round(RULES.springDryChance * 100)}% 前後の確率で酸の泉に変わる`, () => {
     let dried = 0;
     const N = 300;
     for (let rng = 1; rng <= N; rng++) {
@@ -64,10 +64,26 @@ describe('回復の泉の枯渇', () => {
     }
     expect(dried / N).toBeGreaterThan(RULES.springDryChance - 0.1);
     expect(dried / N).toBeLessThan(RULES.springDryChance + 0.1);
-    // 枯れた泉に立っても回復しない
-    const s = game([{ ...mk('p1', 'warrior', 1, 1), hp: 5 }], ['#####', '#.h.#', '#####']);
-    const r = resolveTurn(s, { p1: [{ type: 'move', dir: 'E' }] });
-    expect(u(r.state, 'p1').hp).toBe(5);
+  });
+
+  it('酸の泉: 触れた(通り抜けた)者は最大 HP の 20% のダメージ(酸では気絶しない)。同じ確率で回復の泉に戻る', () => {
+    const max = CLASSES.warrior.maxHp;
+    const hit = Math.round(max * RULES.acidRatio);
+    let purified = 0;
+    const N = 300;
+    for (let rng = 1; rng <= N; rng++) {
+      // 酸の泉を通り抜けて反対側へ
+      const s = { ...game([mk('p1', 'warrior', 1, 1)], ['#####', '#.h.#', '#####']), rng };
+      const r = resolveTurn(s, { p1: [{ type: 'move', dir: 'E' }, { type: 'move', dir: 'E' }] });
+      expect(u(r.state, 'p1').hp).toBe(max - hit);
+      if (tileAt(r.state.map, 2, 1) === 'H') purified++;
+    }
+    expect(purified / N).toBeGreaterThan(RULES.springDryChance - 0.1);
+    expect(purified / N).toBeLessThan(RULES.springDryChance + 0.1);
+    // HP が少なくても、酸では気絶せず HP 1 で止まる
+    const low = resolveTurn(game([{ ...mk('p1', 'warrior', 1, 1), hp: 3 }], ['#####', '#.h.#', '#####']), { p1: [{ type: 'move', dir: 'E' }] });
+    expect(u(low.state, 'p1').hp).toBe(1);
+    expect(u(low.state, 'p1').down).toBe(false);
   });
 });
 

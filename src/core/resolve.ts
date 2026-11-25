@@ -298,6 +298,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     if (!inCombat) applyWander(state, rng, share, events);
   }
   applyIntrusion(state, rng, events);
+  // 酸の泉は、このターンの泉の判定(回復の泉が酸に変わる)より先に見る
+  applyAcid(state, rng, events, frames, tiles);
   applySpring(state, rng, events, frames);
   applyWakeUp(state, rng, events, frames);
   applyExp(state, foesAtStart, events, frames);
@@ -528,7 +530,7 @@ function applyWakeUp(state: GameState, rng: Rng, events: GameEvent[], frames: Un
 /**
  * 回復の泉: ターンの終わりに泉のマスにいる味方は、気絶から復帰し、HP と MP が全回復する。
  * 担がれている味方は、担いでいる者が泉にいれば回復する。
- * 誰かが回復した泉は RULES.springDryChance の確率で枯れる('h' になる。地上から潜り直すと戻る)
+ * 誰かが回復した泉は RULES.springDryChance の確率で酸の泉に変わる('h' になる。地上から潜り直すと戻る)
  */
 function applySpring(state: GameState, rng: Rng, events: GameEvent[], frames: UnitSnapshot[][]): void {
   const { map, units } = state;
@@ -555,6 +557,41 @@ function applySpring(state: GameState, rng: Rng, events: GameEvent[], frames: Un
   }
   if (!changed) return;
   frames[frames.length - 1] = snapshot(units, new Set(), new Set());
+}
+
+/**
+ * 酸の泉: このターンのどこかのティックで酸の泉のマスにいた(通り抜けを含む)立っているユニットは、
+ * ターンの終わりに最大 HP の RULES.acidRatio のダメージを受ける(酸では気絶せず、HP 1 で止まる)。
+ * 誰かが触れた酸の泉は、RULES.springDryChance の確率で回復の泉に戻る
+ */
+function applyAcid(state: GameState, rng: Rng, events: GameEvent[], frames: UnitSnapshot[][], tiles: string[][]): void {
+  const touched = new Set<string>();
+  const pools = new Map<string, Pos>();
+  for (let i = 1; i < frames.length; i++) {
+    const rows = tiles[i] ?? state.map.tiles;
+    for (const s of frames[i]) {
+      if (s.down || rows[s.y]?.[s.x] !== 'h') continue;
+      touched.add(s.id);
+      pools.set(key(s), { x: s.x, y: s.y });
+    }
+  }
+  if (touched.size === 0) return;
+  for (const u of state.units) {
+    if (!touched.has(u.id) || u.down) continue;
+    const amount = Math.min(u.hp - 1, Math.max(1, Math.round(stats(u).maxHp * RULES.acidRatio)));
+    if (amount <= 0) continue;
+    u.hp -= amount;
+    events.push({ tick: TICKS_PER_TURN, type: 'acid', id: u.id, amount });
+  }
+  for (const at of pools.values()) {
+    if (state.map.tiles[at.y][at.x] !== 'h' || rng.next() >= RULES.springDryChance) continue;
+    const row = state.map.tiles[at.y];
+    state.map.tiles[at.y] = row.slice(0, at.x) + 'H' + row.slice(at.x + 1);
+    events.push({ tick: TICKS_PER_TURN, type: 'purify', at });
+  }
+  const last = frames[frames.length - 1];
+  for (const s of last) s.hp = state.units.find((u) => u.id === s.id)?.hp ?? s.hp;
+  tiles[tiles.length - 1] = state.map.tiles.slice();
 }
 
 /**

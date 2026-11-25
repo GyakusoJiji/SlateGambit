@@ -11,7 +11,7 @@ export type Side = 'party' | 'enemy';
 
 /**
  * マップのタイル。'#'=壁, '.'=床, '+'=扉(開), 'D'=扉(閉), 'S'=上り階段(地下 1 階では入口), '>'=下り階段,
- * 'H'=回復の泉, 'h'=枯れた泉(地上から潜り直すと戻る), '$'=宝箱, 'c'=開けた宝箱
+ * 'H'=回復の泉, 'h'=酸の泉(回復の泉が変わったもの。触れると傷む。地上から潜り直すと戻る), '$'=宝箱, 'c'=開けた宝箱
  * 閉じた扉は視線を遮るが、通ることはできる(隣に立ったユニットが開けるため)
  */
 export type TileChar = '#' | '.' | '+' | 'D' | 'S' | '>' | 'H' | 'h' | '$' | 'c';
@@ -212,8 +212,12 @@ export type GameEvent =
   | { tick: number; type: 'carry'; id: string; target: string }
   | { tick: number; type: 'drop'; id: string; target: string }
   | { tick: number; type: 'spring'; id: string; revived: boolean }
-  /** 回復の泉が枯れた */
+  /** 回復の泉が酸の泉に変わった */
   | { tick: number; type: 'dry'; at: Pos }
+  /** 酸の泉に触れて、id がダメージを受けた */
+  | { tick: number; type: 'acid'; id: string; amount: number }
+  /** 酸の泉が回復の泉に戻った */
+  | { tick: number; type: 'purify'; at: Pos }
   /** 休憩で食料を使った(food=false なら、食料が無くて休憩しても回復しなかった) */
   | { tick: number; type: 'ration'; food: boolean }
   /** 地上の住人(id)が噂を話した */

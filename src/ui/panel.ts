@@ -354,6 +354,12 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
       case 'dry':
         lines.push(T.log.dry);
         break;
+      case 'acid':
+        lines.push(T.log.acid(nameOf(e.id), e.amount));
+        break;
+      case 'purify':
+        lines.push(T.log.purify);
+        break;
       case 'ration':
         if (!e.food) lines.push(T.log.noFood);
         break;

@@ -173,8 +173,12 @@ export class Playback {
         out.push({ kind: 'text', at: posOf(e.id), text: `-${e.gold}G`, color: '#ff9a3a', rise: 0.6 + k * 0.5, alpha: 1 });
       } else if (e.type === 'recover') {
         out.push({ kind: 'text', at: posOf(e.id), text: `+${e.gold}G`, color: '#ffd23a', rise: 0.9 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'acid') {
+        out.push({ kind: 'text', at: posOf(e.id), text: `-${e.amount}`, color: '#b8f040', rise: 0.3 + k * 0.5, alpha: 1 });
+      } else if (e.type === 'purify') {
+        out.push({ kind: 'text', at: e.at, text: '浄化', color: '#80d8ff', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'dry') {
-        out.push({ kind: 'text', at: e.at, text: '枯れた', color: '#c8b080', rise: 0.3 + k * 0.5, alpha: 1 });
+        out.push({ kind: 'text', at: e.at, text: '酸に!', color: '#b8f040', rise: 0.3 + k * 0.5, alpha: 1 });
       } else if (e.type === 'levelup') {
         out.push({ kind: 'burst', at: posOf(e.id), radius: 0, color: '#fff080', alpha });
         out.push({ kind: 'text', at: posOf(e.id), text: 'Lv UP!', color: '#fff080', rise: 0.5 + k * 0.6, alpha: 1 });

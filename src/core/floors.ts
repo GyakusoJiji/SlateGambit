@@ -38,7 +38,7 @@ export function stairsDest(state: GameState, p: Pos): number | null {
   return t === '>' && cur < FLOORS ? cur + 1 : t === 'S' && cur > 0 ? cur - 1 : null;
 }
 
-/** 枯れた泉('h')を元に戻す(地上から地下 1 階へ降りたとき、すべての階の泉が戻る) */
+/** 酸の泉('h')を回復の泉に戻す(地上から地下 1 階へ降りたとき、すべての階の泉が戻る) */
 function refillSprings(map: GameState['map']): void {
   map.tiles = map.tiles.map((row) => row.replaceAll('h', 'H'));
 }

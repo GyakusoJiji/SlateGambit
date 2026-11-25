@@ -262,19 +262,21 @@ export class Renderer {
       g.textBaseline = 'middle';
       g.fillText(FACILITY_ICON[t], px + z / 2, py + z / 2 + 1);
     } else if (t === 'h') {
-      // 枯れた泉(乾いた窪みとひび)
-      g.fillStyle = '#3a3428';
+      // 酸の泉(毒々しい緑の水たまりと泡)
+      g.fillStyle = '#4a8a1a';
       g.beginPath();
       g.ellipse(px + z / 2, py + z / 2, z * 0.38, z * 0.3, 0, 0, Math.PI * 2);
       g.fill();
-      g.strokeStyle = '#6a5e48';
-      g.lineWidth = 1;
-      g.beginPath();
-      g.moveTo(px + z * 0.3, py + z * 0.45);
-      g.lineTo(px + z * 0.45, py + z * 0.55);
-      g.lineTo(px + z * 0.6, py + z * 0.42);
-      g.lineTo(px + z * 0.7, py + z * 0.55);
-      g.stroke();
+      g.fillStyle = '#b8f040';
+      for (const [bx, by, br] of [
+        [0.38, 0.45, 0.07],
+        [0.58, 0.56, 0.05],
+        [0.62, 0.42, 0.04],
+      ]) {
+        g.beginPath();
+        g.arc(px + z * bx, py + z * by, z * br, 0, Math.PI * 2);
+        g.fill();
+      }
     } else if (t === 'S') {
       // 上り階段(上ほど細い段)
       g.fillStyle = COLORS.stairs;
