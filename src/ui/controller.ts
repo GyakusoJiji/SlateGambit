@@ -9,7 +9,23 @@ import { FLOORS, generateGame } from '../core/generate';
 import { createEncounter, encounterDef, ENCOUNTERS } from '../core/encounters';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
-import { anyTired, buyItem, clinicCost, FACILITY_TILE, facilityHere, innCost, TOWN, useClinic, useInn, useStable, type FacilityId } from '../core/town';
+import {
+  anyTired,
+  buyItem,
+  churchCost,
+  clinicCost,
+  deposit,
+  FACILITY_TILE,
+  facilityHere,
+  innCost,
+  TOWN,
+  useChurch,
+  useClinic,
+  useInn,
+  useStable,
+  withdraw,
+  type FacilityId,
+} from '../core/town';
 import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, PotionId, Pos, TurnResult, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
@@ -637,7 +653,9 @@ export class Controller {
         items[k] = Math.max(0, (items[k] ?? 0) - 1);
       }
     });
-    return inventoryBar(gold, items, holder && (this.names.get(holder) ?? holder));
+    // 加護は、再生中に使われたら(持ち直した出来事があれば)消して出す
+    const blessing = !!st.blessing && !events.some((e) => e.type === 'blessing');
+    return inventoryBar(gold, items, holder && (this.names.get(holder) ?? holder), st.bank ?? 0, blessing);
   }
 
   private panelVersion = 0;
@@ -713,6 +731,23 @@ export class Controller {
       body = `<button class="act primary" data-ov="inn" ${gold < cost || !anyTired(st) ? 'disabled' : ''}>${T.facility.inn.use(cost)}</button>`;
     } else if (f === 'stable') {
       body = `<button class="act primary" data-ov="stable">${T.facility.stable.use(Math.round(TOWN.stableHpRatio * 100))}</button>`;
+    } else if (f === 'bank') {
+      const bank = st.bank ?? 0;
+      const step = TOWN.bankStep;
+      body = `<p>${T.facility.bank.balance(bank)}</p>
+        <div class="row">
+          <button class="act" data-ov="deposit" data-amount="${step}" ${gold <= 0 ? 'disabled' : ''}>${T.facility.bank.deposit(step)}</button>
+          <button class="act" data-ov="deposit" data-amount="all" ${gold <= 0 ? 'disabled' : ''}>${T.facility.bank.depositAll}</button>
+        </div>
+        <div class="row">
+          <button class="act" data-ov="withdraw" data-amount="${step}" ${bank <= 0 ? 'disabled' : ''}>${T.facility.bank.withdraw(step)}</button>
+          <button class="act" data-ov="withdraw" data-amount="all" ${bank <= 0 ? 'disabled' : ''}>${T.facility.bank.withdrawAll}</button>
+        </div>`;
+    } else if (f === 'church') {
+      const cost = churchCost(st);
+      body = st.blessing
+        ? `<p class="note">${T.facility.church.active}</p>`
+        : `<button class="act primary" data-ov="church" ${gold < cost ? 'disabled' : ''}>${T.facility.church.use(cost)}</button>`;
     } else {
       const downed = this.party().filter((u) => u.down);
       body = downed.length
@@ -857,6 +892,11 @@ export class Controller {
     if (b.dataset.ov === 'inn' && fac === 'inn' && useInn(this.state)) this.facilityUsed(T.facility.inn.done);
     if (b.dataset.ov === 'stable' && fac === 'stable') this.facilityUsed(useStable(this.state) ? T.facility.stable.done : T.facility.stable.nothing);
     if (b.dataset.ov === 'clinic' && fac === 'clinic' && useClinic(this.state, b.dataset.id!)) this.facilityUsed(T.facility.clinic.done(this.names.get(b.dataset.id!) ?? ''));
+    if (b.dataset.ov === 'church' && fac === 'church' && useChurch(this.state)) this.facilityUsed(T.facility.church.done);
+    if ((b.dataset.ov === 'deposit' || b.dataset.ov === 'withdraw') && fac === 'bank') {
+      const amount = b.dataset.amount === 'all' ? Infinity : Number(b.dataset.amount);
+      if ((b.dataset.ov === 'deposit' ? deposit : withdraw)(this.state, amount) > 0) this.facilityUsed();
+    }
     if (b.dataset.ov === 'form-up' || b.dataset.ov === 'form-down') {
       const seed = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]')?.value;
       this.moveInFormation(b.dataset.id!, b.dataset.ov === 'form-up' ? -1 : 1);

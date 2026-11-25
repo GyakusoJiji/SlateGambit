@@ -1,11 +1,12 @@
 // 地上の町(迷路・施設)のテスト
 import { describe, expect, it } from 'vitest';
+import { fillPlan } from '../src/core/actions';
 import { changeFloor, findTile } from '../src/core/floors';
 import { generateGame, MAP_H, MAP_W } from '../src/core/generate';
 import { isWalkable, step, DIR_LIST, tileAt } from '../src/core/map';
 import { resolveTurn } from '../src/core/resolve';
 import { stats } from '../src/core/stats';
-import { buyItem, clinicCost, FACILITY_TILE, facilityHere, generateTown, innCost, TOWN, useClinic, useInn, useStable } from '../src/core/town';
+import { buyItem, churchCost, clinicCost, deposit, FACILITY_TILE, facilityHere, generateTown, innCost, TOWN, useChurch, useClinic, useInn, useStable, withdraw } from '../src/core/town';
 import type { GameState, Pos } from '../src/core/types';
 import { ITEMS } from '../src/data/units';
 
@@ -37,8 +38,8 @@ function walk(map: GameState['map'], from: Pos, to: Pos): number {
   return dist.get(`${to.x},${to.y}`) ?? -1;
 }
 
-describe('地上の迷路', () => {
-  it('どのシードでも、入口・下り階段・4 つの施設がすべてあり、全域がつながっている', () => {
+describe('地上の城', () => {
+  it('入口・下り階段・6 つの施設がすべてあり、全域がつながっている', () => {
     for (let seed = 1; seed <= 30; seed++) {
       const t = generateTown(seed, MAP_W, MAP_H);
       const reach = reachable(t.map, t.start);
@@ -50,13 +51,22 @@ describe('地上の迷路', () => {
         const p = t.facilities[id as keyof typeof FACILITY_TILE];
         expect(tileAt(t.map, p.x, p.y)).toBe(c);
       }
-      // 入口と下り階段は、歩いて遠い
-      expect(walk(t.map, t.down, t.start)).toBeGreaterThan(30);
+      // 入口は大広間の下端、下り階段は上端(まっすぐ歩いて行ける)
+      expect(t.start.x).toBe(t.down.x);
+      expect(walk(t.map, t.down, t.start)).toBe(t.start.y - t.down.y);
     }
   });
 
-  it('同じシードからは同じ町ができる', () => {
-    expect(generateTown(9, MAP_W, MAP_H).map.tiles).toEqual(generateTown(9, MAP_W, MAP_H).map.tiles);
+  it('施設の部屋は大広間の左右に 3 つずつあり、閉じた扉で大広間とつながる', () => {
+    const t = generateTown(1, MAP_W, MAP_H);
+    const ps = Object.values(t.facilities);
+    expect(ps.filter((p) => p.x < t.start.x).length).toBe(3);
+    expect(ps.filter((p) => p.x > t.start.x).length).toBe(3);
+    // 扉は 6 つ(各部屋に 1 つ)
+    expect(t.map.tiles.join('').split('D').length - 1).toBe(6);
+    // 左右対称
+    expect(t.facilities.church.y).toBe(t.facilities.bank.y);
+    expect(t.start.x - t.facilities.inn.x).toBe(t.facilities.clinic.x - t.start.x);
   });
 });
 
@@ -132,6 +142,62 @@ describe('施設', () => {
     expect(buyItem(s, 'food')).toBe(true);
     expect(s.items?.food).toBe(food + 1);
     expect(buyItem(s, 'food')).toBe(false);
+  });
+});
+
+describe('銀行と教会', () => {
+  it('銀行: 預けたゴールドは所持金から減り、引き出すと戻る(預金より多くは引き出せない)', () => {
+    const s = generateGame(24, 'normal');
+    s.gold = 120;
+    expect(deposit(s, 50)).toBe(50);
+    expect(deposit(s, Infinity)).toBe(70);
+    expect([s.gold, s.bank]).toEqual([0, 120]);
+    expect(withdraw(s, 200)).toBe(120);
+    expect([s.gold, s.bank]).toEqual([120, 0]);
+  });
+
+  it('預金は野盗に盗まれない', () => {
+    const s = generateGame(25, 'normal');
+    s.gold = 100;
+    deposit(s, 80);
+    const w = s.units[0];
+    const n = s.units.find((u) => u.defId === 'bandit')!;
+    n.x = w.x + 1;
+    n.y = w.y;
+    s.units = s.units.filter((u) => u.side === 'party' || u === n);
+    const r = resolveTurn(s, { [n.id]: [{ type: 'attack', target: w.id }] });
+    // 所持金 20 G のうち、地上で盗まれるのは 10 G(10 + 階 0 × 10)。預金は減らない
+    expect(r.state.gold).toBe(10);
+    expect(r.state.bank).toBe(80);
+  });
+
+  it('教会: 加護を受けると、最初に気絶するはずだった味方が 1 度だけ HP 半分で持ち直す。地上へ戻ると消える', () => {
+    const s = generateGame(26, 'normal', 1);
+    s.gold = churchCost(s);
+    expect(useChurch(s)).toBe(true);
+    expect(useChurch(s)).toBe(false);
+    expect(s.blessing).toBe(true);
+    const w = s.units[0];
+    w.hp = 1;
+    const g = s.units.find((u) => u.side === 'enemy')!;
+    g.x = w.x + 1;
+    g.y = w.y;
+    if (tileAt(s.map, g.x, g.y) === '#') {
+      g.x = w.x - 1;
+    }
+    // 味方は防御だけ(休憩の回復を混ぜない)
+    const guard = Object.fromEntries(s.units.filter((u) => u.side === 'party').map((u) => [u.id, fillPlan([], 'guard')]));
+    const r = resolveTurn(s, { ...guard, [g.id]: [{ type: 'attack', target: w.id }] });
+    const me = r.state.units.find((u) => u.id === w.id)!;
+    expect(r.events.some((e) => e.type === 'blessing' && e.id === w.id)).toBe(true);
+    expect(me.down).toBe(false);
+    expect(me.hp).toBe(Math.ceil(stats(me).maxHp * TOWN.blessingHpRatio));
+    expect(r.state.blessing).toBe(false);
+    // 地上へ戻ると消える
+    const t = generateGame(27, 'normal', 1);
+    t.blessing = true;
+    changeFloor(t, 0);
+    expect(t.blessing).toBe(false);
   });
 });
 

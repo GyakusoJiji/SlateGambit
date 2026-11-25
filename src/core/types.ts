@@ -126,6 +126,10 @@ export interface GameState {
   scenario?: string;
   /** パーティ共通の持ち物(回復薬の数)。泉でゴールドを払って買う */
   items?: Partial<Record<ItemId, number>>;
+  /** 地上の銀行に預けたゴールド(野盗に盗まれない。地上でしか引き出せない) */
+  bank?: number;
+  /** 教会の加護。最初に気絶した味方を 1 度だけその場で復帰させる。地上へ戻ると消える */
+  blessing?: boolean;
 }
 
 /** 持ち物の種類(回復薬と食料)。食料は休憩 1 ターンごとに 1 つ使う */
@@ -207,6 +211,8 @@ export type GameEvent =
   | { tick: number; type: 'dry'; at: Pos }
   /** 休憩で食料を使った(food=false なら、食料が無くて休憩しても回復しなかった) */
   | { tick: number; type: 'ration'; food: boolean }
+  /** 教会の加護で、気絶するはずだった id がその場で持ち直した */
+  | { tick: number; type: 'blessing'; id: string }
   /** 倒した敵からゴールドを得た */
   | { tick: number; type: 'loot'; gold: number }
   /** 野盗(id)にゴールドを盗まれた */

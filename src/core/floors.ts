@@ -87,6 +87,8 @@ export function changeFloor(state: GameState, to: number): void {
   }
   state.floor = to;
   state.deepest = Math.max(state.deepest ?? 1, to);
+  // 教会の加護は、地上へ戻ると消える(次に潜る間だけ)
+  if (to === 0) state.blessing = false;
   if (cur === 0 && to === 1) {
     refillSprings(state.map);
     for (const f of Object.values(state.floors)) refillSprings(f.map);

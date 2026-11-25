@@ -54,7 +54,8 @@ function besideOf(s: GameState, p: Pos) {
 describe('マップ生成', () => {
   it('同じシード・難易度・階なら同じマップになる', () => {
     expect(JSON.stringify(generateGame(5, 'hard', 1))).toBe(JSON.stringify(generateGame(5, 'hard', 1)));
-    expect(generateGame(5).map.tiles.join()).not.toBe(generateGame(6).map.tiles.join());
+    // 地上の城はどのシードでも同じ間取りなので、地下 1 階で比べる
+    expect(generateGame(5, 'normal', 1).map.tiles.join()).not.toBe(generateGame(6, 'normal', 1).map.tiles.join());
     expect(JSON.stringify(generateFloor(5, 'normal', 3))).toBe(JSON.stringify(generateFloor(5, 'normal', 3)));
     expect(generateFloor(5, 'normal', 2).map.tiles.join()).not.toBe(generateFloor(5, 'normal', 3).map.tiles.join());
   });

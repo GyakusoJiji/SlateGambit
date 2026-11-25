@@ -1,15 +1,15 @@
-// 地上の町(階 0)。通路だけの迷路に、宿・馬小屋・道具屋・療養所と、地下 1 階への下り階段を置く。
+// 地上(階 0)の城。 中央を縦に貫く幅 3 の大広間(下端が城の入口、上端が地下 1 階への下り階段)の
+// 左右に、扉の付いた部屋が 3 つずつ並び、それぞれに施設がある(宿・馬小屋・道具屋・療養所・銀行・教会)。
 // 施設は通れるマス(視線も遮らない)で、立っている味方が施設のマスにいて敵が見えなければ使える(controller.ts)。
 import { ITEMS } from '../data/units';
 import { DIR_LIST, isWalkable, step } from './map';
-import { Rng, hashSeed } from './rng';
 import { stats } from './stats';
 import type { FloorMap, GameState, ItemId, Pos, Unit } from './types';
 
 /** 施設の種類と、地図のタイル文字 */
-export type FacilityId = 'inn' | 'stable' | 'shop' | 'clinic';
-export const FACILITY_TILE: Record<FacilityId, string> = { inn: 'I', stable: 'B', shop: 'T', clinic: 'C' };
-const TILE_FACILITY: Record<string, FacilityId> = { I: 'inn', B: 'stable', T: 'shop', C: 'clinic' };
+export type FacilityId = 'inn' | 'stable' | 'shop' | 'clinic' | 'bank' | 'church';
+export const FACILITY_TILE: Record<FacilityId, string> = { inn: 'I', stable: 'B', shop: 'T', clinic: 'C', bank: 'G', church: 'A' };
+const TILE_FACILITY: Record<string, FacilityId> = Object.fromEntries(Object.entries(FACILITY_TILE).map(([id, c]) => [c, id as FacilityId]));
 
 /** タイル文字が施設なら、その種類 */
 export function facilityOf(tile: string): FacilityId | null {
@@ -24,13 +24,27 @@ export const TOWN = {
   stableHpRatio: 0.5,
   /** 療養所: 気絶した味方 1 人を復帰させる額(× そのキャラのレベル) */
   clinicPerLevel: 30,
-  /** 迷路に足す抜け道の数(行き止まりばかりにならないように) */
-  loops: 14,
+  /** 教会: 加護の額(× パーティのレベルの合計) */
+  churchPerLevel: 10,
+  /** 教会の加護で復帰したときの HP(最大値に対する割合) */
+  blessingHpRatio: 0.5,
+  /** 銀行: 1 回に預ける・引き出す額(全額の操作もある) */
+  bankStep: 50,
 };
+
+/**
+ * 城の部屋の並び(上から順に、左・右)。下(入口側)ほどよく使う施設を置く。
+ * 上: 教会・銀行、中: 宿・療養所、下: 道具屋・馬小屋
+ */
+const ROOMS: [FacilityId, FacilityId][] = [
+  ['church', 'bank'],
+  ['inn', 'clinic'],
+  ['shop', 'stable'],
+];
 
 export interface Town {
   map: FloorMap;
-  /** 町の入口(新しいゲームの開始位置) */
+  /** 城の入口(新しいゲームの開始位置) */
   start: Pos;
   /** 地下 1 階への下り階段 */
   down: Pos;
@@ -38,89 +52,44 @@ export interface Town {
 }
 
 /**
- * 地上の迷路を作る。奇数の座標を通路のマスにした穴掘り法の迷路に、抜け道を少し足す。
- * 下り階段は行き止まりの 1 つに置き、町の入口はそこから最も遠い行き止まり、
- * 施設は下り階段からの歩数が中ほど〜遠めの行き止まりに散らす
+ * 地上の城を作る(どのシードでも同じ間取り)。
+ * 大広間は地図の中央の 3 列で、上端の中央に下り階段、下端の中央が入口。
+ * 左右の部屋は大広間との間の壁に扉(閉)があり、部屋の中央に施設のマスを置く
  */
-export function generateTown(seed: number, w: number, h: number): Town {
-  const rng = new Rng(hashSeed('town', seed));
+export function generateTown(_seed: number, w: number, h: number): Town {
   const tiles = Array.from({ length: h }, () => new Array<string>(w).fill('#'));
-  const cw = Math.floor((w - 1) / 2);
-  const ch = Math.floor((h - 1) / 2);
-  const cell = (cx: number, cy: number): Pos => ({ x: cx * 2 + 1, y: cy * 2 + 1 });
+  const cx = Math.floor(w / 2) - 1;
+  const hall = { x0: cx - 1, x1: cx + 1 };
+  for (let y = 1; y < h - 1; y++) for (let x = hall.x0; x <= hall.x1; x++) tiles[y][x] = '.';
 
-  // 穴掘り法(深さ優先)
-  const seen = new Set<string>();
-  const stack: [number, number][] = [[rng.int(0, cw - 1), rng.int(0, ch - 1)]];
-  seen.add(stack[0].join());
-  const c0 = cell(...stack[0]);
-  tiles[c0.y][c0.x] = '.';
-  while (stack.length > 0) {
-    const [cx, cy] = stack[stack.length - 1];
-    const next = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const)
-      .map(([dx, dy]) => [cx + dx, cy + dy] as [number, number])
-      .filter(([x, y]) => x >= 0 && y >= 0 && x < cw && y < ch && !seen.has(`${x},${y}`));
-    if (next.length === 0) {
-      stack.pop();
-      continue;
+  // 部屋: 大広間の左右の壁(1 マス)の外側。縦は 3 等分し、部屋の間に壁を 1 マス挟む
+  const left = { x0: 2, x1: hall.x0 - 2 };
+  const right = { x0: hall.x1 + 2, x1: hall.x1 + 2 + (left.x1 - left.x0) };
+  const rows = ROOMS.length;
+  const span = Math.floor((h - 2 - (rows + 1)) / rows);
+  const facilities = {} as Record<FacilityId, Pos>;
+  ROOMS.forEach(([l, r], i) => {
+    const y0 = 2 + i * (span + 1);
+    const y1 = y0 + span - 1;
+    const mid = Math.floor((y0 + y1) / 2);
+    for (const [side, id, doorX] of [
+      [left, l, hall.x0 - 1],
+      [right, r, hall.x1 + 1],
+    ] as const) {
+      for (let y = y0; y <= y1; y++) for (let x = side.x0; x <= side.x1; x++) tiles[y][x] = '.';
+      tiles[mid][doorX] = 'D';
+      const p = { x: Math.floor((side.x0 + side.x1) / 2), y: mid };
+      tiles[p.y][p.x] = FACILITY_TILE[id];
+      facilities[id] = p;
     }
-    const [nx, ny] = next[rng.int(0, next.length - 1)];
-    seen.add(`${nx},${ny}`);
-    const a = cell(cx, cy);
-    const b = cell(nx, ny);
-    tiles[(a.y + b.y) / 2][(a.x + b.x) / 2] = '.';
-    tiles[b.y][b.x] = '.';
-    stack.push([nx, ny]);
-  }
+  });
 
-  // 抜け道: 両側が通路の壁を少し開ける
-  for (let i = 0, made = 0; i < 400 && made < TOWN.loops; i++) {
-    const x = rng.int(1, w - 2);
-    const y = rng.int(1, h - 2);
-    if (tiles[y][x] !== '#') continue;
-    const horiz = tiles[y][x - 1] === '.' && tiles[y][x + 1] === '.' && tiles[y - 1][x] === '#' && tiles[y + 1][x] === '#';
-    const vert = tiles[y - 1][x] === '.' && tiles[y + 1][x] === '.' && tiles[y][x - 1] === '#' && tiles[y][x + 1] === '#';
-    if (!horiz && !vert) continue;
-    tiles[y][x] = '.';
-    made++;
-  }
-
-  const map: FloorMap = { w, h, tiles: tiles.map((r) => r.join('')) };
-  const deadEnds: Pos[] = [];
-  for (let y = 1; y < h - 1; y++)
-    for (let x = 1; x < w - 1; x++) {
-      if (map.tiles[y][x] !== '.') continue;
-      const open = DIR_LIST.filter((d) => {
-        const n = step({ x, y }, d);
-        return isWalkable(map, n.x, n.y);
-      }).length;
-      if (open === 1) deadEnds.push({ x, y });
-    }
-
-  const down = deadEnds[rng.int(0, deadEnds.length - 1)];
-  const dist = walkDistances(map, down);
-  const d = (p: Pos) => dist[p.y * w + p.x];
-  const others = deadEnds.filter((p) => p !== down).sort((a, b) => d(a) - d(b));
-  const start = others[others.length - 1];
-  const max = d(start);
-  // 施設: 歩数が下り階段から最大の 35〜85% 付近の行き止まり(重ならないよう順に選ぶ)
-  const used = new Set<Pos>([down, start]);
-  const pick = (ratio: number): Pos => {
-    const free = others.filter((p) => !used.has(p));
-    const p = free.sort((a, b) => Math.abs(d(a) - max * ratio) - Math.abs(d(b) - max * ratio))[0];
-    used.add(p);
-    return p;
-  };
-  const facilities: Record<FacilityId, Pos> = { inn: pick(0.85), stable: pick(0.6), shop: pick(0.7), clinic: pick(0.45) };
-
-  const set = (p: Pos, c: string) => {
-    const row = map.tiles[p.y];
-    map.tiles[p.y] = row.slice(0, p.x) + c + row.slice(p.x + 1);
-  };
-  set(down, '>');
-  for (const [id, p] of Object.entries(facilities) as [FacilityId, Pos][]) set(p, FACILITY_TILE[id]);
-  return { map, start, down, facilities };
+  const down = { x: cx, y: 1 };
+  tiles[down.y][down.x] = '>';
+  const start = { x: cx, y: h - 2 };
+  return { map: { w, h, tiles: tiles.map((r) => r.join('')) }, start, down, facilities };
 }
+
 
 // ---- 施設の利用(状態を直接書き換える。時間は進まない) ----
 
@@ -199,6 +168,36 @@ export function useClinic(state: GameState, id: string): boolean {
     }
   }
   return true;
+}
+
+/** 教会の加護の額(パーティ全員のレベルの合計 × TOWN.churchPerLevel) */
+export function churchCost(state: GameState): number {
+  return state.units.filter((u) => u.side === 'party').reduce((a, u) => a + (u.level ?? 1), 0) * TOWN.churchPerLevel;
+}
+
+/** 教会で加護を受ける(すでに受けていれば受けない)。受けられたら true */
+export function useChurch(state: GameState): boolean {
+  const cost = churchCost(state);
+  if (state.blessing || (state.gold ?? 0) < cost) return false;
+  state.gold = (state.gold ?? 0) - cost;
+  state.blessing = true;
+  return true;
+}
+
+/** 銀行に預ける(amount が所持金より多ければ所持金の全部)。預けた額を返す */
+export function deposit(state: GameState, amount: number): number {
+  const n = Math.max(0, Math.min(amount, state.gold ?? 0));
+  state.gold = (state.gold ?? 0) - n;
+  state.bank = (state.bank ?? 0) + n;
+  return n;
+}
+
+/** 銀行から引き出す(amount が預金より多ければ預金の全部)。引き出した額を返す */
+export function withdraw(state: GameState, amount: number): number {
+  const n = Math.max(0, Math.min(amount, state.bank ?? 0));
+  state.bank = (state.bank ?? 0) - n;
+  state.gold = (state.gold ?? 0) + n;
+  return n;
 }
 
 /** 道具屋で 1 つ買う。買えたら true */

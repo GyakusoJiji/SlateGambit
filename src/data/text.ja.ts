@@ -6,7 +6,7 @@ export const T = {
   /** 上部バー用の短い表示 */
   turnShort: (n: number) => `T${n}`,
   floor: (n: number) => (n <= 0 ? '地上' : `B${n}F`),
-  floorLong: (n: number) => (n <= 0 ? '地上の町' : `地下 ${n} 階`),
+  floorLong: (n: number) => (n <= 0 ? '地上の城' : `地下 ${n} 階`),
   gold: (n: number) => `${n.toLocaleString()} G`,
   level: (n: number) => `Lv${n}`,
   ap: 'AP',
@@ -136,6 +136,7 @@ export const T = {
     bounty: (a: string, gold: number) => `${a} を止めた。持っていた宝 +${gold} G`,
     chest: (a: string, gold: number) => `${a} が宝箱を開けた(+${gold} G)`,
     loot: (gold: number) => `倒した敵から +${gold} G を手に入れた`,
+    blessing: (a: string) => `${a} は教会の加護で持ち直した!`,
     steal: (a: string, gold: number) => `${a} に ${gold} G 盗まれた! 逃げられる前に倒せば取り返せる`,
     recover: (a: string, gold: number) => `${a} から盗まれた ${gold} G を取り返した`,
     escape: (a: string, gold: number) => `${a} に逃げ切られた(${gold} G は戻らない)`,
@@ -144,7 +145,7 @@ export const T = {
     exp: (n: number) => `全員が経験値 ${n} を得た`,
     levelup: (a: string, lv: number) => `${a} はレベル ${lv} に上がった!`,
     levelupAll: (lv: number) => `全員がレベル ${lv} に上がった!`,
-    stairs: (from: number, to: number) => (to <= 0 ? '地上の町へ戻った' : to > from ? `地下 ${to} 階へ降りた` : `地下 ${to} 階へ上った`),
+    stairs: (from: number, to: number) => (to <= 0 ? '地上の城へ戻った' : to > from ? `地下 ${to} 階へ降りた` : `地下 ${to} 階へ上った`),
     noHit: (a: string, spell: string) => `${a} の${spell}は誰にも当たらなかった`,
     scatter: (a: string) => `${a} の火球は狙いが逸れた(見えないマスを狙った)`,
   },
@@ -202,6 +203,22 @@ export const T = {
     shop: {
       name: '道具屋',
       note: '食料(休憩 1 ターンに 1 つ使う)と回復薬を買える。持ち物はパーティ共通',
+    },
+    bank: {
+      name: '銀行',
+      note: 'ゴールドを預けておけば、野盗に盗まれない。引き出せるのは地上のこの銀行だけ。施設の支払いには所持金を使う',
+      balance: (g: number) => `預金 ${g} G`,
+      deposit: (g: number) => `${g} G 預ける`,
+      withdraw: (g: number) => `${g} G 引き出す`,
+      depositAll: '全部預ける',
+      withdrawAll: '全部引き出す',
+    },
+    church: {
+      name: '教会',
+      note: '祈りの加護を受けると、次に地上へ戻るまでの間、最初に気絶するはずだった味方が 1 度だけその場で持ち直す(HP 半分)。地上へ戻ると加護は消える。費用はパーティのレベルの合計で決まる',
+      use: (cost: number) => `加護を受ける(${cost} G)`,
+      active: '加護を受けている(地上へ戻るまで有効)',
+      done: '教会で祈りの加護を受けた',
     },
     clinic: {
       name: '療養所',
@@ -267,6 +284,8 @@ export const T = {
   /** 持ち物の欄 */
   inv: {
     relic: (name: string) => `秘宝: ${name}`,
+    bank: (g: number) => `預金 ${g} G`,
+    blessing: '加護',
   },
 
   toast: {

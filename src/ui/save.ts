@@ -4,7 +4,7 @@ import type { GameState } from '../core/types';
 
 const SAVE_KEY = 'slate-gambit/save';
 /** 保存形式の版。GameState の形を互換性なく変えたら上げる(古い保存は読まずに捨てる) */
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 interface SaveData {
   version: number;

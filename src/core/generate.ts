@@ -79,7 +79,7 @@ const inRoom = (r: Room, p: Pos) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y 
 export interface GeneratedFloor {
   map: FloorMap;
   enemies: Unit[];
-  /** 上り階段(地上では町の入口) */
+  /** 上り階段(地上では城の入口) */
   up: Pos;
   /** 下り階段(地下 5 階には無い) */
   down: Pos | null;
@@ -88,7 +88,7 @@ export interface GeneratedFloor {
 }
 
 /**
- * 新しいゲーム。startFloor 階の上り階段(地上なら町の入口)の周りにパーティを置く。既定は地上から始める。
+ * 新しいゲーム。startFloor 階の上り階段(地上なら城の入口)の周りにパーティを置く。既定は地上から始める。
  * 地下から始めるとき(デバッグ・自動対戦用)は、その階に見合ったレベルにする
  */
 export function generateGame(seed: number, difficulty: Difficulty = 'normal', startFloor = 0): GameState {
@@ -124,10 +124,10 @@ export function generateGame(seed: number, difficulty: Difficulty = 'normal', st
   return state;
 }
 
-/** 1 つの階を作る(階 0 は地上の町) */
+/** 1 つの階を作る(階 0 は地上の城) */
 export function generateFloor(seed: number, difficulty: Difficulty, floor: number): GeneratedFloor {
   if (floor <= 0) {
-    // 地上: 迷路の町。up は町の入口(新しいゲームの開始位置)。モンスターはおらず、野盗が少しうろつく
+    // 地上: 城の中。up は城の入口(新しいゲームの開始位置)。モンスターはおらず、野盗が少しうろつく
     const t = generateTown(seed, MAP_W, MAP_H);
     return { map: t.map, enemies: townBandits(seed, difficulty, t.map, t.start), up: t.start, down: t.down, treasureAt: null };
   }
@@ -171,7 +171,7 @@ export function generateFloor(seed: number, difficulty: Difficulty, floor: numbe
 /** 地上の野盗の数(難易度ごと) */
 export const TOWN_BANDITS: Record<Difficulty, number> = { easy: 1, normal: 2, hard: 3 };
 
-/** 地上の野盗: 町の入口から歩いて 15 マス以上離れた通路に、難易度ごとの数だけ置く。ID は 0n1, 0n2… */
+/** 地上の野盗: 城の入口から歩いて 15 マス以上離れた床に、難易度ごとの数だけ置く。ID は 0n1, 0n2… */
 function townBandits(seed: number, difficulty: Difficulty, map: FloorMap, start: Pos): Unit[] {
   const rng = new Rng(hashSeed('bandit', seed));
   const dist = bfs(map, start);

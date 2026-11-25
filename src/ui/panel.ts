@@ -34,12 +34,14 @@ export function partyCards(party: Unit[], plans: Record<string, Action[]>, selec
 /**
  * 持ち物の欄: 所持金・回復薬と食料の数・秘宝(持っている味方の名前)。予約中も再生中も盤面のすぐ下に出す
  */
-export function inventoryBar(gold: number, items: GameState['items'], relic: string | null): string {
+export function inventoryBar(gold: number, items: GameState['items'], relic: string | null, bank = 0, blessing = false): string {
   const potions = (Object.keys(ITEMS) as ItemId[])
     .map((k) => `<span class="item${items?.[k] ? '' : ' none'}" title="${ITEMS[k].name}">${ITEMS[k].icon}${ITEMS[k].short} ×${items?.[k] ?? 0}</span>`)
     .join('');
   const treasure = relic !== null ? `<span class="item relic">💎${T.inv.relic(esc(relic))}</span>` : '';
-  return `<div class="inv"><span class="item gold">💰${T.gold(gold)}</span>${potions}${treasure}</div>`;
+  const saved = bank > 0 ? `<span class="item">🏦${T.inv.bank(bank)}</span>` : '';
+  const holy = blessing ? `<span class="item relic">✝${T.inv.blessing}</span>` : '';
+  return `<div class="inv"><span class="item gold">💰${T.gold(gold)}</span>${saved}${potions}${treasure}${holy}</div>`;
 }
 
 export function actionLabel(a: Action, nameOf: (id: string) => string): string {
@@ -309,6 +311,9 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
         break;
       case 'loot':
         lines.push(T.log.loot(e.gold));
+        break;
+      case 'blessing':
+        lines.push(T.log.blessing(nameOf(e.id)));
         break;
       case 'steal':
         lines.push(T.log.steal(nameOf(e.id), e.gold));

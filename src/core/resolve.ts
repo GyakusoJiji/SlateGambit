@@ -10,6 +10,7 @@ import { clearShot, interceptCandidates, overwatchTarget } from './reactions';
 import { Rng } from './rng';
 import { applyAlarm } from './alarm';
 import { openDoorsNear, tickDoors } from './doors';
+import { TOWN } from './town';
 import {
   TICKS_PER_TURN,
   type Action,
@@ -252,6 +253,13 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     // ⑤ 戦闘不能判定(相打ちあり)。担いでいた者が倒れたら、その場に落とす
     for (const u of units) {
       if (!u.down && u.hp <= 0) {
+        // 教会の加護: 最初に気絶するはずだった味方は、1 度だけその場で持ち直す
+        if (u.side === 'party' && state.blessing) {
+          state.blessing = false;
+          u.hp = Math.max(1, Math.ceil(stats(u).maxHp * TOWN.blessingHpRatio));
+          events.push({ tick, type: 'blessing', id: u.id });
+          continue;
+        }
         u.down = true;
         u.hp = 0;
         if (u.side === 'enemy') u.downTurn = state.turn;

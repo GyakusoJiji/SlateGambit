@@ -65,8 +65,8 @@ const COLORS = {
   enemy: '#ff5a5a',
 };
 
-/** 地上の施設のタイルの絵文字(宿・馬小屋・道具屋・療養所) */
-const FACILITY_ICON: Record<string, string> = { I: '🛏️', B: '🐴', T: '🧺', C: '⚕️' };
+/** 地上の施設のタイルの絵文字(宿・馬小屋・道具屋・療養所・銀行・教会) */
+const FACILITY_ICON: Record<string, string> = { I: '🛏️', B: '🐴', T: '🧺', C: '⚕️', G: '🏦', A: '⛪' };
 
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
