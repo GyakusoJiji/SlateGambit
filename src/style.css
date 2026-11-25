@@ -333,8 +333,10 @@ body {
   grid-template-columns: repeat(5, 1fr);
   gap: 4px;
 }
-.acts .act.primary {
-  grid-column: span 2;
+/* 行動ボタンは 4 行あるので、ほかのボタン(34px)より 15% 低くする */
+.acts .act,
+.acts .act-gap {
+  min-height: 29px;
 }
 .playbar {
   display: grid;

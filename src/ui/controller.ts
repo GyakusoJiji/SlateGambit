@@ -582,8 +582,11 @@ export class Controller {
       ? `<b>${nameOf(sel.id)}</b> <span class="ap">AP ${apLeft(acts)}/8</span>${vitals(sel)}${planChips(acts, nameOf, this.foesInSight())}`
       : `<span class="chip empty">${sel ? `${nameOf(sel.id)} は${T.down}している` : T.prompt.selectUnit}</span>`;
     const promptText = active ? prompt : '';
-    const actions = active ? actionButtons(sel, acts, this.mode) : idleButtons();
+    const potion = active
+      ? potionButton(this.potionKind, this.state.items, this.mode === 'potion', this.potionOff(sel, acts))
+      : potionButton(this.potionKind, this.state.items, false, true);
     const hasPlan = active && acts.length > 0;
+    const actions = active ? actionButtons(sel, acts, this.mode, { potion }) : idleButtons({ potion });
     const o = this.state.objective;
     this.el.panel.innerHTML = `
       ${this.inventory(this.state, [], o?.kind === 'treasure' ? o.holder ?? null : null)}
@@ -592,10 +595,10 @@ export class Controller {
       <p class="prompt" data-prompt="${promptText}">${promptText}</p>
       <div class="acts">
         ${actions}
-        ${actButton('undo', { off: !hasPlan })}
-        ${active ? potionButton(this.potionKind, this.state.items, this.mode === 'potion', this.potionOff(sel, acts)) : potionButton(this.potionKind, this.state.items, false, true)}
+        <span class="act-gap"></span>
         ${actButton('rest', { off: this.foesInSight() })}
         ${actButton('group', { on: this.mode === 'group', off: !active || this.foesInSight() })}
+        ${actButton('undo', { off: !hasPlan })}
         ${actButton('execute', { cls: 'primary' })}
       </div>
       ${timeline(this.party(), this.plans, nameOf, this.foesInSight() ? 'guard' : 'wait', this.timelineTick, this.selected)}

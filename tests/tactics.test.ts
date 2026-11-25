@@ -53,15 +53,16 @@ describe('挟み撃ち', () => {
 });
 
 describe('強攻撃', () => {
-  it('5AP を使い、5 ティック目に 1.5 倍のダメージを与える', () => {
+  it('5AP を使い、5 ティック目に 2 倍のダメージを与える', () => {
     const s = arena({ p1: [4, 3], g1: [5, 3] });
     const plan: Action[] = [{ type: 'attack', target: 'g1', power: true }];
     expect(apLeft(plan)).toBe(8 - RULES.powerCost);
     const r = resolveTurn(s, { p1: plan });
     const d = r.events.find((e) => e.type === 'damage' && e.id === 'g1')!;
     expect(d.tick).toBe(RULES.powerCost);
-    // ゴブリンは防御 0。戦士の攻撃 7〜10 の 1.5 倍(四捨五入)は 11 以上で、通常攻撃の上限 10 を超える
-    expect(d.type === 'damage' && d.amount).toBeGreaterThanOrEqual(11);
+    // ゴブリンは防御 0。戦士の攻撃 7〜10 の 2 倍は 14〜20
+    expect(d.type === 'damage' && d.amount).toBeGreaterThanOrEqual(14);
+    expect(d.type === 'damage' && d.amount).toBeLessThanOrEqual(20);
   });
 
   it('強攻撃を持たない職業は予約できない', () => {

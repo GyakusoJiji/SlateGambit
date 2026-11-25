@@ -94,8 +94,7 @@ export function planChips(actions: Action[], nameOf: (id: string) => string, inC
   return out.join('') + tail;
 }
 
-/** 職業の特技の枠の数(特技が少ない職業は空けておき、ほかのボタンの位置を揃える) */
-const SKILL_SLOTS = 3;
+/** ボタンの並びの空き */
 const GAP = '<span class="act-gap"></span>';
 
 /** キャラを選んでいないときの、全部グレーのボタン */
@@ -110,32 +109,62 @@ export function potionButton(kind: ItemId, items: GameState['items'], on: boolea
   return `<button data-act="potion" data-label="${it.short}" class="${cls}"${off ? ' aria-disabled="true"' : ''}><span class="ic">🧪</span>${it.short}<small>${n}</small></button>`;
 }
 
-export function idleButtons(): string {
-  return [...['move', 'attack', 'guard', 'wait', 'watch'].map((id) => actButton(id, { off: true })), GAP, GAP, GAP, actButton('carry', { off: true })].join('');
+/**
+ * 行動ボタンの並び(5 列)。どのキャラでも同じ位置に並べ、その職業に無いもの・使えないものはグレーアウトする。
+ * 1 行目: 攻撃・特技・休憩、2 行目: 移動・守り・担ぐ・回復薬、3 行目: 魔法。
+ * 4 行目(空き・全員休憩・全員移動・1手戻す・実行)は controller 側で続けて並べる。
+ * null は空き。'potion'(回復薬)は controller が作った HTML をそのまま置く
+ */
+const ACTION_ROWS: (string | null)[][] = [
+  ['attack', 'power', 'watch', 'trip', 'wait'],
+  ['move', 'guard', 'cover', 'carry', 'potion'],
+  ['fireball', 'smite', 'heal', 'revive', null],
+];
+
+/** controller が作るボタン(持ち物は controller が知っているため) */
+export type ExtraButtons = { potion: string };
+
+/** キャラを選んでいないときの、全部グレーのボタン */
+export function idleButtons(extra: ExtraButtons): string {
+  return ACTION_ROWS.flat()
+    .map((id) => (id === 'potion' ? extra.potion : id ? actButton(id, { off: true }) : GAP))
+    .join('');
 }
 
-export function actionButtons(u: Unit, actions: Action[], mode: Mode): string {
+export function actionButtons(u: Unit, actions: Action[], mode: Mode, extra: ExtraButtons): string {
   const d = stats(u);
   const ap = apLeft(actions);
   // 担いでいる間は、移動(2AP/マス)・防御・待機・降ろすだけ
   const busy = carryingAfter(u, actions);
   const need = (s: SpellId) => (s === 'power' ? RULES.powerCost : s === 'cover' ? RULES.coverCost : spellCost(s));
   const spell = (s: SpellId) => !busy && d.spells.includes(s) && ap >= need(s) && u.mp >= spellMp(u, s);
-  // ボタンはどのキャラでも同じ位置に並べ、使えないものはグレーアウトする
-  // 特技の枠には、その職業の魔法だけを出す
-  const skills = d.spells.map((s) => actButton(s, { on: mode === s, off: !spell(s), mp: spellMp(u, s) }));
-  while (skills.length < SKILL_SLOTS) skills.push(GAP);
-  const list = [
-    actButton('move', { on: mode === 'move', off: ap < (busy ? RULES.carryMoveCost : 1) }),
-    actButton('attack', { on: mode === 'attack', off: busy || ap < 1 }),
-    actButton('guard', { off: ap < 1 }),
-    actButton('wait', { off: ap < 1 }),
-    actButton('watch', { off: busy || ap < 1 }),
-    ...skills,
-    // 担ぐと降ろすは同じ枠。担いでいる間は降ろす
-    busy ? actButton('drop', { off: ap < 1 }) : actButton('carry', { on: mode === 'carry', off: ap < 1 }),
-  ];
-  return list.join('');
+  const button = (id: string): string => {
+    switch (id) {
+      case 'potion':
+        return extra.potion;
+      case 'move':
+        return actButton('move', { on: mode === 'move', off: ap < (busy ? RULES.carryMoveCost : 1) });
+      case 'attack':
+        return actButton('attack', { on: mode === 'attack', off: busy || ap < 1 });
+      case 'guard':
+      case 'wait':
+        return actButton(id, { off: ap < 1 });
+      case 'watch':
+        return actButton('watch', { off: busy || ap < 1 });
+      case 'carry':
+        // 担ぐと降ろすは同じ枠。担いでいる間は降ろす
+        return busy ? actButton('drop', { off: ap < 1 }) : actButton('carry', { on: mode === 'carry', off: ap < 1 });
+      default: {
+        // 特技・魔法。その職業に無いものは MP の表示も付けずにグレーにする
+        const s = id as SpellId;
+        if (!d.spells.includes(s)) return actButton(s, { off: true, mp: 0 });
+        return actButton(s, { on: mode === s, off: !spell(s), mp: spellMp(u, s) });
+      }
+    }
+  };
+  return ACTION_ROWS.flat()
+    .map((id) => (id ? button(id) : GAP))
+    .join('');
 }
 
 /** 行動ボタンのアイコン */

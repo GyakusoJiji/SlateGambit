@@ -8,7 +8,7 @@ export const RULES = {
   spellCost: 3,
   /** 強攻撃の AP と、ダメージの倍率 */
   powerCost: 5,
-  powerMult: 1.5,
+  powerMult: 2,
   /** かばうの AP(その間、防御もする) */
   coverCost: 3,
   /** 足払いで動けなくなるティック数 */

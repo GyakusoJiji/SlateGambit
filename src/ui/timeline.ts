@@ -67,7 +67,7 @@ function glyphOf(s: Step): string {
     case 'wait':
       return '休';
     case 'watch':
-      return '見';
+      return '迎';
     case 'charge':
       return '接';
     case 'carry':
