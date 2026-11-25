@@ -29,13 +29,18 @@ export function findTile(map: GameState['map'], c: string): Pos | null {
 }
 
 /**
- * p の階段を使ったときに移る先の階。下り階段('>')なら下の階、上り階段('S')なら上の階。
- * 階段でない、または地下 1 階の 'S'(地上への出口。秘宝を持っていれば勝ち)なら null
+ * p の階段を使ったときに移る先の階。下り階段('>')なら下の階、上り階段('S')なら上の階
+ * (地下 1 階の 'S' は地上(階 0)へ出る。秘宝を持って地上へ出れば勝ち)。階段でなければ null
  */
 export function stairsDest(state: GameState, p: Pos): number | null {
   const cur = currentFloor(state);
   const t = tileAt(state.map, p.x, p.y);
-  return t === '>' && cur < FLOORS ? cur + 1 : t === 'S' && cur > 1 ? cur - 1 : null;
+  return t === '>' && cur < FLOORS ? cur + 1 : t === 'S' && cur > 0 ? cur - 1 : null;
+}
+
+/** 枯れた泉('h')を元に戻す(地上から地下 1 階へ降りたとき、すべての階の泉が戻る) */
+function refillSprings(map: GameState['map']): void {
+  map.tiles = map.tiles.map((row) => row.replaceAll('h', 'H'));
 }
 
 /**
@@ -82,6 +87,10 @@ export function changeFloor(state: GameState, to: number): void {
   }
   state.floor = to;
   state.deepest = Math.max(state.deepest ?? 1, to);
+  if (cur === 0 && to === 1) {
+    refillSprings(state.map);
+    for (const f of Object.values(state.floors)) refillSprings(f.map);
+  }
   const arrive = findTile(state.map, to > cur ? 'S' : '>');
   if (arrive) placeParty(state, arrive);
   openDoorsNear(state.map, state.units);

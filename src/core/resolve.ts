@@ -299,7 +299,8 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
   state.status = judge(state);
   if (state.status === 'playing') {
     const users = new Set(Object.keys(plans).filter((id) => plans[id]?.some((a) => a.type === 'stairs')));
-    applyStairs(state, events, users);
+    // 秘宝を持って地上へ上がったら勝ち(階段で移った後に判定する)
+    if (applyStairs(state, events, users)) state.status = judge(state);
   }
   return { state, events, frames, tiles, treasure };
 }
@@ -973,9 +974,9 @@ function judge(state: GameState): GameState['status'] {
   if (state.units.filter((u) => u.side === 'party').every((u) => u.down)) return 'lost';
   const o = state.objective;
   if (o?.kind === 'treasure') {
-    // 宝を持った味方が、立ったまま地下 1 階の入口の階段に戻れば勝ち
+    // 宝を持った味方が、立ったまま地上(階 0)に着けば勝ち
     const h = o.holder ? state.units.find((u) => u.id === o.holder) : undefined;
-    return h && !h.down && currentFloor(state) === 1 && tileAt(state.map, h.x, h.y) === 'S' ? 'won' : 'playing';
+    return h && !h.down && currentFloor(state) === 0 ? 'won' : 'playing';
   }
   if (o?.kind === 'escape') {
     // 救出: 対象(気絶していても、担がれていてもよい)が出口の階段のマスでターンを終えたら勝ち

@@ -5,8 +5,8 @@ export const T = {
   turn: (n: number) => `ターン ${n}`,
   /** 上部バー用の短い表示 */
   turnShort: (n: number) => `T${n}`,
-  floor: (n: number) => `B${n}F`,
-  floorLong: (n: number) => `地下 ${n} 階`,
+  floor: (n: number) => (n <= 0 ? '地上' : `B${n}F`),
+  floorLong: (n: number) => (n <= 0 ? '地上の町' : `地下 ${n} 階`),
   gold: (n: number) => `${n.toLocaleString()} G`,
   level: (n: number) => `Lv${n}`,
   ap: 'AP',
@@ -141,7 +141,7 @@ export const T = {
     exp: (n: number) => `全員が経験値 ${n} を得た`,
     levelup: (a: string, lv: number) => `${a} はレベル ${lv} に上がった!`,
     levelupAll: (lv: number) => `全員がレベル ${lv} に上がった!`,
-    stairs: (from: number, to: number) => (to > from ? `地下 ${to} 階へ降りた` : `地下 ${to} 階へ上った`),
+    stairs: (from: number, to: number) => (to <= 0 ? '地上の町へ戻った' : to > from ? `地下 ${to} 階へ降りた` : `地下 ${to} 階へ上った`),
     noHit: (a: string, spell: string) => `${a} の${spell}は誰にも当たらなかった`,
     scatter: (a: string) => `${a} の火球は狙いが逸れた(見えないマスを狙った)`,
   },
@@ -181,13 +181,39 @@ export const T = {
     tickTitle: (t: number) => `${t} ティック目の終わりの予定位置を盤面に出す`,
   },
 
+  /** 地上の施設 */
+  facility: {
+    inn: {
+      name: '宿',
+      note: '泊まると、立っている全員の HP と MP が全快する(気絶している味方は療養所へ)。宿代はレベルの合計で決まる',
+      use: (cost: number) => `泊まる(${cost} G)`,
+      done: '宿に泊まった。全員の HP と MP が全快した',
+    },
+    stable: {
+      name: '馬小屋',
+      note: '無料で休める。HP は半分までしか戻らず、MP は回復しない',
+      use: (pct: number) => `休む(無料・HP ${pct}% まで)`,
+      done: '馬小屋で休んだ',
+      nothing: 'これ以上は馬小屋では回復しない',
+    },
+    shop: {
+      name: '道具屋',
+      note: '食料(休憩 1 ターンに 1 つ使う)と回復薬を買える。持ち物はパーティ共通',
+    },
+    clinic: {
+      name: '療養所',
+      note: '気絶した味方を復帰させ、HP と MP を全快する。費用はその味方のレベルで決まる',
+      use: (cost: number) => `治療する(${cost} G)`,
+      none: '気絶している味方はいない',
+      done: (name: string) => `${name} が療養所で復帰した`,
+    },
+  },
+
   shop: {
-    title: '泉の店',
-    note: '泉にいる間だけ回復薬を買える。持ち物はパーティ共通',
     gold: (g: number) => `所持金 ${g} G`,
     have: (n: number) => `持っている数 ${n}`,
     buy: (name: string, price: number) => `${name}を買う(${price} G)`,
-    noItem: (name: string) => `${name}を持っていない(泉の店で買える)`,
+    noItem: (name: string) => `${name}を持っていない(地上の道具屋で買える)`,
     reserved: (name: string) => `${name}は予約済みの分で足りなくなる`,
   },
 
@@ -268,7 +294,7 @@ export const T = {
 
   pointer: {
     stairs: '上り階段',
-    entrance: '入口',
+    surface: '地上へ',
     down: '下り階段',
     treasure: '秘宝',
     party: '味方',

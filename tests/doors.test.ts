@@ -28,7 +28,7 @@ const wait = (n = 8): Action[] => fillPlan([], 'wait').slice(0, n);
 
 describe('扉', () => {
   it('作った階の扉は閉じていて、パーティの隣のものだけ開いている', () => {
-    const s = generateGame(1234, 'normal');
+    const s = generateGame(1234, 'normal', 1);
     const party = s.units.filter((u) => u.side === 'party');
     let closed = 0;
     for (let y = 0; y < s.map.h; y++)

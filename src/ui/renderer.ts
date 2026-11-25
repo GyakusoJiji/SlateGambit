@@ -65,6 +65,9 @@ const COLORS = {
   enemy: '#ff5a5a',
 };
 
+/** 地上の施設のタイルの絵文字(宿・馬小屋・道具屋・療養所) */
+const FACILITY_ICON: Record<string, string> = { I: '🛏️', B: '🐴', T: '🧺', C: '⚕️' };
+
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   /** カメラ中心(マス単位) */
@@ -247,6 +250,17 @@ export class Renderer {
       g.fillStyle = '#9ad8ff';
       g.fillRect(px + z * 0.32, py + z * 0.4, z * 0.14, z * 0.06);
       g.fillRect(px + z * 0.52, py + z * 0.56, z * 0.14, z * 0.06);
+    } else if (t in FACILITY_ICON) {
+      // 地上の施設(看板の色の床と絵文字)
+      g.fillStyle = '#4a3a22';
+      g.fillRect(px + 1, py + 1, z - 2, z - 2);
+      g.strokeStyle = '#c8a060';
+      g.lineWidth = 1.5;
+      g.strokeRect(px + 2, py + 2, z - 4, z - 4);
+      g.font = `${Math.round(z * 0.62)}px sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(FACILITY_ICON[t], px + z / 2, py + z / 2 + 1);
     } else if (t === 'h') {
       // 枯れた泉(乾いた窪みとひび)
       g.fillStyle = '#3a3428';

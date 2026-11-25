@@ -7,6 +7,7 @@ import { Rng, hashSeed } from './rng';
 import { stats } from './stats';
 import type { AiMemory, Difficulty, FloorMap, GameState, Pos, Unit } from './types';
 import { openDoorsNear } from './doors';
+import { generateTown } from './town';
 import { updateExplored } from './vision';
 
 export const MAP_W = 40;
@@ -76,7 +77,7 @@ const inRoom = (r: Room, p: Pos) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y 
 export interface GeneratedFloor {
   map: FloorMap;
   enemies: Unit[];
-  /** 上り階段(地下 1 階では入口) */
+  /** 上り階段(地上では町の入口) */
   up: Pos;
   /** 下り階段(地下 5 階には無い) */
   down: Pos | null;
@@ -85,10 +86,10 @@ export interface GeneratedFloor {
 }
 
 /**
- * 新しいゲーム。startFloor 階の上り階段の周りにパーティを置く。
- * 地下 1 階以外から始めるときは、その階に見合ったレベルにする(デバッグ・自動対戦用)
+ * 新しいゲーム。startFloor 階の上り階段(地上なら町の入口)の周りにパーティを置く。既定は地上から始める。
+ * 地下から始めるとき(デバッグ・自動対戦用)は、その階に見合ったレベルにする
  */
-export function generateGame(seed: number, difficulty: Difficulty = 'normal', startFloor = 1): GameState {
+export function generateGame(seed: number, difficulty: Difficulty = 'normal', startFloor = 0): GameState {
   const f = generateFloor(seed, difficulty, startFloor);
   const level = START_LEVEL[startFloor - 1] ?? 1;
   const party: Unit[] = (['warrior', 'thief', 'mage', 'priest'] as const).map((defId, i) => {
@@ -121,8 +122,13 @@ export function generateGame(seed: number, difficulty: Difficulty = 'normal', st
   return state;
 }
 
-/** 1 つの階を作る */
+/** 1 つの階を作る(階 0 は地上の町) */
 export function generateFloor(seed: number, difficulty: Difficulty, floor: number): GeneratedFloor {
+  if (floor <= 0) {
+    // 地上: 迷路の町。up は町の入口(新しいゲームの開始位置)
+    const t = generateTown(seed, MAP_W, MAP_H);
+    return { map: t.map, enemies: [], up: t.start, down: t.down, treasureAt: null };
+  }
   const rng = new Rng(floor === 1 ? hashSeed('map', seed) : hashSeed('map', seed, floor));
   const { tiles, rooms } = carveRooms(rng);
   const map: FloorMap = { w: MAP_W, h: MAP_H, tiles: tiles.map((r) => r.join('')) };

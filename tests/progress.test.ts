@@ -23,7 +23,7 @@ describe('経験値とレベル', () => {
   });
 
   it('敵を倒すと気絶者を含む全員に経験値が入り、しきい値でレベルと最大 HP が上がる', () => {
-    const s = generateGame(15, 'easy');
+    const s = generateGame(15, 'easy', 1);
     const party = s.units.filter((u) => u.side === 'party');
     const [w, , , p] = party;
     for (const u of party) u.exp = EXP_TABLE[1] - 1;

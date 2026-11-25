@@ -2,13 +2,14 @@
 import { planEnemies, summarizeIntent } from '../core/ai';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan, planCost } from '../core/actions';
 import { hasLos } from '../core/los';
-import { adjacent, nearOrSame, samePos, step, tileAt } from '../core/map';
+import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
 import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
 import { createEncounter, encounterDef, ENCOUNTERS } from '../core/encounters';
 import { currentFloor, findTile, stairsDest, treasureHere } from '../core/floors';
 import { quickMovePlans } from '../core/quickmove';
+import { anyTired, buyItem, clinicCost, FACILITY_TILE, facilityHere, innCost, TOWN, useClinic, useInn, useStable, type FacilityId } from '../core/town';
 import type { Action, Difficulty, GameEvent, GameState, ItemId, Plans, PotionId, Pos, TurnResult, Unit } from '../core/types';
 import { sideVisibleMask, visibleFoes } from '../core/vision';
 import { T } from '../data/text.ja';
@@ -300,8 +301,8 @@ export class Controller {
 
   /** persist=false は難易度選択の後ろに映すだけの仮のゲーム(保存しない) */
   /** startFloor: デバッグ用に途中の階から始める(URL の &floor=) */
-  start(seed: number, difficulty: Difficulty = 'normal', persist = true, startFloor = 1): void {
-    this.begin(generateGame(seed, difficulty, Math.max(1, Math.min(FLOORS, startFloor))));
+  start(seed: number, difficulty: Difficulty = 'normal', persist = true, startFloor = 0): void {
+    this.begin(generateGame(seed, difficulty, Math.max(0, Math.min(FLOORS, startFloor))));
     if (persist) saveGame(this.state);
   }
 
@@ -519,7 +520,14 @@ export class Controller {
     const out: { at: Pos; color: string; label: string }[] = [];
     const seen = (p: Pos) => !!explored[p.y * st.map.w + p.x];
     const up = findTile(st.map, 'S');
-    if (up) out.push({ at: up, color: '#c8b070', label: currentFloor(st) === 1 ? T.pointer.entrance : T.pointer.stairs });
+    if (up) out.push({ at: up, color: '#c8b070', label: currentFloor(st) === 1 ? T.pointer.surface : T.pointer.stairs });
+    // 地上: 見つけた施設
+    if (currentFloor(st) === 0) {
+      for (const [f, c] of Object.entries(FACILITY_TILE) as [FacilityId, string][]) {
+        const p = findTile(st.map, c);
+        if (p && seen(p)) out.push({ at: p, color: '#9fe0a0', label: T.facility[f].name });
+      }
+    }
     const down = findTile(st.map, '>');
     if (down && seen(down)) out.push({ at: down, color: '#b08cff', label: T.pointer.down });
     if (treasureAt && seen(treasureAt)) out.push({ at: treasureAt, color: '#ffd23a', label: T.pointer.treasure });
@@ -555,7 +563,11 @@ export class Controller {
     const replay = this.el.topbar.querySelector<HTMLButtonElement>('[data-top="replay"]')!;
     replay.disabled = !this.lastPlayback || !!pb;
     // 泉の店: 誰かが泉にいて、敵が見えていない予約中だけ出す
-    this.el.topbar.querySelector<HTMLButtonElement>('[data-top="shop"]')!.hidden = !!pb || !this.canShop();
+    // 施設: 誰かが施設のマスにいて、敵が見えていない予約中だけ、その施設の名前のボタンを出す
+    const shopBtn = this.el.topbar.querySelector<HTMLButtonElement>('[data-top="shop"]')!;
+    const fac = pb ? null : this.facility();
+    shopBtn.hidden = !fac;
+    if (fac) shopBtn.textContent = T.facility[fac].name;
 
     if (pb) {
       const before = pb.before.units.filter((u) => u.side === 'party');
@@ -671,31 +683,58 @@ export class Controller {
     return true;
   }
 
-  /** 泉の店を開けるか: 立っている味方が泉のマスにいて、敵が見えていない */
-  private canShop(): boolean {
-    const st = this.state;
-    return st.status === 'playing' && !this.foesInSight() && this.party().some((u) => !u.down && tileAt(st.map, u.x, u.y) === 'H');
+  /** 使える施設: 立っている味方が地上の施設のマスにいて、敵が見えていなければ、その施設 */
+  private facility(): FacilityId | null {
+    if (this.state.status !== 'playing' || this.foesInSight()) return null;
+    return facilityHere(this.state);
   }
 
-  /** 泉の店: ゴールドで回復薬を買う */
-  private showShop(): void {
+  /** 施設の画面(宿・馬小屋・道具屋・療養所)。使っても時間は進まない */
+  private showFacility(): void {
+    const f = this.facility();
+    if (!f) return;
     const st = this.state;
     const gold = st.gold ?? 0;
-    const rows = (Object.keys(ITEMS) as ItemId[])
-      .map((k) => {
-        const it = ITEMS[k];
-        return `<div class="row"><span>${it.name} · ${T.shop.have(st.items?.[k] ?? 0)}</span>
-          <button class="act" data-ov="buy" data-item="${k}" ${gold < it.price ? 'disabled' : ''}>${T.shop.buy(it.short, it.price)}</button></div>`;
-      })
-      .join('');
+    const text = T.facility[f];
+    let body = '';
+    if (f === 'shop') {
+      body = (Object.keys(ITEMS) as ItemId[])
+        .map((k) => {
+          const it = ITEMS[k];
+          return `<div class="row"><span>${it.icon}${it.name} · ${T.shop.have(st.items?.[k] ?? 0)}</span>
+            <button class="act" data-ov="buy" data-item="${k}" ${gold < it.price ? 'disabled' : ''}>${T.shop.buy(it.short, it.price)}</button></div>`;
+        })
+        .join('');
+    } else if (f === 'inn') {
+      const cost = innCost(st);
+      body = `<button class="act primary" data-ov="inn" ${gold < cost || !anyTired(st) ? 'disabled' : ''}>${T.facility.inn.use(cost)}</button>`;
+    } else if (f === 'stable') {
+      body = `<button class="act primary" data-ov="stable">${T.facility.stable.use(Math.round(TOWN.stableHpRatio * 100))}</button>`;
+    } else {
+      const downed = this.party().filter((u) => u.down);
+      body = downed.length
+        ? downed
+            .map((u) => `<div class="row"><span>${this.names.get(u.id) ?? u.name}(${T.level(u.level ?? 1)})</span>
+              <button class="act" data-ov="clinic" data-id="${u.id}" ${gold < clinicCost(u) ? 'disabled' : ''}>${T.facility.clinic.use(clinicCost(u))}</button></div>`)
+            .join('')
+        : `<p class="note">${T.facility.clinic.none}</p>`;
+    }
     this.el.overlay.hidden = false;
     this.el.overlay.innerHTML = `<div class="sheet shop">
-      <h2>${T.shop.title}</h2>
-      <p class="note">${T.shop.note}</p>
+      <h2>${text.name}</h2>
+      <p class="note">${text.note}</p>
       <p>${T.shop.gold(gold)}</p>
-      ${rows}
-      <button class="act primary" data-ov="close">${T.settings.close}</button>
+      ${body}
+      <button class="act" data-ov="close">${T.settings.close}</button>
     </div>`;
+  }
+
+  /** 施設を使った後: 保存して、画面と施設の画面を描き直す */
+  private facilityUsed(msg?: string): void {
+    if (!this.state.scenario) saveGame(this.state);
+    if (msg) this.toast(msg);
+    this.changed();
+    this.showFacility();
   }
 
   /** 履歴の画面: 新しいターンから順に、味方ごとの要約と経過の全部 */
@@ -783,7 +822,7 @@ export class Controller {
     if (!b) return;
     if (b.dataset.top === 'settings') this.showSettings();
     if (b.dataset.top === 'history' && !this.playback) this.showHistory();
-    if (b.dataset.top === 'shop' && !this.playback && this.canShop()) this.showShop();
+    if (b.dataset.top === 'shop' && !this.playback) this.showFacility();
     if (b.dataset.top === 'replay' && this.lastPlayback && !this.playback) {
       this.playback = this.lastPlayback;
       this.replaying = true;
@@ -810,17 +849,11 @@ export class Controller {
         this.showPerkChoice();
       }
     }
-    if (b.dataset.ov === 'buy' && this.canShop()) {
-      const k = b.dataset.item as ItemId;
-      const st = this.state;
-      if ((st.gold ?? 0) >= ITEMS[k].price) {
-        st.gold = (st.gold ?? 0) - ITEMS[k].price;
-        st.items = { ...st.items, [k]: (st.items?.[k] ?? 0) + 1 };
-        if (!st.scenario) saveGame(st);
-        this.changed();
-        this.showShop();
-      }
-    }
+    const fac = this.facility();
+    if (b.dataset.ov === 'buy' && fac === 'shop' && buyItem(this.state, b.dataset.item as ItemId)) this.facilityUsed();
+    if (b.dataset.ov === 'inn' && fac === 'inn' && useInn(this.state)) this.facilityUsed(T.facility.inn.done);
+    if (b.dataset.ov === 'stable' && fac === 'stable') this.facilityUsed(useStable(this.state) ? T.facility.stable.done : T.facility.stable.nothing);
+    if (b.dataset.ov === 'clinic' && fac === 'clinic' && useClinic(this.state, b.dataset.id!)) this.facilityUsed(T.facility.clinic.done(this.names.get(b.dataset.id!) ?? ''));
     if (b.dataset.ov === 'form-up' || b.dataset.ov === 'form-down') {
       const seed = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]')?.value;
       this.moveInFormation(b.dataset.id!, b.dataset.ov === 'form-up' ? -1 : 1);

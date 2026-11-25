@@ -17,7 +17,7 @@ const controller = new Controller({
 if (import.meta.env.DEV) (window as unknown as { __sg: Controller }).__sg = controller;
 
 // 自動保存があれば続きから再開する。
-// ?seed=数&diff=easy|normal|hard(&floor=1〜5)で直接始める(保存と同じシード・難易度なら続きから)。diff が無ければ難易度選択を出す
+// ?seed=数&diff=easy|normal|hard(&floor=0〜5。0 は地上)で直接始める(保存と同じシード・難易度なら続きから)。diff が無ければ難易度選択を出す
 const params = new URLSearchParams(location.search);
 const seed = params.get('seed') ? Number(params.get('seed')) : randomSeed();
 const diff = params.get('diff') as Difficulty | null;
@@ -31,7 +31,7 @@ if (scenario && controller.startEncounter(scenario)) {
   controller.resume(saved);
 } else if (diff === 'easy' || diff === 'normal' || diff === 'hard') {
   // &floor=N で途中の階から始める(バランス確認用。レベルもその階に合わせる)
-  controller.start(seed, diff, true, Number(params.get('floor') ?? 1) || 1);
+  controller.start(seed, diff, true, Number(params.get('floor') ?? 0) || 0);
 } else {
   controller.start(seed, 'normal', false);
   controller.showStart(seed);

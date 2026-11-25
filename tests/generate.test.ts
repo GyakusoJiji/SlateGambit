@@ -53,7 +53,7 @@ function besideOf(s: GameState, p: Pos) {
 
 describe('マップ生成', () => {
   it('同じシード・難易度・階なら同じマップになる', () => {
-    expect(JSON.stringify(generateGame(5, 'hard'))).toBe(JSON.stringify(generateGame(5, 'hard')));
+    expect(JSON.stringify(generateGame(5, 'hard', 1))).toBe(JSON.stringify(generateGame(5, 'hard', 1)));
     expect(generateGame(5).map.tiles.join()).not.toBe(generateGame(6).map.tiles.join());
     expect(JSON.stringify(generateFloor(5, 'normal', 3))).toBe(JSON.stringify(generateFloor(5, 'normal', 3)));
     expect(generateFloor(5, 'normal', 2).map.tiles.join()).not.toBe(generateFloor(5, 'normal', 3).map.tiles.join());
@@ -90,8 +90,16 @@ describe('マップ生成', () => {
     }
   });
 
-  it('新しいゲームは地下 1 階の入口の周りにパーティがいて、目的は秘宝', () => {
-    const s = generateGame(7, 'normal');
+  it('新しいゲームは地上の町の入口から始まり、目的は秘宝', () => {
+    const t = generateGame(7, 'normal');
+    expect(t.floor).toBe(0);
+    expect(t.units.filter((u) => u.side === 'enemy').length).toBe(0);
+    expect(findTile(t.map, '>')).not.toBeNull();
+    expect(t.objective).toEqual({ kind: 'treasure', at: null, floor: FLOORS });
+  });
+
+  it('地下 1 階から始めると、入口の周りにパーティがいる', () => {
+    const s = generateGame(7, 'normal', 1);
     expect(s.floor).toBe(1);
     expect(s.map.w).toBe(MAP_W);
     expect(s.map.h).toBe(MAP_H);
@@ -173,7 +181,7 @@ describe('敵の編成', () => {
 
 describe('階段', () => {
   it('下り階段に 1 人が入ると、全員(担がれた気絶者を含む)が次の階の上り階段の周りへ移る', () => {
-    const s = generateGame(11, 'easy');
+    const s = generateGame(11, 'easy', 1);
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const [w, t, , p] = s.units;
     // 盗賊は気絶して僧侶に担がれている
@@ -207,7 +215,7 @@ describe('階段', () => {
   });
 
   it('上り階段で戻ると、前の階の敵・開けた宝箱・探索済み範囲がそのまま残っている', () => {
-    const s = generateGame(12, 'normal');
+    const s = generateGame(12, 'normal', 1);
     const e1 = s.units.find((u) => u.side === 'enemy')!;
     e1.hp = 3;
     const chest = findTile(s.map, '$')!;
@@ -233,19 +241,22 @@ describe('階段', () => {
     expect(n.floors?.[2]?.enemies.every((u) => u.down)).toBe(true);
   });
 
-  it('地下 1 階の入口の階段では階を移らない', () => {
-    const s = generateGame(13, 'easy');
+  it('地下 1 階の上り階段からは地上へ出る(秘宝が無ければ勝ちにはならない)', () => {
+    const s = generateGame(13, 'easy', 1);
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const up = findTile(s.map, 'S')!;
     const k = walkerOnto(s, up);
     const r = resolveTurn(s, { [k.id]: [{ type: 'move', dir: k.dir }, { type: 'stairs' }] });
-    expect(r.state.floor).toBe(1);
+    expect(r.state.floor).toBe(0);
     expect(r.state.status).toBe('playing');
-    expect(r.events.some((e) => e.type === 'stairs')).toBe(false);
+    expect(r.events.some((e) => e.type === 'stairs' && e.from === 1 && e.to === 0)).toBe(true);
+    // 地上の下り階段の周りに着く
+    const down = findTile(r.state.map, '>')!;
+    for (const u of r.state.units.filter((u) => u.side === 'party')) expect(Math.abs(u.x - down.x) + Math.abs(u.y - down.y)).toBeLessThanOrEqual(6);
   });
 
   it('階段を使う予約が無ければ、階段の上でターンを終えても移らない(通り道の階段)', () => {
-    const s = generateGame(11, 'easy');
+    const s = generateGame(11, 'easy', 1);
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const down = findTile(s.map, '>')!;
     const k = walkerOnto(s, down);
@@ -257,7 +268,7 @@ describe('階段', () => {
   });
 
   it('全員移動で階段を行き先にすると、先頭だけが階段を使い、着いたターンに移る', () => {
-    const s = generateGame(11, 'easy');
+    const s = generateGame(11, 'easy', 1);
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const down = findTile(s.map, '>')!;
     const b = besideOf(s, down);
@@ -280,7 +291,7 @@ describe('階段', () => {
 
 describe('宝箱', () => {
   it('宝箱に立つと開いてゴールドが増え、同じ宝箱は 2 回開かない', () => {
-    const s = generateGame(14, 'easy');
+    const s = generateGame(14, 'easy', 1);
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const chest = findTile(s.map, '$')!;
     const b = besideOf(s, chest);
@@ -300,7 +311,7 @@ describe('宝箱', () => {
 });
 
 describe('秘宝', () => {
-  it('秘宝のマスに立つと拾い、地下 1 階の入口の階段に戻ると勝ち。地下 2 階以降の上り階段では階を移るだけ', () => {
+  it('秘宝のマスに立つと拾い、地上へ上がると勝ち。地下 2 階以降の上り階段では階を移るだけ', () => {
     const s = generateGame(3, 'easy', 5);
     for (const u of s.units) if (u.side === 'enemy') u.down = true;
     const at = (s.objective as { at: Pos }).at;
@@ -323,7 +334,7 @@ describe('秘宝', () => {
     expect(r.state.status).toBe('playing');
     expect(r.state.floor).toBe(4);
 
-    // 地下 1 階の入口へ移して戻る
+    // 地下 1 階の上り階段に乗るだけでは勝ちにならず、階段を使って地上へ上がると勝ち
     st = r.state;
     changeFloor(st, 1);
     for (const u of st.units) if (u.side === 'enemy') u.down = true;
@@ -332,6 +343,9 @@ describe('秘宝', () => {
     p1().x = nb.at.x;
     p1().y = nb.at.y;
     r = resolveTurn(st, { p1: [{ type: 'move', dir: nb.dir }] });
+    expect(r.state.status).toBe('playing');
+    r = resolveTurn(r.state, { p1: [{ type: 'stairs' }] });
+    expect(r.state.floor).toBe(0);
     expect(r.state.status).toBe('won');
   });
 
