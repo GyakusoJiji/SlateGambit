@@ -20,6 +20,7 @@ import {
   FACILITY_TILE,
   facilityHere,
   innCost,
+  roomFacility,
   TOWN,
   useChurch,
   useClinic,
@@ -213,12 +214,19 @@ export class Controller {
     // 噂を聞いたら、通知を読めるよう止まる(次のターンの通知で上書きしない)
     if (last.some((e) => e.type === 'rumor')) return void this.stopAuto();
     const plans = quickMovePlans(this.state, this.quick.leader, this.quick.target, this.settings.formation);
-    if (!plans) return void this.stopAuto(T.toast.arrived);
+    if (!plans) return void this.stopAuto(this.arrivedMessage());
     this.autoTimer = window.setTimeout(() => {
       if (!this.quick || this.playback) return;
       this.plans = { ...this.plans, ...plans };
       this.execute(true);
     }, 120);
+  }
+
+  /** 全員移動で着いたときの通知。地上で先頭が施設の部屋の中にいれば「〇〇に入った」 */
+  private arrivedMessage(): string {
+    const u = this.state.units.find((x) => x.id === this.quick?.leader && !x.down);
+    const f = u && (this.state.floor ?? 1) === 0 && !this.state.scenario ? roomFacility(this.state.map, u) : null;
+    return f ? T.toast.enteredFacility(T.facility[f].name) : T.toast.arrived;
   }
 
   /** 立っている味方に、HP か MP が減っている者がいるか */

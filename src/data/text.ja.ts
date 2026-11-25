@@ -364,6 +364,8 @@ export const T = {
     overlap: '止まるマスが重なっている味方がいる(片方は押し戻される)',
     foundFoe: '敵を見つけたので止まった',
     arrived: '行き先に着いた',
+    /** 全員移動の行き先が地上の施設の部屋だったとき。name=施設の名前 */
+    enteredFacility: (name: string) => `${name}に入った`,
     rested: '全員の回復が終わった',
     /** 宿・馬小屋で全員休憩を押して保存したとき。msg=施設で休んだ結果(無ければ保存だけ) */
     saved: (msg: string) => (msg ? `${msg}。保存した` : '保存した'),
