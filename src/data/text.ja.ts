@@ -88,6 +88,7 @@ export const T = {
   },
 
   settings: {
+    pointers: '画面外の階段・施設・味方などの方向を表示する',
     title: '設定',
     hints: '敵の予兆を表示する',
     debugPlans: '[デバッグ] 敵の計画をすべて表示',

@@ -394,8 +394,8 @@ body {
 
 .log {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
+  min-height: 84px;
+  overflow: auto;
   margin: 6px 0 0;
   padding: 6px 8px;
   border-radius: 6px;

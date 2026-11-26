@@ -44,6 +44,7 @@ import { LESSONS, lessonDef, TUTORIAL_ID, TUTORIAL_PAGES } from '../core/tutoria
 
 interface Settings {
   hints: boolean;
+  pointers: boolean;
   debugPlans: boolean;
   noFog: boolean;
   /** 全員移動の隊列(先頭の後ろに並ぶ順。味方の ID)。null なら先頭に近い順 */
@@ -331,6 +332,7 @@ export class Controller {
    * ターンごとの自動保存(最後のターン)は、起動したときの自動の再開だけに使う
    */
   private showCampaign(): void {
+    this.el.overlay.hidden = false;
     const saved = loadGame();
     const inn = loadInn();
     const btn = (d: Difficulty) => `<button class="act diff" data-ov="diff" data-diff="${d}">
@@ -340,6 +342,7 @@ export class Controller {
       ${inn ? `<button class="act diff primary" data-ov="continue-inn"><b>${T.menu.continueInn}</b><small>${T.menu.continueInnDesc(inn.turn, !!saved && saved.turn !== inn.turn)}</small></button>` : ''}
       <h3>${T.menu.newGame}</h3>
       ${btn('easy')}${btn('normal')}${btn('hard')}
+      <button class="act" data-ov="campaign-settings">${T.settings.title}</button>
       <p class="note">${T.start.note}<br>${T.difficultyDesc.boss}</p>
       <button class="act" data-ov="menu">${T.menu.back}</button>
     </div>`;
@@ -695,6 +698,7 @@ export class Controller {
   /** 画面外の目印: 上り階段(入口)、見つけた下り階段・秘宝、(誰も映っていなければ)味方 */
   private pointers(st: GameState, explored: ArrayLike<number>, treasureAt: Pos | null): { at: Pos; color: string; label: string }[] {
     const out: { at: Pos; color: string; label: string }[] = [];
+    if (!this.settings.pointers) return out;
     const seen = (p: Pos) => !!explored[p.y * st.map.w + p.x];
     const up = findTile(st.map, 'S');
     if (up) out.push({ at: up, color: '#c8b070', label: currentFloor(st) === 1 ? T.pointer.surface : T.pointer.stairs });
@@ -1039,19 +1043,18 @@ export class Controller {
   }
 
   /** seed: シード欄に出す値(並び替えで描き直すとき、入力途中の値を残す) */
-  private showSettings(seed: number | string = this.state.seed): void {
+  private settingsFromCampaign = false;
+
+  private showSettings(): void {
     const s = this.settings;
     this.el.overlay.hidden = false;
     this.el.overlay.innerHTML = `<div class="sheet">
       <h2>${T.settings.title}</h2>
       <label><input type="checkbox" data-set="hints" ${s.hints ? 'checked' : ''}> ${T.settings.hints}</label>
-      <label><input type="checkbox" data-set="debugPlans" ${s.debugPlans ? 'checked' : ''}> ${T.settings.debugPlans}</label>
-      <label><input type="checkbox" data-set="noFog" ${s.noFog ? 'checked' : ''}> ${T.settings.debugNoFog}</label>
+      <label><input type="checkbox" data-set="pointers" ${s.pointers ? 'checked' : ''}> ${T.settings.pointers}</label>
       ${this.formationSection()}
-      <label>${T.settings.seed} <input type="number" data-seed value="${seed}"></label>
       <div class="row">
-        <button class="act" data-ov="new">${T.settings.newGame}</button>
-        <button class="act primary" data-ov="close">${T.settings.close}</button>
+        <button class="act primary" data-ov="settings-close">${T.settings.close}</button>
       </div>
     </div>`;
   }
@@ -1100,7 +1103,7 @@ export class Controller {
   private onTopbarClick(e: Event): void {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-top]');
     if (!b) return;
-    if (b.dataset.top === 'settings') this.showSettings();
+    if (b.dataset.top === 'settings') { this.pendingSeed = randomSeed(); this.showCampaign(); }
     if (b.dataset.top === 'history' && !this.playback) this.showHistory();
     if (b.dataset.top === 'replay' && this.lastPlayback && !this.playback) {
       this.playback = this.lastPlayback;
@@ -1139,15 +1142,14 @@ export class Controller {
       if ((b.dataset.ov === 'deposit' ? deposit : withdraw)(this.state, amount) > 0) this.facilityUsed();
     }
     if (b.dataset.ov === 'form-up' || b.dataset.ov === 'form-down') {
-      const seed = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]')?.value;
       this.moveInFormation(b.dataset.id!, b.dataset.ov === 'form-up' ? -1 : 1);
-      this.showSettings(seed);
+      this.showSettings();
     }
-    if (b.dataset.ov === 'new') {
-      // 設定画面でシードを書き換えた場合だけそのシード、それ以外は毎回新しいマップ
-      const input = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]');
-      const typed = input && input.value && Number(input.value) !== this.state.seed;
-      this.showMenu(typed ? Number(input.value) : randomSeed());
+    if (b.dataset.ov === 'new') this.showMenu(randomSeed());
+    if (b.dataset.ov === 'campaign-settings') { this.settingsFromCampaign = true; this.showSettings(); }
+    if (b.dataset.ov === 'settings-close') {
+      if (this.settingsFromCampaign) this.showCampaign();
+      else { this.el.overlay.hidden = true; this.refresh(); }
     }
     if (b.dataset.ov === 'menu') this.showMenu(this.pendingSeed);
     if (b.dataset.ov === 'tutorial') this.showTutorialGuide(0);
@@ -1200,11 +1202,10 @@ export class Controller {
     if (input.dataset.formation) {
       this.settings.formation = input.dataset.formation === 'custom' ? this.formationOrder() : null;
       saveSettings(this.settings);
-      const seed = this.el.overlay.querySelector<HTMLInputElement>('[data-seed]')?.value;
-      this.showSettings(seed);
+      this.showSettings();
       return;
     }
-    const k = input.dataset.set as 'hints' | 'debugPlans' | 'noFog' | undefined;
+    const k = input.dataset.set as 'hints' | 'pointers' | undefined;
     if (!k) return;
     this.settings[k] = input.checked;
     saveSettings(this.settings);
@@ -1681,10 +1682,10 @@ export function randomSeed(): number {
 }
 
 function loadSettings(): Settings {
-  const def: Settings = { hints: true, debugPlans: false, noFog: false, formation: null };
+  const def: Settings = { hints: true, pointers: true, debugPlans: false, noFog: false, formation: null };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    const s: Settings = raw ? { ...def, ...JSON.parse(raw) } : def;
+    const s: Settings = raw ? { ...def, ...JSON.parse(raw), debugPlans: false, noFog: false } : def;
     const f: unknown = s.formation;
     if (!Array.isArray(f) || !f.every((id) => typeof id === 'string')) s.formation = null;
     return s;
