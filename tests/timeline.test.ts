@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { parseMap } from '../src/core/map';
 import type { GameState, Unit } from '../src/core/types';
 import { CLASSES, MONSTERS } from '../src/data/units';
-import { cursorTickFor, reachInfo, tickCells, tickPositions, unitsAtTick } from '../src/ui/timeline';
+import { resolveTurn } from '../src/core/resolve';
+import { cursorTickFor, previewPlan, reachInfo, shoveDelay, tickCells, tickPositions, unitsAtTick } from '../src/ui/timeline';
 
 const OPEN = [
   '##########',
@@ -41,6 +42,27 @@ describe('時間軸', () => {
     expect(pos[1]).toEqual({ x: 3, y: 3 });
     expect(pos[2]).toEqual({ x: 3, y: 2 });
     expect(pos[8]).toEqual({ x: 3, y: 2 });
+  });
+
+  it('押し返しを見込む: 押した敵の位置を追い、踏ん張りで後ろの予約を遅らせる(エンジンと同じ結果)', () => {
+    const w = mk('p1', 'warrior', 1, 1);
+    const s = game([w, mk('g1', 'goblin', 2, 1)]);
+    const plan = [{ type: 'move' as const, dir: 'E' as const }, { type: 'move' as const, dir: 'E' as const }, { type: 'attack' as const, target: 'g1' }];
+    const pv = previewPlan(s, w, plan);
+    // t1 押す → t2 踏ん張り → t3 もう一度押す → t4 踏ん張り → t5〜t7 攻撃
+    expect(pv.pushes.map((p) => [p.tick, p.to.x])).toEqual([[1, 3], [3, 4]]);
+    expect(pv.end).toEqual({ x: 3, y: 1 });
+    expect(pv.pos[2]).toEqual({ x: 2, y: 1 });
+    expect(shoveDelay(s, w, plan)).toBe(2);
+    expect(tickCells(plan, 'guard', { st: s, u: w }).map((c) => c.glyph)).toEqual(['押', '踏', '押', '踏', '構', '構', '攻', '防']);
+    // 押された敵は、押されたティックの後は後ろへ動いて見える(押したあとの攻撃が届く)
+    expect(unitsAtTick(s, { p1: plan }, 3).find((u) => u.id === 'g1')).toMatchObject({ x: 4, y: 1 });
+    expect(reachInfo(s, w, pv.end, 'attack', unitsAtTick(s, { p1: plan }, 7)).targets.map((u) => u.id)).toEqual(['g1']);
+    // 同じ予約をエンジンで解決しても、同じ位置になって攻撃が当たる
+    const r = resolveTurn({ ...s, items: { food: 9 } }, { p1: plan, g1: [{ type: 'guard' }] });
+    expect(r.state.units.find((u) => u.id === 'p1')).toMatchObject(pv.end);
+    expect(r.state.units.find((u) => u.id === 'g1')).toMatchObject({ x: 4, y: 1 });
+    expect(r.events.some((e) => e.type === 'damage' && e.by === 'p1' && e.tick === 7)).toBe(true);
   });
 
   it('接近攻撃は経路の目安をたどる', () => {

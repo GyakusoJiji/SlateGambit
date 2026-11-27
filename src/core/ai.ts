@@ -2,16 +2,18 @@
 // 判断の揺らぎは (seed, turn, id) から作る決定的な乱数で行うため、同じ状態からは同じ計画になる。
 import { SPELLS } from '../data/units';
 import { stats } from './stats';
-import { RULES, apLeft } from './actions';
+import { RULES, actionCost, apLeft } from './actions';
 import { hasLos } from './los';
 import { adjacent, chebyshev, DIR_LIST, dist2, isWalkable, manhattan, samePos, step } from './map';
 import { pathAdjacent, pathTo } from './path';
 import { clearShot } from './reactions';
+import { chargeRoute } from './resolve';
+import { canShove } from './shove';
 import { Rng, hashSeed } from './rng';
-import type { Action, Dir, GameState, Plans, Pos, Unit } from './types';
+import { AP_PER_TURN, type Action, type Dir, type GameState, type Plans, type Pos, type Unit } from './types';
 import { unitSees } from './vision';
 
-export type Intent = 'attack' | 'power' | 'watch' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath' | 'cast' | 'alarm';
+export type Intent = 'attack' | 'power' | 'watch' | 'overwatch' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath' | 'cast' | 'alarm';
 
 export function planEnemies(state: GameState): Plans {
   const plans: Plans = {};
@@ -22,18 +24,37 @@ export function planEnemies(state: GameState): Plans {
   return plans;
 }
 
-/** 計画の中で単体の相手を狙う最初の攻撃行動(予兆のターゲットライン用) */
-export function plannedTarget(actions: Action[]): { target: string; charge: boolean; power: boolean; tick: number } | null {
+/**
+ * 計画の中で単体の相手を狙う最初の攻撃行動と、それが発動するティック(予兆のターゲットライン・印用)。
+ * 接近攻撃は、at(敵本人・盤面・ユニット)を渡すと、届く位置まで近づく歩数を足す。
+ * このターンのうちに届かない見込みなら tick は null
+ */
+export function plannedTarget(
+  actions: Action[],
+  at?: { unit: Unit; map: GameState['map']; units: Unit[] },
+): { target: string; charge: boolean; power: boolean; tick: number | null } | null {
   let elapsed = 0;
+  let pos: Pos | null = at ? { x: at.unit.x, y: at.unit.y } : null;
   for (const a of actions) {
     if (a.type === 'attack') {
       const cost = a.power ? RULES.powerCost : RULES.attackCost;
       return { target: a.target, charge: false, power: !!a.power, tick: elapsed + cost };
     }
     if (a.type === 'charge') {
-      return { target: a.target, charge: true, power: false, tick: elapsed + RULES.attackCost };
+      let walk = 0;
+      if (at && pos) {
+        const t = at.units.find((u) => u.id === a.target);
+        const route = t ? chargeRoute(at.map, at.unit, pos, t, at.units) : null;
+        walk = route ? route.length - 1 : Infinity;
+      }
+      const tick = elapsed + walk + RULES.attackCost;
+      return { target: a.target, charge: true, power: false, tick: tick <= Math.min(AP_PER_TURN, elapsed + a.ticks) ? tick : null };
     }
-    elapsed += a.type === 'move' ? (a.slow ? RULES.carryMoveCost : 1) : 1;
+    if (a.type === 'move' && pos && at) {
+      const n = step(pos, a.dir);
+      if (isWalkable(at.map, n.x, n.y)) pos = n;
+    }
+    elapsed += actionCost(a);
   }
   return null;
 }
@@ -46,7 +67,8 @@ export function summarizeIntent(actions: Action[], unit?: Unit): Intent {
   if (actions.some((a) => a.type === 'spell' && a.spell === 'hellfire')) return 'cast';
   if (actions.some((a) => a.type === 'attack' && a.power)) return 'power';
   if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell')) return 'attack';
-  if (actions.some((a) => a.type === 'overwatch' || a.type === 'intercept')) return 'watch';
+  if (actions.some((a) => a.type === 'overwatch')) return 'overwatch';
+  if (actions.some((a) => a.type === 'intercept')) return 'watch';
   if (actions.some((a) => a.type === 'move')) return 'move';
   if (actions.some((a) => a.type === 'guard')) return 'guard';
   return 'idle';
@@ -113,7 +135,8 @@ function planOne(state: GameState, e: Unit): Action[] {
   const hpRatio = e.hp / def.maxHp;
 
   let pos: Pos = { x: e.x, y: e.y };
-  const blocked = (p: Pos) => units.some((o) => o !== e && !o.down && o.x === p.x && o.y === p.y);
+  // 押し返せる小さい相手(オーガにとっての戦士など)は通れるものとして扱う(踏み込めば押し返して進む)
+  const blocked = (p: Pos) => units.some((o) => o !== e && !o.down && o.x === p.x && o.y === p.y && !canShove(e, o));
 
   // 弱ったら、半分は下がって距離を取り、残りの一部は守りを固める
   if (hpRatio < 0.35) {

@@ -495,6 +495,8 @@ export function timeline(
   tick: number | null,
   selected: string | null,
   autoTick: number | null = null,
+  /** 渡すと押し返しを見込んで並べる(押すティックは「押」、踏ん張りは「踏」) */
+  st?: GameState,
 ): string {
   const head = Array.from(
     { length: TICKS_PER_TURN },
@@ -504,7 +506,7 @@ export function timeline(
     .map((u) => {
       const cells = u.down
         ? `<span class="cell down" style="grid-column: span ${TICKS_PER_TURN}">${T.down}</span>`
-        : tickCells(plans[u.id] ?? [], filler)
+        : tickCells(plans[u.id] ?? [], filler, st ? { st, u } : undefined)
             .map((c, i) => `<span class="cell${c.hit ? ' hit' : ''}${c.fill ? ' fill' : ''}${tick === i + 1 ? ' on' : autoTick === i + 1 ? ' cur' : ''}">${esc(c.glyph)}</span>`)
             .join('');
       return `<span class="who${u.id === selected ? ' sel' : ''}" data-sel="${u.id}">${esc(nameOf(u.id))}</span>${cells}`;

@@ -29,7 +29,9 @@ export type Mark =
   | { kind: 'ghost'; at: Pos; icon: string }
   | { kind: 'target'; at: Pos; color: string }
   | { kind: 'area'; at: Pos; radius: number; color: string }
-  | { kind: 'link'; from: Pos; to: Pos; color: string };
+  | { kind: 'link'; from: Pos; to: Pos; color: string }
+  /** マスの右上に小さな文字の札(押し返しの「押」など) */
+  | { kind: 'tag'; at: Pos; text: string; color: string };
 
 export type Effect =
   | { kind: 'line'; from: Pos; to: Pos; color: string; alpha: number }
@@ -514,6 +516,7 @@ export class Renderer {
       attack: ['#ff4d4d', '!'],
       power: ['#ff5a20', '強5'],
       watch: ['#ffb020', '迎'],
+      overwatch: ['#ffb020', '警'],
       move: ['#ffd24d', '→'],
       guard: ['#5ab0ff', '■'],
       idle: ['#9a9aa8', '…'],
@@ -531,6 +534,9 @@ export class Renderer {
     const g = this.ctx;
     const z = this.zoom;
     switch (m.kind) {
+      case 'tag':
+        this.badge(this.sx(m.at.x) + z * 0.3, this.sy(m.at.y) - z * 0.32, m.color, m.text);
+        return;
       case 'path': {
         if (m.points.length < 2) return;
         g.strokeStyle = m.color;

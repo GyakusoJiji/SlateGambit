@@ -6,18 +6,21 @@
 //   PLAY=turn STATE=... CMD="p1: to 8,20; atk g1 | p2: ow | p3: fb 9,20 | p4: heal p1"
 //   PLAY=show STATE=...
 //
-// コマンド: to X,Y(経路で移動) / atk ID(届かなければ接近攻撃) / chg ID / g(防御) / w(待機) /
-//   fb X,Y / heal ID / rev ID / ow(警戒射撃・残り全部) / ic(迎撃・残り全部) / carry ID / drop / st(階段を使う)
+// コマンド: to X,Y(経路で移動) / mv ENWS(1 マスずつ移動。戦士は小さい敵を押し返す) /
+//   atk ID(届かなければ接近攻撃) / pw ID(強攻撃) / chg ID / g(防御) / w(待機) / cv(かばう) /
+//   trip ID(足払い) / fb X,Y / sm X,Y(聖光) / heal ID / rev ID / pot hp|mp ID(回復薬) /
+//   ow(警戒射撃・残り全部) / ic(迎撃・残り全部) / carry ID / drop / st(階段を使う)
+// 予定位置・届くかの判定は、予約画面と同じ見込み(壁・押し返し・踏ん張り・押された敵の位置)を使う
 import * as fs from 'node:fs';
 import { it } from 'vitest';
-import { RULES, apLeft, canAppend, carryingAfter, fillPlan } from '../src/core/actions';
-import { planEnemies, summarizeIntent } from '../src/core/ai';
-import { step } from '../src/core/map';
+import { RULES, apLeft, canAppend, carryingAfter, fillPlan, planCost } from '../src/core/actions';
+import { planEnemies, plannedTarget, summarizeIntent } from '../src/core/ai';
 import { pathTo } from '../src/core/path';
-import { inReach, resolveTurn } from '../src/core/resolve';
+import { canShove, inReach, resolveTurn } from '../src/core/resolve';
 import { createTestGame } from '../src/core/scenario';
-import type { Action, GameEvent, GameState, Plans, Pos, Unit } from '../src/core/types';
-import { sideVisibleMask, visibleFoes } from '../src/core/vision';
+import type { Action, Dir, GameEvent, GameState, Plans, PotionId, Pos, Unit } from '../src/core/types';
+import { isNeutral, sideVisibleMask, visibleFoes } from '../src/core/vision';
+import { previewPlan, shoveDelay, unitsAtTick } from '../src/ui/timeline';
 import { stats } from '../src/core/stats';
 import { planParty } from './partyBot';
 
@@ -70,24 +73,56 @@ function parseCmd(state: GameState, cmd: string, out: string[]): Plans {
         if (err) out.push(`  ! ${u.id} ${c}: ${err}`);
         else list.push(a);
       };
-      const end = (): Pos => {
-        let p: Pos = { x: u.x, y: u.y };
-        for (const a of list) if (a.type === 'move') p = step(p, a.dir);
-        return p;
+      // 予約画面と同じ見込みの予定位置(壁や押せない敵には入らない。押し返しと踏ん張りを数える)
+      const end = (): Pos => previewPlan(state, u, list).end;
+      /** この行動を足したとき、それが発動するティックの全ユニットの位置(押された敵は押された先) */
+      const unitsAtHit = (cost: number) => unitsAtTick(state, { ...plans, [u.id]: list }, planCost(list) + shoveDelay(state, u, list) + cost);
+      const attackOrCharge = (power: boolean) => {
+        const cost = power ? RULES.powerCost : RULES.attackCost;
+        const units = unitsAtHit(cost);
+        const t = units.find((x) => x.id === arg);
+        if (!t) return out.push(`  ! ${u.id} ${c}: ${arg} がいない`);
+        if (inReach(state.map, u, end(), t, units)) push({ type: 'attack', target: arg, ...(power ? { power: true } : {}) });
+        else if (power) out.push(`  ! ${u.id} ${c}: 強攻撃は予定位置から届く敵にしか使えない`);
+        else push({ type: 'charge', target: arg, ticks: apLeft(list) });
       };
       switch (op) {
         case 'to': {
           const slow = carryingAfter(u, list);
-          const path = pathTo(state.map, end(), xy()) ?? [];
+          // 押し返せない敵のマスは避けて経路を引く(UI と同じ)
+          const blockedByFoe = (q: Pos) =>
+            state.units.some((o) => o.side !== u.side && !o.down && !isNeutral(o) && o.x === q.x && o.y === q.y && !canShove(u, o));
+          const path = pathTo(state.map, end(), xy(), blockedByFoe) ?? pathTo(state.map, end(), xy()) ?? [];
           const room = Math.floor(apLeft(list) / (slow ? RULES.carryMoveCost : 1));
           for (const d of path.slice(0, room)) list.push({ type: 'move', dir: d, slow: slow || undefined });
           if (path.length > room) out.push(`  ・${u.id} の移動は AP 不足で途中まで`);
           break;
         }
-        case 'atk': {
-          const t = state.units.find((x) => x.id === arg)!;
-          if (inReach(state.map, u, end(), t, state.units)) push({ type: 'attack', target: arg });
-          else push({ type: 'charge', target: arg, ticks: apLeft(list) });
+        case 'mv':
+          for (const d of (arg ?? '').toUpperCase()) {
+            if ('NESW'.includes(d)) push({ type: 'move', dir: d as Dir, stop: true });
+            else out.push(`  ! ${u.id} ${c}: 方向は N E S W`);
+          }
+          break;
+        case 'atk':
+          attackOrCharge(false);
+          break;
+        case 'pw':
+          attackOrCharge(true);
+          break;
+        case 'cv':
+          push({ type: 'cover' });
+          break;
+        case 'trip':
+          push({ type: 'spell', spell: 'trip', target: arg });
+          break;
+        case 'sm':
+          push({ type: 'spell', spell: 'smite', tile: xy() });
+          break;
+        case 'pot': {
+          const [kind, target] = c.split(/\s+/).slice(1);
+          if (kind !== 'hp' && kind !== 'mp') out.push(`  ! ${u.id} ${c}: pot hp|mp ID`);
+          else push({ type: 'item', item: kind as PotionId, target: target ?? u.id });
           break;
         }
         case 'chg':
@@ -145,12 +180,22 @@ function summarize(events: GameEvent[], state: GameState): string {
     else if (e.type === 'spring') lines.push(`${name(e.id)} 泉${e.revived ? '復活' : '全快'}`);
     else if (e.type === 'wake') lines.push(`${name(e.id)} 意識を取り戻した`);
     else if (e.type === 'carry' || e.type === 'drop') lines.push(`${name(e.id)} ${e.type}`);
+    else if (e.type === 'push') lines.push(`t${e.tick}:${name(e.id)} が ${name(e.target)} を押し返した(${e.from.x},${e.from.y}→${e.to.x},${e.to.y})`);
+    else if (e.type === 'bump') lines.push(`t${e.tick}:${name(e.id)} 進めず`);
+    else if (e.type === 'stun') lines.push(`${name(e.id)} 足払いで ${e.ticks} ティック動けない`);
+    else if (e.type === 'interrupt') lines.push(`${name(e.id)} の構えが止まった`);
+    else if (e.type === 'dry') lines.push(`泉(${e.at.x},${e.at.y})が酸の泉に変わった`);
+    else if (e.type === 'acid') lines.push(`${name(e.id)} 酸 ${e.amount}`);
+    else if (e.type === 'purify') lines.push(`泉(${e.at.x},${e.at.y})が戻った`);
+    else if (e.type === 'ration') lines.push(e.food ? '食料を 1 つ使った' : '食料が無く休憩しても回復しない');
   }
   void state;
   return lines.join(', ') || '(戦闘なし)';
 }
 
-const LETTER: Record<string, string> = { warrior: 'W', thief: 'T', mage: 'M', priest: 'P', goblin: 'g', archer: 'a', orc: 'o', ogre: 'B' };
+const LETTER_MAP: Record<string, string> = { warrior: 'W', thief: 'T', mage: 'M', priest: 'P', goblin: 'g', archer: 'a', orc: 'o', ogre: 'B' };
+/** 一覧に無い敵は defId の頭文字(小文字)で出す */
+const LETTER = new Proxy(LETTER_MAP, { get: (m, k: string) => m[k] ?? k[0].toLowerCase() });
 
 function view(state: GameState): string {
   const { map, units } = state;
@@ -186,10 +231,16 @@ function view(state: GameState): string {
     }),
     ...seenFoes
       .filter((u) => !u.down)
-      .map((u) => `${u.id} ${LETTER[u.defId]} (${u.x},${u.y}) HP${u.hp}/${stats(u).maxHp} 予兆:${summarizeIntent(enemyPlans[u.id] ?? [])}`),
+      .map((u) => {
+        const plan = enemyPlans[u.id] ?? [];
+        // 狙っている味方と発動ティック(画面の「!3」「強5」「追6」と同じ。接近攻撃がこのターンに届かない見込みなら「追」だけ)
+        const pt = plannedTarget(plan, { unit: u, map, units });
+        const aim = pt ? ` 狙い:${pt.target}(${pt.charge ? `追${pt.tick ?? ''}` : `${pt.power ? '強' : '!'}${pt.tick}`})` : '';
+        return `${u.id} ${LETTER[u.defId]} (${u.x},${u.y}) HP${u.hp}/${stats(u).maxHp} 予兆:${summarizeIntent(plan, u)}${aim}`;
+      }),
   ];
   const remain = units.filter((u) => u.side === 'enemy' && !u.down).length;
-  return `ターン ${state.turn} 状態:${state.status} 残り敵:${remain}\n${rows.join('\n')}\n${info.join('\n')}`;
+  return `ターン ${state.turn} 状態:${state.status} 残り敵:${remain} 食料:${state.items?.food ?? 0}\n${rows.join('\n')}\n${info.join('\n')}`;
 }
 
 export type { Unit };

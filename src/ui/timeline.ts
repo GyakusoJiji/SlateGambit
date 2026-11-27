@@ -3,68 +3,111 @@ import { RULES, expandPlan, fillPlan, planCost, spellCost, type Step } from '../
 import { hasLos } from '../core/los';
 import { adjacent, dirBetween, dist2, isWalkable, nearOrSame, step } from '../core/map';
 import { canShove, chargeRoute, inReach } from '../core/resolve';
+import { delayAfterShove } from '../core/shove';
 import { spellRange, stats } from '../core/stats';
 import { AP_PER_TURN, TICKS_PER_TURN, type Action, type GameState, type Plans, type Pos, type Unit } from '../core/types';
 import { SPELLS } from '../data/units';
 import { hostile } from '../core/vision';
 import type { Mode } from './panel';
 
+/** 予約どおりに動いたときの見込み(予約画面の予定経路・予定位置・時間軸が共通で使う) */
+export interface PlanPreview {
+  /** 各ティックの終わりの予定位置(添字 0 がターンの初め、t が t ティック目の終わり。9 要素) */
+  pos: Pos[];
+  /** 押し返しの踏ん張りを反映した 8 ティック分の動き(踏ん張りのあとの予約は 1 ティックずつ遅れる) */
+  steps: Step[];
+  /** 押し返し: 押したティック・押した敵・敵の行き先 */
+  pushes: { tick: number; id: string; to: Pos }[];
+  /** 移動でたどるマス(予定経路の線。接近攻撃の経路は含めない) */
+  path: Pos[];
+  /** 移動を終えた予定位置(次に足す行動の起点) */
+  end: Pos;
+}
+
 /**
- * 予約どおりに動いたときの各ティックの終わりの予定位置(添字 0 がターンの初め、t が t ティック目の終わり)。
- * 他のユニットとの競合は考えない(ただし重装ユニットが小さい敵を押し返せない壁際の詰まり・大きい敵への衝突は考慮する)。
- * 接近攻撃は予約の時点の経路の目安をたどる
+ * 予約どおりに動いたときの見込み。エンジン(resolveTurn)と同じく、
+ * 壁や押し返せない敵のマスには入らず、小さい敵を押し返したら敵を 1 マス後ろへ動かし、次のティックを踏ん張りにして残りを遅らせる。
+ * 他のユニットの移動との競合は考えない。接近攻撃は予約の時点の経路の目安をたどる
  */
-export function tickPositions(st: GameState, u: Unit, actions: Action[]): Pos[] {
+export function previewPlan(st: GameState, u: Unit, actions: Action[]): PlanPreview {
+  const steps = expandPlan(actions);
+  /** 押し返した敵の移動後の位置 */
+  const moved = new Map<string, Pos>();
+  const others = (): Unit[] => (moved.size === 0 ? st.units : st.units.map((o) => (moved.has(o.id) ? { ...o, ...moved.get(o.id)! } : o)));
   let p: Pos = { x: u.x, y: u.y };
-  const out: Pos[] = [p];
+  const pos: Pos[] = [p];
+  const path: Pos[] = [p];
+  const pushes: PlanPreview['pushes'] = [];
+  let end = p;
   let route: Pos[] | null = null;
   let ri = 0;
-  let skipNextMove = false;
-  for (const s of expandPlan(actions)) {
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
     if (s.k === 'move') {
-      if (skipNextMove) {
-        skipNextMove = false;
-      } else {
-        const n = step(p, s.action.dir);
-        const stepKind = canStepPreview(st, u, p, n);
-        if (stepKind) {
-          p = n;
-          if (stepKind === 'shove') skipNextMove = true;
+      const n = step(p, s.action.dir);
+      const r = canStepPreview(st.map, others(), u, p, n);
+      if (r) {
+        p = n;
+        end = p;
+        path.push(p);
+        if (r !== 'walk') {
+          moved.set(r.foe.id, r.back);
+          pushes.push({ tick: i + 1, id: r.foe.id, to: r.back });
+          delayAfterShove(steps, i + 1);
         }
       }
     } else if (s.k === 'charge') {
-      const t = st.units.find((x) => x.id === s.target);
+      const units = others();
+      const t = units.find((x) => x.id === s.target);
       if (t && !route) {
-        route = chargeRoute(st.map, u, p, t, st.units) ?? [p];
+        route = chargeRoute(st.map, u, p, t, units) ?? [p];
         ri = 0;
       }
       if (route && ri < route.length - 1) p = route[++ri];
     }
-    out.push(p);
+    pos.push(p);
   }
-  return out;
+  return { pos, steps, pushes, path, end };
 }
 
-/** 予定位置の計算で p → n へ進めるか(壁は不可。敵がいるマスは、押し返せる場合だけ 'shove' を返す) */
-function canStepPreview(st: GameState, u: Unit, p: Pos, n: Pos): false | 'walk' | 'shove' {
-  if (!isWalkable(st.map, n.x, n.y)) return false;
+/** 予約どおりに動いたときの各ティックの終わりの予定位置(previewPlan の pos) */
+export function tickPositions(st: GameState, u: Unit, actions: Action[]): Pos[] {
+  return previewPlan(st, u, actions).pos;
+}
+
+/** 押し返しの踏ん張りで遅れるティック数(このターンに入らなくなる予約の AP) */
+export function shoveDelay(st: GameState, u: Unit, actions: Action[]): number {
+  return previewPlan(st, u, actions).pushes.length;
+}
+
+/** 予定位置の計算で p → n へ進めるか(壁は不可。敵がいるマスは、押し返せる場合だけ押す相手と行き先を返す) */
+export function canStepPreview(
+  map: GameState['map'],
+  units: Unit[],
+  u: Unit,
+  p: Pos,
+  n: Pos,
+): false | 'walk' | { foe: Unit; back: Pos } {
+  if (!isWalkable(map, n.x, n.y)) return false;
   if (RULES.passThroughFoes) return 'walk';
-  const foe = st.units.find((o) => o !== u && !o.down && o.side !== u.side && o.x === n.x && o.y === n.y);
+  const foe = units.find((o) => o.id !== u.id && !o.down && o.side !== u.side && o.x === n.x && o.y === n.y);
   if (!foe) return 'walk';
   if (!canShove(u, foe)) return false;
   const dir = dirBetween(p, n);
   if (!dir) return false;
   const back = step(n, dir);
-  return isWalkable(st.map, back.x, back.y) && !st.units.some((o) => !o.down && o.x === back.x && o.y === back.y) ? 'shove' : false;
+  return isWalkable(map, back.x, back.y) && !units.some((o) => !o.down && o.x === back.x && o.y === back.y) ? { foe, back } : false;
 }
 
 /**
  * キャラ u を選んで mode の操作をしているとき、盤面と時間軸で基準にするティック(0〜8)。
  * - 移動・通常モード: 今から行動を足すティック(= 予約済み AP)
  * - 対象を選ぶモード(攻撃・魔法・薬・担ぐ): その行動が発動するティック(= min(8, 予約済み AP + 行動コスト))
+ * どちらも、押し返しの踏ん張りで遅れる分(delay)を足す
  */
-export function cursorTickFor(actions: Action[], mode: Mode): number {
-  const used = planCost(actions);
+export function cursorTickFor(actions: Action[], mode: Mode, delay = 0): number {
+  // delay: 押し返しの踏ん張りで遅れるティック数(shoveDelay)
+  const used = planCost(actions) + delay;
   const cost = modeHitCost(mode);
   return Math.max(0, Math.min(TICKS_PER_TURN, used + cost));
 }
@@ -90,13 +133,22 @@ function modeHitCost(mode: Mode): number {
   }
 }
 
-/** 指定ティック t(0〜8)の終わりにおける全ユニットの位置(味方は予約から進めた予定位置、敵は現在位置) */
+/**
+ * 指定ティック t(0〜8)の終わりにおける全ユニットの位置。
+ * 味方は予約から進めた予定位置、敵は現在位置(ただし味方が t までに押し返す敵は押された先)
+ */
 export function unitsAtTick(st: GameState, plans: Plans, tick: number): Unit[] {
   const t = Math.max(0, Math.min(TICKS_PER_TURN, tick));
+  const at = new Map<string, Pos>();
+  for (const u of st.units) {
+    if (u.side !== 'party' || u.down) continue;
+    const pv = previewPlan(st, u, plans[u.id] ?? []);
+    at.set(u.id, pv.pos[t]);
+    for (const p of pv.pushes) if (p.tick <= t) at.set(p.id, p.to);
+  }
   return st.units.map((u) => {
-    if (u.side !== 'party' || u.down) return u;
-    const at = tickPositions(st, u, plans[u.id] ?? [])[t];
-    return at.x === u.x && at.y === u.y ? u : { ...u, x: at.x, y: at.y };
+    const p = at.get(u.id);
+    return !p || (p.x === u.x && p.y === u.y) ? u : { ...u, x: p.x, y: p.y };
   });
 }
 
@@ -111,16 +163,28 @@ export interface TickCell {
 
 const ARROW = { N: '↑', E: '→', S: '↓', W: '←' } as const;
 
-/** 1 人分の 8 ティックの表示。filler は予約していない AP の扱い(敵が見えていれば防御) */
-export function tickCells(actions: Action[], filler: 'guard' | 'wait'): TickCell[] {
+/**
+ * 1 人分の 8 ティックの表示。filler は予約していない AP の扱い(敵が見えていれば防御)。
+ * at(盤面とキャラ)を渡すと押し返しを見込み、押すティックを「押」、踏ん張りを「踏」にして、後ろの予約を遅らせて並べる
+ */
+export function tickCells(actions: Action[], filler: 'guard' | 'wait', at?: { st: GameState; u: Unit }): TickCell[] {
   // 余った AP は、敵が見えていれば防御、見えていなければただの待機(回復しない)
   const used = planCost(actions);
-  const steps = expandPlan(fillPlan(actions, filler));
-  return steps.slice(0, AP_PER_TURN).map((s, i) => ({ glyph: glyphOf(s), hit: s.k === 'strike', fill: i >= used }));
+  const filled = fillPlan(actions, filler);
+  const pv = at ? previewPlan(at.st, at.u, filled) : null;
+  const steps = pv ? pv.steps : expandPlan(filled);
+  const shoveTicks = new Set(pv?.pushes.map((p) => p.tick));
+  let delay = 0;
+  return steps.slice(0, AP_PER_TURN).map((s, i) => {
+    if (s.k === 'recover') delay++;
+    return { glyph: shoveTicks.has(i + 1) ? '押' : glyphOf(s), hit: s.k === 'strike', fill: s.k !== 'recover' && i >= used + delay };
+  });
 }
 
 function glyphOf(s: Step): string {
   switch (s.k) {
+    case 'recover':
+      return '踏';
     case 'move':
       return ARROW[s.action.dir];
     case 'windup':

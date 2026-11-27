@@ -161,7 +161,23 @@ describe('敵の狙い予兆と強攻撃', () => {
     const pwr = plannedTarget([{ type: 'attack', target: 'p1', power: true }]);
     expect(pwr).toEqual({ target: 'p1', charge: false, power: true, tick: RULES.powerCost });
     expect(summarizeIntent([{ type: 'attack', target: 'p1', power: true }])).toBe('power');
-    expect(summarizeIntent([{ type: 'overwatch', ticks: 8 }])).toBe('watch');
+    // 警戒射撃と迎撃は印を分ける
+    expect(summarizeIntent([{ type: 'overwatch', ticks: 8 }])).toBe('overwatch');
+    expect(summarizeIntent([{ type: 'intercept', ticks: 8 }])).toBe('watch');
+  });
+
+  it('接近攻撃の発動ティックは、届く位置まで近づく歩数を足す(このターンに届かなければ null)', () => {
+    const s = arena({ p1: [1, 3], g1: [6, 3] });
+    const g1 = s.units.find((u) => u.id === 'g1')!;
+    const at = { unit: g1, map: s.map, units: s.units };
+    // (6,3) から隣の (2,3) まで 4 歩 + 構え 3 = 7
+    expect(plannedTarget([{ type: 'charge', target: 'p1', ticks: 8 }], at)?.tick).toBe(7);
+    // 先に 2 ティック使えば 9 になり、このターンには届かない
+    const late = plannedTarget([{ type: 'guard' }, { type: 'guard' }, { type: 'charge', target: 'p1', ticks: 6 }], at);
+    expect(late).toMatchObject({ charge: true, tick: null });
+    // 経過は行動の AP で数える(魔法 3AP の後の攻撃は 3 + 3 = 6)
+    const after = plannedTarget([{ type: 'spell', spell: 'fireball', tile: { x: 1, y: 3 } }, { type: 'attack', target: 'p1' }]);
+    expect(after?.tick).toBe(6);
   });
 
   it('隣にいるオークは一定確率で強攻撃(5AP)を構える', () => {

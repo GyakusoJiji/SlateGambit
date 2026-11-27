@@ -128,17 +128,57 @@ describe('移動', () => {
     expect(u(r3.state, 'p1')).toMatchObject({ x: 1, y: 1 });
   });
 
-  it('重装の戦士は小型の敵を 1 マス後ろへ押し返して前進できる(直後の 1 ティックは踏ん張り、壁際は押せない)', () => {
+  it('重装の戦士は小型の敵を 1 マス後ろへ押し返して前進できる(直後の 1 ティックは踏ん張りで残りが遅れる、壁際は押せない)', () => {
     const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
-    const r = resolveTurn(s, { p1: moves('E', 2) });
+    const r = resolveTurn(s, { p1: moves('E', 1) });
     expect(u(r.state, 'p1')).toMatchObject({ x: 2, y: 1 });
     expect(u(r.state, 'g1')).toMatchObject({ x: 3, y: 1 });
     expect(r.events.some((e) => e.type === 'push' && e.id === 'p1' && e.target === 'g1')).toBe(true);
+    // 2 歩目は消えずに 1 ティック遅れて、t3 にもう一度押す
+    const r2 = resolveTurn(s, { p1: moves('E', 2) });
+    expect(u(r2.state, 'p1')).toMatchObject({ x: 3, y: 1 });
+    expect(u(r2.state, 'g1')).toMatchObject({ x: 4, y: 1 });
+    expect(r2.events.filter((e) => e.type === 'push').map((e) => e.tick)).toEqual([1, 3]);
+    expect(r2.events.some((e) => e.type === 'move' && e.id === 'p1' && e.tick === 2)).toBe(false);
     // 敵の後ろが壁なら押せない
     const wall = game([mk('p1', 'warrior', 9, 1), mk('g1', 'goblin', 10, 1)]);
     const rw = resolveTurn(wall, { p1: moves('E', 1) });
     expect(u(rw.state, 'p1')).toMatchObject({ x: 9, y: 1 });
     expect(u(rw.state, 'g1')).toMatchObject({ x: 10, y: 1 });
+  });
+
+  it('押し返しの踏ん張りは、移動以外の行動が続いても 1 ティック遅らせる(曲がる経路も予定の道をたどる)', () => {
+    // 押す → 北へ曲がる: 曲がる 1 歩は消えずに t3 に進む
+    const s = game([mk('p1', 'warrior', 1, 2), mk('g1', 'goblin', 2, 2)]);
+    const r = resolveTurn(s, { p1: [...moves('E', 1), ...moves('N', 1)] });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 2, y: 1 });
+    expect(r.events.some((e) => e.type === 'move' && e.id === 'p1' && e.tick === 3)).toBe(true);
+    // 押す → 攻撃: 攻撃も 1 ティック遅れて発動する(押す → 防御 → 移動で踏ん張りを踏み倒せない)
+    const s2 = game([mk('p1', 'warrior', 1, 2), mk('g1', 'goblin', 2, 2)]);
+    const r2 = resolveTurn(s2, { p1: [...moves('E', 1), { type: 'attack', target: 'g1' }] });
+    const hit = r2.events.find((e) => e.type === 'damage' && e.by === 'p1');
+    expect(hit?.tick).toBe(1 + 1 + RULES.attackCost);
+  });
+
+  it('1 マスの通路で後ろの敵が前へ動いたティックには、押せないはずの敵を押さない', () => {
+    const corridor = ['#######', '#.....#', '#######'];
+    for (let seed = 1; seed <= 20; seed++) {
+      // 戦士 p1 が東へ踏み込み、g1 はその場、後ろの g2 は西へ(g1 のマス)動こうとする
+      const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1), mk('g2', 'goblin', 3, 1)], corridor, seed);
+      const r = resolveTurn(s, { p1: moves('E', 1), g1: [{ type: 'guard' }], g2: moves('W', 1) });
+      expect(r.events.some((e) => e.type === 'push')).toBe(false);
+      expect(u(r.state, 'p1')).toMatchObject({ x: 1, y: 1 });
+      expect(u(r.state, 'g1')).toMatchObject({ x: 2, y: 1 });
+      expect(u(r.state, 'g2')).toMatchObject({ x: 3, y: 1 });
+    }
+  });
+
+  it('大型の敵の接近攻撃は、押し返せる味方を通れるものとして進む', () => {
+    // 1 マスの通路で、オーガ b1 が戦士 p1 の奥の魔法使い p3 を狙う。戦士を押し返して進む
+    const corridor = ['########', '#......#', '########'];
+    const s = game([mk('b1', 'ogre', 1, 1), mk('p1', 'warrior', 3, 1), mk('p3', 'mage', 6, 1)], corridor);
+    const r = resolveTurn(s, { b1: [{ type: 'charge', target: 'p3', ticks: 8 }] });
+    expect(r.events.some((e) => e.type === 'push' && e.id === 'b1' && e.target === 'p1')).toBe(true);
   });
 
   it('止まるマスが重ならない(多数のランダムな移動)', () => {
