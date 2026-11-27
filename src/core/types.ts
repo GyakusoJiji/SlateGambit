@@ -173,6 +173,8 @@ export type StrikeKind = 'melee' | 'ranged' | 'fireball' | 'breath' | 'heal' | '
 
 export type GameEvent =
   | { tick: number; type: 'move'; id: string; from: Pos; to: Pos }
+  /** id が target を押し返して前進した */
+  | { tick: number; type: 'push'; id: string; target: string; from: Pos; to: Pos }
   | { tick: number; type: 'bump'; id: string; at: Pos }
   | { tick: number; type: 'halt'; id: string }
   | {

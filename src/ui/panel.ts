@@ -296,6 +296,9 @@ export function eventLog(events: GameEvent[], nameOf: (id: string) => string, li
       case 'halt':
         lines.push(T.log.halt(nameOf(e.id)));
         break;
+      case 'push':
+        lines.push(T.log.push(nameOf(e.id), nameOf(e.target)));
+        break;
       case 'strike':
         if (e.reaction) lines.push(T.log.reaction(nameOf(e.id)));
         if (e.scatter) lines.push(T.log.scatter(nameOf(e.id)));
@@ -408,6 +411,7 @@ export function turnSummary(events: GameEvent[], before: Unit[], nameOf: (id: st
       else if (e.type === 'damage') taken += e.amount;
       else if (e.type === 'cover') parts.push(T.sum.cover(nameOf(e.for)));
       else if (e.type === 'halt') parts.push(T.sum.halt);
+      else if (e.type === 'push') parts.push(T.sum.push(nameOf(e.target)));
       else if (e.type === 'carry') parts.push(T.sum.carry(nameOf(e.target)));
       else if (e.type === 'move') moved = true;
       else if (e.type === 'rest') rest = T.log.restPart('', e.hp, e.mp).trim();
@@ -483,14 +487,25 @@ function strikeSummary(
  * 予約の時間軸: 味方ごとに 8 ティックの行動を並べる(見るだけ)。
  * 見出しのティック番号を押すと、盤面にそのティックの終わりの予定位置を出す(もう一度押すと消す)
  */
-export function timeline(party: Unit[], plans: Record<string, Action[]>, nameOf: (id: string) => string, filler: 'guard' | 'wait', tick: number | null, selected: string | null): string {
-  const head = Array.from({ length: TICKS_PER_TURN }, (_, i) => `<button class="tk${tick === i + 1 ? ' on' : ''}" data-tick="${i + 1}" title="${T.timeline.tickTitle(i + 1)}">${i + 1}</button>`).join('');
+export function timeline(
+  party: Unit[],
+  plans: Record<string, Action[]>,
+  nameOf: (id: string) => string,
+  filler: 'guard' | 'wait',
+  tick: number | null,
+  selected: string | null,
+  autoTick: number | null = null,
+): string {
+  const head = Array.from(
+    { length: TICKS_PER_TURN },
+    (_, i) => `<button class="tk${tick === i + 1 ? ' on' : autoTick === i + 1 ? ' cur' : ''}" data-tick="${i + 1}" title="${T.timeline.tickTitle(i + 1)}">${i + 1}</button>`,
+  ).join('');
   const rows = party
     .map((u) => {
       const cells = u.down
         ? `<span class="cell down" style="grid-column: span ${TICKS_PER_TURN}">${T.down}</span>`
         : tickCells(plans[u.id] ?? [], filler)
-            .map((c, i) => `<span class="cell${c.hit ? ' hit' : ''}${c.fill ? ' fill' : ''}${tick === i + 1 ? ' on' : ''}">${esc(c.glyph)}</span>`)
+            .map((c, i) => `<span class="cell${c.hit ? ' hit' : ''}${c.fill ? ' fill' : ''}${tick === i + 1 ? ' on' : autoTick === i + 1 ? ' cur' : ''}">${esc(c.glyph)}</span>`)
             .join('');
       return `<span class="who${u.id === selected ? ' sel' : ''}" data-sel="${u.id}">${esc(nameOf(u.id))}</span>${cells}`;
     })

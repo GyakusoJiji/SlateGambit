@@ -20,6 +20,8 @@ export interface DisplayUnit {
   carrying?: boolean;
   /** 宝を持っている */
   treasure?: boolean;
+  /** ティック連動プレビューの開始位置に残す薄い残像か */
+  faint?: boolean;
 }
 
 export type Mark =
@@ -42,9 +44,16 @@ export interface View {
   visible: ArrayLike<number> | null;
   units: DisplayUnit[];
   marks: Mark[];
-  /** 敵の予兆。area はブレスなど範囲攻撃の着弾予定(中心と半径) */
-  /** 敵の予兆。area は範囲魔法の着弾範囲と、発動するティック */
-  hints: { at: Pos; intent: Intent; area?: { at: Pos; radius: number; tick?: number }; label?: string }[];
+  /** 敵の予兆。area は範囲魔法の着弾範囲と発動ティック、aim は狙っている味方への点滅ライン */
+  hints: {
+    at: Pos;
+    intent: Intent;
+    area?: { at: Pos; radius: number; tick?: number };
+    aim?: { to: Pos; charge?: boolean; power?: boolean };
+    label?: string;
+  }[];
+  /** 点滅演出の位相(0〜1) */
+  pulse?: number;
   effects: Effect[];
   /** 床に置かれている宝の位置(宝探しのとき) */
   treasureAt?: Pos | null;
@@ -162,9 +171,10 @@ export class Renderer {
 
     for (const m of view.marks) this.drawMark(m);
     for (const h of view.hints) if (h.area) this.drawDanger(h.area.at, h.area.radius, h.area.tick);
+    for (const h of view.hints) if (h.aim) this.drawAimLine(h.at, h.aim.to, view.pulse ?? 0.5, h.aim.charge, h.aim.power);
 
-    // 倒れた敵 → 気絶した味方 → 立っているユニットの順に描く(味方が水たまりに隠れて担げなくならないように)
-    const rank = (u: DisplayUnit) => (!u.down ? 2 : u.side === 'enemy' ? 0 : 1);
+    // 倒れた敵 → 気絶した味方 → 薄い残像 → 立っているユニットの順に描く(味方が水たまりに隠れて担げなくならないように)
+    const rank = (u: DisplayUnit) => (!u.down ? (u.faint ? 1.5 : 2) : u.side === 'enemy' ? 0 : 1);
     const sorted = [...view.units].sort((a, b) => rank(a) - rank(b));
     for (const u of sorted) this.drawUnit(u);
 
@@ -357,7 +367,7 @@ export class Renderer {
     const cy = this.sy(u.y);
     const ring = u.side === 'party' ? COLORS.party : COLORS.enemy;
 
-    if (u.selected) {
+    if (u.selected && !u.faint) {
       g.strokeStyle = '#ffe14a';
       g.lineWidth = 2;
       g.strokeRect(cx - z / 2 + 1, cy - z / 2 + 1, z - 2, z - 2);
@@ -367,6 +377,8 @@ export class Renderer {
     const puddle = u.down && u.side === 'enemy';
     if (puddle) {
       g.globalAlpha = 0.85;
+    } else if (u.faint) {
+      g.globalAlpha = 0.28;
     } else {
       if (u.down) {
         g.globalAlpha = 0.45;
@@ -384,6 +396,7 @@ export class Renderer {
     g.drawImage(iconCanvas(puddle ? 'puddle' : u.icon), Math.round(cx - s / 2), Math.round(cy - s / 2 - z * 0.04), s, s);
     g.restore();
 
+    if (u.faint) return;
     if (!u.down) {
       // HP バー
       const w = z * 0.8;
@@ -468,10 +481,39 @@ export class Renderer {
     }
   }
 
+  /** 敵が狙っている味方へのオレンジの点滅ライン(charge=追尾は長破線、power=強攻撃は太線) */
+  private drawAimLine(from: Pos, to: Pos, pulse: number, charge?: boolean, power?: boolean): void {
+    const g = this.ctx;
+    const z = this.zoom;
+    const x0 = this.sx(from.x);
+    const y0 = this.sy(from.y);
+    const x1 = this.sx(to.x);
+    const y1 = this.sy(to.y);
+    const alpha = 0.32 + 0.63 * (0.5 + 0.5 * Math.sin(pulse * Math.PI * 2));
+    g.save();
+    g.globalAlpha = alpha;
+    g.strokeStyle = power ? '#ff5a20' : '#ff9420';
+    g.lineWidth = Math.max(power ? 2.5 : 1.75, z * (power ? 0.09 : charge ? 0.075 : 0.06));
+    g.setLineDash(charge ? [z * 0.28, z * 0.12] : [z * 0.14, z * 0.14]);
+    g.lineDashOffset = -pulse * z * 0.56;
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.lineTo(x1, y1);
+    g.stroke();
+    g.setLineDash([]);
+    // 狙われている味方の足元にも小さなオレンジの照準リングを添える
+    g.beginPath();
+    g.arc(x1, y1, z * 0.38, 0, Math.PI * 2);
+    g.stroke();
+    g.restore();
+  }
+
   /** label があれば、印の文字の代わりに出す(警報役の残りターンなど) */
   private drawHint(at: Pos, intent: Intent, label?: string): void {
     const map: Record<Intent, [string, string]> = {
       attack: ['#ff4d4d', '!'],
+      power: ['#ff5a20', '強5'],
+      watch: ['#ffb020', '迎'],
       move: ['#ffd24d', '→'],
       guard: ['#5ab0ff', '■'],
       idle: ['#9a9aa8', '…'],

@@ -99,7 +99,7 @@ export function planParty(state: GameState): Plans {
     // 倒れた仲間がいて僧侶が蘇生できるなら、まず助けに行く
     const priestU = party.find((u) => u.defId === 'priest');
     const downed = units.some((u) => u.side === 'party' && u.down);
-    if (downed && priestU && priestU.mp >= SPELLS.revive.mp) {
+    if (downed && currentFloor(state) > 0 && priestU && priestU.mp >= SPELLS.revive.mp) {
       const ctx: Ctx = { state, u: priestU, plan: [], pos: { x: priestU.x, y: priestU.y }, foes: [], endPos: new Map(), reserved: new Set() };
       priest(ctx);
       // 近づけない(敵が上に立っているなど)ときは諦めて、ほかの行動に回す
@@ -274,7 +274,7 @@ function mage(ctx: Ctx): void {
     return hitFoes - hitAllies * 3;
   };
   const castable = (from: Pos, tile: Pos) => dist2(from, tile) <= fb.range * fb.range && hasLos(state.map, from, tile);
-  if (u.mp >= fb.mp) {
+  if (currentFloor(state) > 0 && u.mp >= fb.mp) {
     let best: { tile: Pos; s: number } | null = null;
     for (const f of ctx.foes) {
       const s = score(f);
@@ -302,7 +302,7 @@ function priest(ctx: Ctx): void {
   const { state, u } = ctx;
   const allies = state.units.filter((o) => o.side === 'party' && o !== u);
   const downed = allies.filter((o) => o.down);
-  if (downed.length > 0 && u.mp >= SPELLS.revive.mp) {
+  if (downed.length > 0 && currentFloor(state) > 0 && u.mp >= SPELLS.revive.mp) {
     const t = nearest(ctx.pos, downed);
     if (!nearOrSame(state.map, ctx.pos, t)) moveAlong(ctx, pathAdjacent(state.map, ctx.pos, t, occupied(ctx)) ?? [], RULES.spellCost);
     if (nearOrSame(state.map, ctx.pos, t)) {
@@ -314,8 +314,8 @@ function priest(ctx: Ctx): void {
     .filter((o) => !o.down && o.hp / stats(o).maxHp < 0.5)
     .filter((o) => dist2(ctx.pos, o) <= SPELLS.heal.range ** 2 && hasLos(state.map, ctx.pos, o))
     .sort((a, b) => a.hp / stats(a).maxHp - b.hp / stats(b).maxHp);
-  if (hurt.length > 0 && u.mp >= SPELLS.heal.mp) ctx.plan.push({ type: 'spell', spell: 'heal', target: hurt[0].id });
-  else if (BOT.use.smite && u.defId === 'priest' && u.mp >= SPELLS.smite.mp + SPELLS.heal.mp && ctx.foes.length > 0) {
+  if (currentFloor(state) > 0 && hurt.length > 0 && u.mp >= SPELLS.heal.mp) ctx.plan.push({ type: 'spell', spell: 'heal', target: hurt[0].id });
+  else if (currentFloor(state) > 0 && BOT.use.smite && u.defId === 'priest' && u.mp >= SPELLS.smite.mp + SPELLS.heal.mp && ctx.foes.length > 0) {
     // 聖光: 敵が 2 体以上固まっている所へ(MP に余裕があれば 1 体でも)。回復の分の MP は残す
     const sm = SPELLS.smite;
     const near = (t: Pos, p: Pos) => chebyshev(t, p) <= sm.radius;

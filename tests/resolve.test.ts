@@ -114,13 +114,31 @@ describe('移動', () => {
     expect(fillPlan([], 'rest').every((a) => a.type === 'wait' && !a.idle)).toBe(true);
   });
 
-  it('敵のマスは通り抜けられず、敵とのすれ違いもできない', () => {
-    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
-    const r = resolveTurn(s, { p1: moves('E', 3) });
-    expect(u(r.state, 'p1')).toMatchObject({ x: 1, y: 1 });
-    const r2 = resolveTurn(s, { p1: moves('E', 1), g1: moves('W', 1) });
+  it('同じ体格以上の敵のマスは通り抜けられず、敵とのすれ違いもできない', () => {
+    const s = game([mk('p2', 'thief', 1, 1), mk('g1', 'goblin', 2, 1)]);
+    const r = resolveTurn(s, { p2: moves('E', 3) });
+    expect(u(r.state, 'p2')).toMatchObject({ x: 1, y: 1 });
+    // 重装の戦士でも、相手が向かってくる(すれ違い)ときや同じ体格のオークは押せない
+    const s2 = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
+    const r2 = resolveTurn(s2, { p1: moves('E', 1), g1: moves('W', 1) });
     expect(u(r2.state, 'p1')).toMatchObject({ x: 1, y: 1 });
     expect(u(r2.state, 'g1')).toMatchObject({ x: 2, y: 1 });
+    const s3 = game([mk('p1', 'warrior', 1, 1), mk('o1', 'orc', 2, 1)]);
+    const r3 = resolveTurn(s3, { p1: moves('E', 2) });
+    expect(u(r3.state, 'p1')).toMatchObject({ x: 1, y: 1 });
+  });
+
+  it('重装の戦士は小型の敵を 1 マス後ろへ押し返して前進できる(直後の 1 ティックは踏ん張り、壁際は押せない)', () => {
+    const s = game([mk('p1', 'warrior', 1, 1), mk('g1', 'goblin', 2, 1)]);
+    const r = resolveTurn(s, { p1: moves('E', 2) });
+    expect(u(r.state, 'p1')).toMatchObject({ x: 2, y: 1 });
+    expect(u(r.state, 'g1')).toMatchObject({ x: 3, y: 1 });
+    expect(r.events.some((e) => e.type === 'push' && e.id === 'p1' && e.target === 'g1')).toBe(true);
+    // 敵の後ろが壁なら押せない
+    const wall = game([mk('p1', 'warrior', 9, 1), mk('g1', 'goblin', 10, 1)]);
+    const rw = resolveTurn(wall, { p1: moves('E', 1) });
+    expect(u(rw.state, 'p1')).toMatchObject({ x: 9, y: 1 });
+    expect(u(rw.state, 'g1')).toMatchObject({ x: 10, y: 1 });
   });
 
   it('止まるマスが重ならない(多数のランダムな移動)', () => {

@@ -7,7 +7,7 @@ import { MAGIC, RULES, expandPlan, restTicks, type Step } from './actions';
 /** 地上で魔法を使おうとしたときの不発の理由 */
 const T_SURFACE_MAGIC = '地上では魔法は使えない';
 import { hasLos, linePoints } from './los';
-import { adjacent, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from './map';
+import { adjacent, dirBetween, DIR_LIST, dist2, isWalkable, manhattan, nearOrSame, step, tileAt } from './map';
 import { findPath } from './path';
 import { clearShot, interceptCandidates, overwatchTarget } from './reactions';
 import { Rng } from './rng';
@@ -148,15 +148,25 @@ export function resolveTurn(input: GameState, plans: Plans): TurnResult {
     const MOVING = new Set<Step['k']>(['move', 'charge']);
     const continues = (u: Unit) =>
       intentById.get(u.id)?.status === 'ok' && tick < TICKS_PER_TURN && MOVING.has(steps.get(u.id)![tick].k);
-    const displaced = settleMoves(intents, units, map, rng, continues);
+    const { displaced, pushed } = settleMoves(intents, units, map, rng, continues);
+    for (const p of pushed) {
+      events.push({ tick, type: 'push', id: p.by.id, target: p.unit.id, from: p.from, to: p.to });
+      // 押し返した直後の 1 ティックは踏ん張りになり、同じターンに無制限に押し続けられないようにする
+      const list = steps.get(p.by.id);
+      if (list && tick < list.length && list[tick].k === 'move') list[tick] = { k: 'recover' };
+    }
     for (const m of intents) {
       if (m.status === 'ok') events.push({ tick, type: 'move', id: m.unit.id, from: m.from, to: m.to });
       else events.push({ tick, type: 'bump', id: m.unit.id, at: m.to });
     }
     for (const d of displaced) events.push({ tick, type: 'move', id: d.unit.id, from: d.from, to: d.to });
-    if (displaced.length > 0) openDoorsNear(map, units);
+    if (displaced.length > 0 || pushed.length > 0) openDoorsNear(map, units);
     /** このティックに実際に位置が変わったユニット(条件付き行動の発動条件) */
-    const movedNow = new Set([...intents.filter((m) => m.status === 'ok').map((m) => m.unit.id), ...displaced.map((d) => d.unit.id)]);
+    const movedNow = new Set([
+      ...intents.filter((m) => m.status === 'ok').map((m) => m.unit.id),
+      ...displaced.map((d) => d.unit.id),
+      ...pushed.map((p) => p.unit.id),
+    ]);
 
     // 担ぐ・降ろす
     for (const [id, s] of current) {
@@ -596,14 +606,23 @@ function applyAcid(state: GameState, rng: Rng, events: GameEvent[], frames: Unit
   tiles[tiles.length - 1] = state.map.tiles.slice();
 }
 
+/** u が target を移動で押し返せる体格関係か(地上の住人は押さない) */
+export function canShove(u: Unit, target: Unit): boolean {
+  if (!RULES.shoveSmaller || u.side === target.side || isNeutral(target)) return false;
+  const du = unitDef(u.defId);
+  const dt = unitDef(target.defId);
+  return !!du.shove && (du.size ?? 2) > (dt.size ?? 2);
+}
+
 /**
  * 移動後の位置の整理。移動は他のユニットがいるマスも通り抜けられるが、
  * 同じマスに 2 体以上が「止まる」ことはできない。
+ * - 重装ユニットが自分より体格の小さい敵のいるマスへ踏み込み、敵のすぐ後ろが空いていれば、敵を 1 マス後ろへ押し返す
  * - 次のティックも移動を続けるユニットは、他と重なっていてよい(通り抜け)
  * - 止まるユニットが重なったら、元からそこにいたユニットを優先し、
  *   いなければ乱数で 1 体を残す。残れなかったユニットは元のマスへ戻る(進めなかった扱い)
  * - 戻る先にも止まるユニットがいる、または通り抜けの途中で止まった場合は、最寄りの空きマスへ押し出す
- * 押し出したユニットの移動を返す。
+ * 押し出したユニットの移動と、押し返した敵の移動を返す。
  */
 export function settleMoves(
   intents: MoveIntent[],
@@ -611,9 +630,37 @@ export function settleMoves(
   map: GameState['map'],
   rng: Rng,
   continues: (u: Unit) => boolean,
-): { unit: Unit; from: Pos; to: Pos }[] {
+): { displaced: { unit: Unit; from: Pos; to: Pos }[]; pushed: { by: Unit; unit: Unit; from: Pos; to: Pos }[] } {
   const intentOf = new Map(intents.map((m) => [m.unit.id, m]));
   const displaced: { unit: Unit; from: Pos; to: Pos }[] = [];
+  const pushed: { by: Unit; unit: Unit; from: Pos; to: Pos }[] = [];
+
+  // 重装ユニットの押し返し: 小さい敵が元々いたマスへ踏み込み、敵が動いておらず後ろが空いていれば 1 マス押し返す
+  if (RULES.shoveSmaller && !RULES.passThroughFoes) {
+    for (const m of intents) {
+      if (m.status !== 'ok') continue;
+      const dir = dirBetween(m.from, m.to);
+      if (!dir) continue;
+      const foe = units.find(
+        (o) =>
+          o !== m.unit &&
+          !o.down &&
+          o.x === m.to.x &&
+          o.y === m.to.y &&
+          canShove(m.unit, o) &&
+          intentOf.get(o.id)?.status !== 'ok',
+      );
+      if (!foe) continue;
+      const back = step(m.to, dir);
+      if (!isWalkable(map, back.x, back.y)) continue;
+      if (units.some((o) => !o.down && o.x === back.x && o.y === back.y)) continue;
+      const from = pos(foe);
+      foe.x = back.x;
+      foe.y = back.y;
+      pushed.push({ by: m.unit, unit: foe, from, to: back });
+    }
+  }
+
   const stoppers = () => units.filter((u) => !u.down && !continues(u));
 
   for (let guardLoop = 0; guardLoop < units.length * 4; guardLoop++) {
@@ -674,7 +721,7 @@ export function settleMoves(
       displaced.push({ unit: u, from, to });
     }
   }
-  return displaced;
+  return { displaced, pushed };
 }
 
 /** 止まるユニットがいない最寄りの床マス */

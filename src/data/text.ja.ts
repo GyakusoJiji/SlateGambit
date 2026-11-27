@@ -115,6 +115,7 @@ export const T = {
     revive: (a: string) => `${a} が起き上がった`,
     fizzle: (a: string, why: string) => `${a} の行動は不発(${why})`,
     halt: (a: string) => `${a} は敵を見つけて立ち止まった`,
+    push: (a: string, b: string) => `${a} が ${b} を押し返した`,
     reaction: (a: string) => `${a} の条件付き行動が発動!`,
     bump: (a: string) => `${a} は進めなかった`,
     /** 休憩した全員分を 1 行にまとめる */
@@ -178,6 +179,7 @@ export const T = {
     fizzle: (why: string) => `不発(${why})`,
     cover: (b: string) => `${b}をかばった`,
     halt: '敵を見て停止',
+    push: (b: string) => `${b}を押し返した`,
     carry: (b: string) => `${b}を担いだ`,
     taken: (n: number) => `被ダメ ${n}`,
     down: '気絶!',
@@ -409,6 +411,7 @@ export const T = {
     notTarget: 'そこには対象がいない',
     carrying: '担いでいる間は攻撃できない',
     powerReach: '強攻撃は、予定位置から届く敵にしか使えない',
+    allyInLine: (tick: number) => `${tick} ティック目には味方が射線上にいる見込み(味方を動かすか、休憩で発射を遅らせると通る)`,
     /** 攻撃が届かず接近攻撃にしたときの通知。steps=経路の目安のマス数(行けなければ null) */
     toCharge: (why: string, ap: number, steps: number | null, attackCost: number) =>
       `${why}ので、近づいて攻撃する(残り ${ap}AP 全部)

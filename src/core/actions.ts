@@ -55,8 +55,13 @@ export const RULES = {
   carryWakeChance: 0.5,
   /** 意識を取り戻したときの HP */
   carryWakeHp: 8,
-  /** 敵 AI が接近攻撃(相手の動きに合わせて追う)を選ぶ割合 */
-  aiChargeRate: 0.5,
+  /** 敵 AI が接近攻撃(相手の動きに合わせて追う)を選ぶ割合(一般の敵 / 素早い追跡型の敵) */
+  aiChargeRate: 0.15,
+  aiChaseChargeRate: 0.6,
+  /** 強攻撃を持つ近接の敵(オークなど)が、最初から隣にいる味方に強攻撃を選ぶ割合 */
+  aiPowerRate: 0.5,
+  /** 重装ユニットが自分より体格の小さい敵を移動で押し返せるか */
+  shoveSmaller: true,
   /** 敵が仲間を呼ぶ範囲(マンハッタン距離)。0 で呼ばない */
   aiCallRange: 8,
   /** ドラゴンが炎のブレスを吐く間隔(ターン) */

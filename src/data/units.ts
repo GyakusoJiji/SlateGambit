@@ -23,44 +23,50 @@ export interface UnitDef {
   gold?: number;
   /** レベルが 1 上がるごとの成長量(職業のみ) */
   growth?: { hp: number; mp: number; atk: number };
+  /** 体格(1=小型、2=中型、3=大型。未指定は 2)。重装の者が小さい敵のマスへ踏み込むと押し返せる */
+  size?: number;
+  /** 重装・巨体: 自分より体格(size)が小さい敵のマスへ踏み込むと、1 マス後ろへ押し返して前進する */
+  shove?: boolean;
+  /** 素早い追跡型: 接近攻撃(相手の動きに合わせて追う)を高確率で選ぶ */
+  chase?: boolean;
 }
 
 export const CLASSES: Record<string, UnitDef> = {
-  warrior: { id: 'warrior', name: '戦士', icon: 'warrior', maxHp: 48, maxMp: 0, atk: 7, dmgVar: 3, def: 2, range: 1, sight: 7, spells: ['cover', 'power'], growth: { hp: 6, mp: 0, atk: 1 } },
-  thief: { id: 'thief', name: '盗賊', icon: 'thief', maxHp: 30, maxMp: 8, atk: 5, dmgVar: 3, def: 1, range: 6, sight: 8, spells: ['trip', 'power'], growth: { hp: 4, mp: 1, atk: 1 } },
-  mage: { id: 'mage', name: '魔法使い', icon: 'mage', maxHp: 24, maxMp: 14, atk: 3, dmgVar: 2, def: 0, range: 6, sight: 7, spells: ['fireball'], growth: { hp: 3, mp: 2, atk: 0 } },
-  priest: { id: 'priest', name: '僧侶', icon: 'priest', maxHp: 33, maxMp: 14, atk: 4, dmgVar: 2, def: 1, range: 1, sight: 7, spells: ['heal', 'revive', 'smite'], growth: { hp: 4, mp: 2, atk: 1 } },
+  warrior: { id: 'warrior', name: '戦士', icon: 'warrior', maxHp: 48, maxMp: 0, atk: 7, dmgVar: 3, def: 2, range: 1, sight: 7, spells: ['cover', 'power'], growth: { hp: 6, mp: 0, atk: 1 }, size: 2, shove: true },
+  thief: { id: 'thief', name: '盗賊', icon: 'thief', maxHp: 30, maxMp: 8, atk: 5, dmgVar: 3, def: 1, range: 6, sight: 8, spells: ['trip', 'power'], growth: { hp: 4, mp: 1, atk: 1 }, size: 2 },
+  mage: { id: 'mage', name: '魔法使い', icon: 'mage', maxHp: 24, maxMp: 14, atk: 3, dmgVar: 2, def: 0, range: 6, sight: 7, spells: ['fireball'], growth: { hp: 3, mp: 2, atk: 0 }, size: 2 },
+  priest: { id: 'priest', name: '僧侶', icon: 'priest', maxHp: 33, maxMp: 14, atk: 4, dmgVar: 2, def: 1, range: 1, sight: 7, spells: ['heal', 'revive', 'smite'], growth: { hp: 4, mp: 2, atk: 1 }, size: 2 },
 };
 
 export const MONSTERS: Record<string, UnitDef> = {
-  slime: { id: 'slime', name: 'スライム', icon: 'slime', maxHp: 12, maxMp: 0, atk: 5, dmgVar: 2, def: 0, range: 1, sight: 5, spells: [], exp: 3, gold: 2 },
-  bat: { id: 'bat', name: '大コウモリ', icon: 'bat', maxHp: 10, maxMp: 0, atk: 6, dmgVar: 2, def: 0, range: 1, sight: 9, spells: [], exp: 4, gold: 2 },
-  goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 20, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [], exp: 6, gold: 3 },
-  archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [], exp: 6, gold: 3 },
+  slime: { id: 'slime', name: 'スライム', icon: 'slime', maxHp: 12, maxMp: 0, atk: 5, dmgVar: 2, def: 0, range: 1, sight: 5, spells: [], exp: 3, gold: 2, size: 1 },
+  bat: { id: 'bat', name: '大コウモリ', icon: 'bat', maxHp: 10, maxMp: 0, atk: 6, dmgVar: 2, def: 0, range: 1, sight: 9, spells: [], exp: 4, gold: 2, size: 1, chase: true },
+  goblin: { id: 'goblin', name: 'ゴブリン', icon: 'goblin', maxHp: 20, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 1, sight: 6, spells: [], exp: 6, gold: 3, size: 1 },
+  archer: { id: 'archer', name: '骸骨弓兵', icon: 'archer', maxHp: 18, maxMp: 0, atk: 7, dmgVar: 2, def: 0, range: 6, sight: 7, spells: [], exp: 6, gold: 3, size: 1 },
   /**
    * 野盗(地下 1〜2 階。地上では住人に化ける)。人間なので打たれ弱く、力も弱い。近接攻撃が当たるとパーティのゴールドを盗み、逃げる。
    * 見られずに 2 ターン過ごすと逃げ切り、倒せば盗まれた分を取り返せる
    */
-  bandit: { id: 'bandit', name: '野盗', icon: 'bandit', maxHp: 10, maxMp: 0, atk: 3, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 4, gold: 8 },
+  bandit: { id: 'bandit', name: '野盗', icon: 'bandit', maxHp: 10, maxMp: 0, atk: 3, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 4, gold: 8, size: 1, chase: true },
   /**
    * 地上の住人。戦わず、隣に来た味方に噂を話す(敵として扱わない)。
    * 住人に化けた盗人も、正体を現すまではこの定義を使う(見かけ・HP で見分けられないよう、能力は野盗と同じ)
    */
-  resident: { id: 'resident', name: '住人', icon: 'resident', maxHp: 10, maxMp: 0, atk: 3, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 0, gold: 0 },
+  resident: { id: 'resident', name: '住人', icon: 'resident', maxHp: 10, maxMp: 0, atk: 3, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 0, gold: 0, size: 1 },
   /** 火球を使う。MP が尽きたら杖で殴る */
-  shaman: { id: 'shaman', name: 'ゴブリン呪術師', icon: 'shaman', maxHp: 16, maxMp: 6, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'], exp: 9, gold: 5 },
-  orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: [], exp: 12, gold: 6 },
-  darkelf: { id: 'darkelf', name: 'ダークエルフ', icon: 'darkelf', maxHp: 28, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 7, sight: 8, spells: [], exp: 14, gold: 7 },
+  shaman: { id: 'shaman', name: 'ゴブリン呪術師', icon: 'shaman', maxHp: 16, maxMp: 6, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['fireball'], exp: 9, gold: 5, size: 1 },
+  orc: { id: 'orc', name: 'オーク', icon: 'orc', maxHp: 39, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 1, sight: 6, spells: ['power'], exp: 12, gold: 6, size: 2 },
+  darkelf: { id: 'darkelf', name: 'ダークエルフ', icon: 'darkelf', maxHp: 28, maxMp: 0, atk: 10, dmgVar: 3, def: 1, range: 7, sight: 8, spells: [], exp: 14, gold: 7, size: 2 },
   /** 警報役。パーティに気付くと逃げながら角笛を吹き、止められなければ増援を呼ぶ(alarm.ts) */
-  hornblower: { id: 'hornblower', name: '角笛ゴブリン', icon: 'hornblower', maxHp: 14, maxMp: 0, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 8, gold: 4 },
+  hornblower: { id: 'hornblower', name: '角笛ゴブリン', icon: 'hornblower', maxHp: 14, maxMp: 0, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 8, spells: [], exp: 8, gold: 4, size: 1 },
   /** 業火(5 ティック詠唱の大技)を使う。打たれ弱い */
-  warlock: { id: 'warlock', name: '呪術師長', icon: 'warlock', maxHp: 22, maxMp: 8, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['hellfire'], exp: 14, gold: 7 },
-  troll: { id: 'troll', name: 'トロル', icon: 'troll', maxHp: 55, maxMp: 0, atk: 11, dmgVar: 3, def: 2, range: 1, sight: 6, spells: [], exp: 18, gold: 9 },
-  ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [], exp: 24, gold: 12 },
+  warlock: { id: 'warlock', name: '呪術師長', icon: 'warlock', maxHp: 22, maxMp: 8, atk: 4, dmgVar: 2, def: 0, range: 1, sight: 7, spells: ['hellfire'], exp: 14, gold: 7, size: 2 },
+  troll: { id: 'troll', name: 'トロル', icon: 'troll', maxHp: 55, maxMp: 0, atk: 11, dmgVar: 3, def: 2, range: 1, sight: 6, spells: [], exp: 18, gold: 9, size: 3, shove: true },
+  ogre: { id: 'ogre', name: 'オーガ', icon: 'ogre', maxHp: 70, maxMp: 0, atk: 11, dmgVar: 4, def: 2, range: 1, sight: 6, spells: [], exp: 24, gold: 12, size: 3, shove: true },
   /** ボス。地下 5 階の最も奥の部屋で秘宝を守る。炎のブレスを吐く */
-  dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 90, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 80, gold: 100 },
+  dragon: { id: 'dragon', name: 'ドラゴン', icon: 'dragon', maxHp: 90, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 80, gold: 100, size: 3, shove: true },
   /** Easy 用のボス(若いドラゴン)。HP だけ低い */
-  wyrm: { id: 'wyrm', name: '若いドラゴン', icon: 'dragon', maxHp: 55, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 60, gold: 80 },
+  wyrm: { id: 'wyrm', name: '若いドラゴン', icon: 'dragon', maxHp: 55, maxMp: 0, atk: 13, dmgVar: 4, def: 3, range: 1, sight: 6, spells: ['breath'], exp: 60, gold: 80, size: 3, shove: true },
 };
 
 /**

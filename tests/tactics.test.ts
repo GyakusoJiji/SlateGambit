@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { RULES, apLeft, canAppend, fillPlan } from '../src/core/actions';
+import { planEnemies, plannedTarget, summarizeIntent } from '../src/core/ai';
 import { resolveTurn } from '../src/core/resolve';
 import { createTestGame } from '../src/core/scenario';
 import type { Action, GameEvent, GameState } from '../src/core/types';
@@ -150,5 +151,26 @@ describe('休憩の物音', () => {
     const s = createTestGame(1);
     const r = resolveTurn(s, {});
     expect(r.state.units.length).toBe(s.units.length);
+  });
+});
+
+describe('敵の狙い予兆と強攻撃', () => {
+  it('敵の計画から狙っている味方と発動ティックを取り出せる', () => {
+    const pt = plannedTarget([{ type: 'move', dir: 'W' }, { type: 'attack', target: 'p3' }]);
+    expect(pt).toEqual({ target: 'p3', charge: false, power: false, tick: 1 + RULES.attackCost });
+    const pwr = plannedTarget([{ type: 'attack', target: 'p1', power: true }]);
+    expect(pwr).toEqual({ target: 'p1', charge: false, power: true, tick: RULES.powerCost });
+    expect(summarizeIntent([{ type: 'attack', target: 'p1', power: true }])).toBe('power');
+    expect(summarizeIntent([{ type: 'overwatch', ticks: 8 }])).toBe('watch');
+  });
+
+  it('隣にいるオークは一定確率で強攻撃(5AP)を構える', () => {
+    let sawPower = false;
+    for (let t = 1; t <= 20 && !sawPower; t++) {
+      const s = { ...arena({ p1: [4, 3], o1: [5, 3] }), turn: t };
+      const plan = planEnemies(s).o1;
+      if (plan.some((a) => a.type === 'attack' && a.power)) sawPower = true;
+    }
+    expect(sawPower).toBe(true);
   });
 });

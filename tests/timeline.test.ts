@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { parseMap } from '../src/core/map';
 import type { GameState, Unit } from '../src/core/types';
 import { CLASSES, MONSTERS } from '../src/data/units';
-import { reachInfo, tickCells, tickPositions } from '../src/ui/timeline';
+import { cursorTickFor, reachInfo, tickCells, tickPositions, unitsAtTick } from '../src/ui/timeline';
 
 const OPEN = [
   '##########',
@@ -71,5 +71,20 @@ describe('届く範囲', () => {
     expect(reachInfo(s, w, w, 'attack').targets.map((u) => u.id)).toEqual(['g1']);
     expect(reachInfo(s, w, w, 'attack').tiles).toHaveLength(8);
     expect(reachInfo(s, w, w, 'carry').targets.map((u) => u.id)).toEqual(['p4']);
+  });
+
+  it('予約済みの味方の移動を発動ティックに合わせて反映し、射線の開通や遮蔽を判定できる', () => {
+    // 初期位置では盗賊(1,2)とゴブリン(6,2)の間に戦士(3,2)が立っている
+    const thief = mk('p2', 'thief', 1, 2);
+    const warrior = mk('p1', 'warrior', 3, 2);
+    const goblin = mk('g1', 'goblin', 6, 2);
+    const s = game([warrior, thief, goblin]);
+    // 予約なし(Tick 3)では戦士が射線上にいるので撃てない
+    const hitTick = cursorTickFor([], 'attack');
+    expect(hitTick).toBe(3);
+    expect(reachInfo(s, thief, thief, 'attack', unitsAtTick(s, {}, hitTick)).targets).toHaveLength(0);
+    // 戦士が Tick 1 で南へ 1 マスどく予約をしていれば、Tick 3 発射時には射線が通る
+    const plans = { p1: [{ type: 'move' as const, dir: 'S' as const }] };
+    expect(reachInfo(s, thief, thief, 'attack', unitsAtTick(s, plans, hitTick)).targets.map((u) => u.id)).toEqual(['g1']);
   });
 });

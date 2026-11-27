@@ -444,6 +444,10 @@ body {
   background: var(--accent);
   color: #000;
 }
+.timeline .tk.cur {
+  color: #9fd0ff;
+  font-weight: 700;
+}
 .timeline .cell {
   border-radius: 3px;
   background: #2a2a3c;
@@ -459,6 +463,9 @@ body {
 }
 .timeline .cell.on {
   outline: 1px solid var(--accent);
+}
+.timeline .cell.cur {
+  outline: 1px dashed #5ab0ffaa;
 }
 .timeline .cell.down {
   color: var(--danger);

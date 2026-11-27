@@ -11,7 +11,7 @@ import { Rng, hashSeed } from './rng';
 import type { Action, Dir, GameState, Plans, Pos, Unit } from './types';
 import { unitSees } from './vision';
 
-export type Intent = 'attack' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath' | 'cast' | 'alarm';
+export type Intent = 'attack' | 'power' | 'watch' | 'move' | 'guard' | 'idle' | 'sleep' | 'breath' | 'cast' | 'alarm';
 
 export function planEnemies(state: GameState): Plans {
   const plans: Plans = {};
@@ -22,13 +22,31 @@ export function planEnemies(state: GameState): Plans {
   return plans;
 }
 
+/** 計画の中で単体の相手を狙う最初の攻撃行動(予兆のターゲットライン用) */
+export function plannedTarget(actions: Action[]): { target: string; charge: boolean; power: boolean; tick: number } | null {
+  let elapsed = 0;
+  for (const a of actions) {
+    if (a.type === 'attack') {
+      const cost = a.power ? RULES.powerCost : RULES.attackCost;
+      return { target: a.target, charge: false, power: !!a.power, tick: elapsed + cost };
+    }
+    if (a.type === 'charge') {
+      return { target: a.target, charge: true, power: false, tick: elapsed + RULES.attackCost };
+    }
+    elapsed += a.type === 'move' ? (a.slow ? RULES.carryMoveCost : 1) : 1;
+  }
+  return null;
+}
+
 /** 予兆表示用に、計画を大まかな意図に要約する */
 export function summarizeIntent(actions: Action[], unit?: Unit): Intent {
   if (unit?.ai?.asleep) return 'sleep';
   if (unit?.defId === 'hornblower' && unit.ai?.alarm !== undefined && !unit.ai.alarmRaised) return 'alarm';
   if (actions.some((a) => a.type === 'spell' && a.spell === 'breath')) return 'breath';
   if (actions.some((a) => a.type === 'spell' && a.spell === 'hellfire')) return 'cast';
-  if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell' || a.type === 'overwatch' || a.type === 'intercept')) return 'attack';
+  if (actions.some((a) => a.type === 'attack' && a.power)) return 'power';
+  if (actions.some((a) => a.type === 'attack' || a.type === 'charge' || a.type === 'spell')) return 'attack';
+  if (actions.some((a) => a.type === 'overwatch' || a.type === 'intercept')) return 'watch';
   if (actions.some((a) => a.type === 'move')) return 'move';
   if (actions.some((a) => a.type === 'guard')) return 'guard';
   return 'idle';
@@ -144,8 +162,9 @@ function planOne(state: GameState, e: Unit): Action[] {
     }
   }
 
-  // 一部の敵は、相手の動きに合わせて追いかけ、届いてから構える(接近攻撃)。フェイントに強い
-  if (rng.next() < RULES.aiChargeRate) {
+  // 素早い追跡型の敵(大コウモリ・野盗など)は高確率で、一般の敵は低確率で接近攻撃を選ぶ
+  const chargeRate = def.chase ? RULES.aiChaseChargeRate : RULES.aiChargeRate;
+  if (rng.next() < chargeRate) {
     plan.push({ type: 'charge', target: target.id, ticks: apLeft(plan) });
     return plan;
   }
@@ -176,7 +195,14 @@ function planOne(state: GameState, e: Unit): Action[] {
     return plan;
   }
 
-  // 近接
+  // 近接: 強攻撃を持つ敵(オークなど)が最初から隣にいれば、一定確率で大振りの強攻撃(5AP)を構える
+  if (adjacent(map, pos, target) && def.spells.includes('power') && apLeft(plan) >= RULES.powerCost && rng.next() < RULES.aiPowerRate) {
+    plan.push({ type: 'attack', target: target.id, power: true });
+    while (apLeft(plan) >= RULES.attackCost) plan.push({ type: 'attack', target: target.id });
+    while (apLeft(plan) > 0) plan.push({ type: 'guard' });
+    return plan;
+  }
+
   const dist = chebyshev(pos, target);
   if (!adjacent(map, pos, target) && dist <= 3 && rng.next() < 0.3) {
     // 近づいてくるのを待って迎え撃つ

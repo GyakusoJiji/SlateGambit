@@ -1,10 +1,10 @@
 // フェーズ管理(予約 / 再生 / 終了)と、画面・入力・ルールエンジンの橋渡し。
-import { planEnemies, summarizeIntent } from '../core/ai';
+import { planEnemies, plannedTarget, summarizeIntent } from '../core/ai';
 import { RULES, apLeft, canAppend, carryingAfter, fillPlan, planCost } from '../core/actions';
 import { hasLos } from '../core/los';
 import { adjacent, nearOrSame, samePos, step } from '../core/map';
 import { pathTo } from '../core/path';
-import { chargeRoute, inReach, reachProblem, resolveTurn } from '../core/resolve';
+import { canShove, chargeRoute, inReach, REACH, reachProblem, resolveTurn } from '../core/resolve';
 import { FLOORS, generateGame } from '../core/generate';
 import { createEncounter, createFromDef, encounterDef, type Carry } from '../core/encounters';
 import { carryOver, MINIGAMES, minigameDef, rankOf, stageScenario, type MinigameDef } from '../core/minigames';
@@ -36,7 +36,7 @@ import { ITEMS, PERKS, SPELLS } from '../data/units';
 import { pendingPerk, stats } from '../core/stats';
 import { attachInput } from './input';
 import { actButton, actionButtons, eventLog, idleButtons, inventoryBar, levelUpNote, rumorText, partyCards, planChips, playbackControls, potionButton, timeline, turnSummary, type Mode } from './panel';
-import { reachInfo, tickPositions, tickCells } from './timeline';
+import { cursorTickFor, reachInfo, tickCells, unitsAtTick } from './timeline';
 import { Playback } from './playback';
 import { Renderer, type DisplayUnit, type Mark, type View } from './renderer';
 import { clearInn, loadGame, loadInn, saveGame, saveInn } from './save';
@@ -594,10 +594,13 @@ export class Controller {
       if (pb.done && !pb.paused) {
         this.finishPlayback();
       }
+    } else if (this.settings.hints && this.foesInSight() && Math.floor(now / 90) !== Math.floor(prev / 90)) {
+      // 戦闘中の予約画面では、敵の狙いラインを穏やかに点滅させる(約 11fps 更新で省電力を保つ)
+      this.dirty = true;
     }
     if (this.dirty) {
       this.dirty = false;
-      this.renderer.draw(this.buildView());
+      this.renderer.draw(this.buildView(now));
       this.updatePanel();
     }
     requestAnimationFrame((t) => this.loop(t, now));
@@ -610,7 +613,15 @@ export class Controller {
 
   // ---- 表示 ----
 
-  private buildView(): View {
+  /** 予約画面で基準にするティック(手動指定があればそれ、無ければ選択中キャラの行動モードから決まるティック) */
+  private activePreviewTick(): number {
+    if (this.timelineTick !== null) return this.timelineTick;
+    const sel = this.selected ? this.unit(this.selected) : undefined;
+    if (!sel || sel.down) return 0;
+    return cursorTickFor(this.plans[sel.id] ?? [], this.mode);
+  }
+
+  private buildView(now = 0): View {
     const pb = this.playback;
     const noFog = this.settings.noFog;
     if (pb) {
@@ -637,36 +648,50 @@ export class Controller {
     const obj = st.objective;
     const visible = noFog ? null : sideVisibleMask(st.map, st.units, 'party');
     const seen = (u: Unit) => !visible || visible[u.y * st.map.w + u.x];
-    const units: DisplayUnit[] = st.units
-      .filter((u) => u.side === 'party' || (seen(u) && !corpseGone(u, st.turn)))
-      .map((u) => {
-        const d = stats(u);
-        return { id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying, treasure: obj?.kind === 'treasure' && obj.holder === u.id };
-      });
+    const previewTick = this.activePreviewTick();
+    const snappedUnits = unitsAtTick(st, this.plans, previewTick);
+    const units: DisplayUnit[] = [];
+    for (const u of st.units) {
+      if (u.side !== 'party' && !(seen(u) && !corpseGone(u, st.turn))) continue;
+      const d = stats(u);
+      const treasure = obj?.kind === 'treasure' && obj.holder === u.id;
+      // 予約済みの他の味方は、基準ティック(previewTick)の予定位置に動かして描き、元の位置には薄い残像を残す
+      if (u.side === 'party' && !u.down && (this.timelineTick !== null || u.id !== this.selected) && previewTick > 0) {
+        const at = snappedUnits.find((x) => x.id === u.id)!;
+        if (at.x !== u.x || at.y !== u.y) {
+          units.push({ id: `${u.id}@0`, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: false, guard: false, watch: false, selected: false, faint: true });
+          units.push({ id: u.id, icon: d.icon, side: u.side, x: at.x, y: at.y, hp: u.hp, maxHp: d.maxHp, down: false, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying, treasure });
+          continue;
+        }
+      }
+      units.push({ id: u.id, icon: d.icon, side: u.side, x: u.x, y: u.y, hp: u.hp, maxHp: d.maxHp, down: u.down, guard: false, watch: false, selected: u.id === this.selected, carrying: !!u.carrying, treasure });
+    }
 
     const marks: Mark[] = [];
     for (const u of this.party()) {
       marks.push(...planMarks(st, u, this.plans[u.id] ?? [], u.id === this.selected ? '#ffe14a' : '#5ab0ffaa'));
     }
-    // 対象を選ぶモードでは、予定位置から届くマスと届く相手を出す
+    // 対象を選ぶモードでは、発動ティックの味方予定位置(snappedUnits)を基準に、届くマスと届く相手を出す
     const sel = this.selected ? this.unit(this.selected) : undefined;
     if (sel && !sel.down && TARGET_MODES.has(this.mode)) {
-      const { tiles, targets, blind } = reachInfo(st, sel, simulate(st, sel, this.plans[sel.id] ?? []).end, this.mode);
+      const from = simulate(st, sel, this.plans[sel.id] ?? []).end;
+      const { tiles, targets, blind } = reachInfo(st, sel, from, this.mode, snappedUnits);
       for (const p of tiles) marks.push({ kind: 'area', at: p, radius: 0, color: 'rgba(110,190,255,0.13)' });
       // 火球: 見えないマス(撃てるが着弾点がずれる)
       for (const p of blind) marks.push({ kind: 'area', at: p, radius: 0, color: 'rgba(255,150,60,0.12)' });
-      for (const t of targets) if (seen(t)) marks.push({ kind: 'target', at: t, color: '#7fe07f' });
+      for (const t of targets) if (t.side === 'party' || seen(t)) marks.push({ kind: 'target', at: t, color: '#7fe07f' });
     }
-    // 時間軸でティックを選んでいれば、そのティックの終わりの味方の予定位置を出す(攻撃・魔法が発動する者は印を付ける)
-    if (this.timelineTick !== null) {
-      const t = this.timelineTick;
+    // 基準ティックに攻撃・魔法が発動する味方には橙の印を付ける
+    if (previewTick > 0) {
       const filler = this.foesInSight() ? 'guard' : 'wait';
       for (const u of this.party()) {
         if (u.down) continue;
         const plan = this.plans[u.id] ?? [];
-        const at = tickPositions(st, u, plan)[t];
-        marks.push({ kind: 'ghost', at, icon: stats(u).icon });
-        if (tickCells(plan, filler)[t - 1]?.hit) marks.push({ kind: 'target', at, color: '#ffb040' });
+        const at = snappedUnits.find((x) => x.id === u.id)!;
+        if (this.timelineTick !== null && u.id === this.selected && (at.x !== u.x || at.y !== u.y)) {
+          marks.push({ kind: 'ghost', at, icon: stats(u).icon });
+        }
+        if (tickCells(plan, filler)[previewTick - 1]?.hit) marks.push({ kind: 'target', at, color: '#ffb040' });
       }
     }
     // 止まるマスが重なっている所は赤い枠で知らせる
@@ -684,15 +709,20 @@ export class Controller {
             const b = plan[bi];
             const area =
               b && b.type === 'spell' && b.tile ? { at: b.tile, radius: SPELLS[b.spell].radius, tick: planCost(plan.slice(0, bi + 1)) } : undefined;
+            // 単体の味方を狙う敵からは、狙っている味方(開始位置)へオレンジの点滅ラインを出す
+            const pt = plannedTarget(plan);
+            const tgt = pt ? st.units.find((p) => p.id === pt.target && !p.down) : undefined;
+            const aim = pt && tgt ? { to: { x: tgt.x, y: tgt.y }, charge: pt.charge, power: pt.power } : undefined;
             // 警報役は、増援を呼ぶまでの残りターンを出す(例「笛2」)
             const left = u.ai?.alarm !== undefined && !u.ai.alarmRaised ? RULES.alarmTurns - u.ai.alarm : undefined;
             // 盗んだ野盗は「盗」の印(逃げている)
             const label = left !== undefined ? `笛${left}` : u.ai?.stolen ? '盗' : undefined;
-            return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area, label };
+            return { at: { x: u.x, y: u.y }, intent: summarizeIntent(plan, u), area, aim, label };
           })
       : [];
     const treasureAt = treasureHere(st);
-    return { map: st.map, explored: st.explored, visible, units, marks, hints, effects: [], treasureAt, pointers: this.pointers(st, st.explored, treasureAt) };
+    const pulse = (now % 1100) / 1100;
+    return { map: st.map, explored: st.explored, visible, units, marks, hints, pulse, effects: [], treasureAt, pointers: this.pointers(st, st.explored, treasureAt) };
   }
 
   /** 画面外の目印: 上り階段(入口)、見つけた下り階段・秘宝、(誰も映っていなければ)味方 */
@@ -791,7 +821,7 @@ export class Controller {
         ${actButton('undo', { off: !hasPlan })}
         ${actButton('execute', { cls: 'primary' })}
       </div>
-      ${timeline(this.party(), this.plans, nameOf, this.foesInSight() ? 'guard' : 'wait', this.timelineTick, this.selected)}
+      ${timeline(this.party(), this.plans, nameOf, this.foesInSight() ? 'guard' : 'wait', this.timelineTick, this.selected, active ? cursorTickFor(acts, this.mode) : null)}
       ${this.lastPlayback ? summaryList(turnSummary(this.lastPlayback.result.events, this.lastPlayback.before.units, nameOf)) : '<ul class="log"></ul>'}`;
   }
 
@@ -1010,6 +1040,8 @@ export class Controller {
     saveGame(st);
     saveInn(st);
     this.toast(T.toast.saved(msg));
+    // 予約を足したりモードを変えたら、手動のティック固定は解除して現在の操作ティックに追従させる
+    this.timelineTick = null;
     this.changed();
   }
 
@@ -1334,6 +1366,8 @@ export class Controller {
         this.mode = 'potion';
         break;
     }
+    // 予約を足したりモードを変えたら、手動のティック固定は解除して現在の操作ティックに追従させる
+    this.timelineTick = null;
     this.changed();
   }
 
@@ -1398,6 +1432,8 @@ export class Controller {
     this.mode = this.defaultMode(id);
     const u = this.unit(id);
     if (focus && u) this.focusOn(u);
+    // 予約を足したりモードを変えたら、手動のティック固定は解除して現在の操作ティックに追従させる
+    this.timelineTick = null;
     this.changed();
   }
 
@@ -1437,10 +1473,17 @@ export class Controller {
     const st = this.state;
     if (tile.x < 0 || tile.y < 0 || tile.x >= st.map.w || tile.y >= st.map.h) return;
     const visible = this.settings.noFog ? null : sideVisibleMask(st.map, st.units, 'party');
-    const at = st.units.filter((u) => samePos(u, tile) && (u.side === 'party' || !visible || visible[tile.y * st.map.w + tile.x]));
-    const ally = at.find((u) => u.side === 'party');
-    const foe = at.find((u) => u.side === 'enemy' && !u.down && !isNeutral(u));
     const u = this.selected ? this.unit(this.selected) : undefined;
+    // 基準ティックで動いている味方もその予定位置でタップできるようにする
+    const previewTick = this.activePreviewTick();
+    const snapped = unitsAtTick(st, this.plans, previewTick);
+    const at = st.units.filter((x) => {
+      if (x.side !== 'party') return samePos(x, tile) && (!visible || visible[tile.y * st.map.w + tile.x]);
+      const p = !x.down && (this.timelineTick !== null || x.id !== u?.id) && previewTick > 0 ? snapped.find((s) => s.id === x.id)! : x;
+      return samePos(p, tile) || samePos(x, tile);
+    });
+    const ally = at.find((x) => x.side === 'party');
+    const foe = at.find((x) => x.side === 'enemy' && !x.down && !isNeutral(x));
 
     // クイック移動: 行き先をタップすると、選んでいるキャラを先頭に全員が自動で向かう
     if (u && this.mode === 'group') {
@@ -1459,20 +1502,23 @@ export class Controller {
     if (u && this.mode !== 'move') {
       const m = this.mode;
       // 敵を狙うモードで味方をタップしたら、そのキャラを選ぶ(接近攻撃の後は次のキャラへ自動で移らないため)
-      if ((m === 'attack' || m === 'power' || m === 'trip') && ally && !ally.down && ally.id !== u.id) return this.select(ally.id);
+      if ((m === 'attack' || m === 'power' || m === 'trip') && ally && !ally.down && ally.id !== u.id && !foe) return this.select(ally.id);
+      const hitTick = cursorTickFor(this.plans[u.id], m);
+      const unitsAtHit = unitsAtTick(st, this.plans, hitTick);
+      const allyAtHit = ally ? unitsAtHit.find((x) => x.id === ally.id) ?? ally : undefined;
       let ok = false;
-      if (m === 'attack' && foe) ok = this.attackOrCharge(u, foe);
+      if (m === 'attack' && foe) ok = this.attackOrCharge(u, foe, false);
       else if (m === 'carry' && ally && ally.down && ally.id !== u.id) {
         const end = simulate(st, u, this.plans[u.id]).end;
         if (!nearOrSame(st.map, end, ally)) {
           this.toast(T.err.notTarget);
         } else ok = this.append(u, { type: 'carry', target: ally.id });
       }
-      else if (m === 'heal' && ally && !ally.down) ok = this.append(u, { type: 'spell', spell: 'heal', target: ally.id });
-      else if (m === 'potion' && ally && !ally.down) {
+      else if (m === 'heal' && ally && !ally.down && allyAtHit) ok = this.append(u, { type: 'spell', spell: 'heal', target: ally.id });
+      else if (m === 'potion' && ally && !ally.down && allyAtHit) {
         const it = ITEMS[this.potionKind];
         const have = st.items?.[this.potionKind] ?? 0;
-        if (!nearOrSame(st.map, simulate(st, u, this.plans[u.id]).end, ally)) this.toast(T.err.notTarget);
+        if (!nearOrSame(st.map, simulate(st, u, this.plans[u.id]).end, allyAtHit)) this.toast(T.err.notTarget);
         else if (have <= 0) this.toast(T.shop.noItem(it.name));
         else if (this.reservedItems(this.potionKind) >= have) this.toast(T.shop.reserved(it.name));
         else ok = this.append(u, { type: 'item', item: this.potionKind, target: ally.id });
@@ -1482,22 +1528,33 @@ export class Controller {
       else if (m === 'trip' && foe) ok = this.append(u, { type: 'spell', spell: 'trip', target: foe.id });
       else if (m === 'power' && foe) {
         const end = simulate(st, u, this.plans[u.id]).end;
-        if (inReach(st.map, u, end, foe, st.units)) ok = this.append(u, { type: 'attack', target: foe.id, power: true });
+        if (inReach(st.map, u, end, foe, unitsAtHit)) ok = this.append(u, { type: 'attack', target: foe.id, power: true });
         else this.toast(T.err.powerReach);
       }
       else this.toast(T.err.notTarget);
+      if (ok) this.timelineTick = null;
       // 予約できたら同じキャラは既定のモードに戻す(AP を使い切って次のキャラに移った場合はそのキャラの既定のまま)
       if (ok && this.selected === u.id) this.mode = this.defaultMode(u.id);
       this.changed();
       return;
     }
 
-    // 移動モード: 味方なら選択、敵なら攻撃、床なら経路を予約
-    if (ally && !ally.down && ally.id !== this.selected) return this.select(ally.id);
+    // 移動モード: 味方なら選択、敵なら攻撃(重装ユニットで押し返せる小型敵のマスなら、移動での突破も選べるよう隣接時は押し込み移動)、床なら経路を予約
+    if (ally && !ally.down && ally.id !== this.selected && !foe) return this.select(ally.id);
     if (!u || u.down) return;
     if (foe) {
       if (carryingAfter(u, this.plans[u.id])) return this.toast(T.err.carrying);
-      this.attackOrCharge(u, foe);
+      const fromNow = simulate(st, u, this.plans[u.id]).end;
+      // 移動モードで、重装ユニット(戦士)が上下左右の隣の小型敵をタップしたときは、そのマスへ踏み込んで押し返す移動を予約できるようにする
+      const stepPath = canShove(u, foe) ? pathTo(st.map, fromNow, tile) : null;
+      if (stepPath && stepPath.length === 1 && apLeft(this.plans[u.id]) >= 1) {
+        this.timelineTick = null;
+        this.plans[u.id].push({ type: 'move', dir: stepPath[0], stop: true });
+        this.changed();
+        this.advanceIfFull(u);
+        return;
+      }
+      this.attackOrCharge(u, foe, true);
       return;
     }
     if (!st.explored[tile.y * st.map.w + tile.x]) return this.toast(T.err.noPath);
@@ -1505,7 +1562,10 @@ export class Controller {
     const from = simulate(st, u, list).end;
     // 階段を行き先に選んだら、着いたターンの終わりに階段を使う(通り過ぎるだけなら使わない)
     const stairs = stairsDest(st, tile) !== null && !list.some((a) => a.type === 'stairs');
-    const path = pathTo(st.map, from, tile);
+    // 押し返せない敵のマスは避けて経路を引く(戦士が小型敵を押し返して奥の床をタップしたときは直進できるようにする)
+    const blockedByFoe = (p: Pos) =>
+      st.units.some((o) => o.side !== u.side && !o.down && !isNeutral(o) && o.x === p.x && o.y === p.y && !canShove(u, o));
+    const path = pathTo(st.map, from, tile, blockedByFoe) ?? pathTo(st.map, from, tile);
     if (path && path.length === 0 && stairs) {
       list.push({ type: 'stairs' });
       this.changed();
@@ -1516,6 +1576,7 @@ export class Controller {
     const slow = carryingAfter(u, list);
     const room = Math.floor(apLeft(list) / (slow ? RULES.carryMoveCost : 1));
     if (room <= 0) return this.toast(T.err.noAp);
+    this.timelineTick = null;
     for (const d of path.slice(0, room)) {
       list.push({ type: 'move', dir: d, stop: true, slow: slow || undefined });
     }
@@ -1529,19 +1590,28 @@ export class Controller {
 
   /**
    * 予定位置から届くなら攻撃、届かなければ接近攻撃(残り AP 全部)を予約する。
-   * 遠隔で味方が射線上にいる場合も「届かない」とみなし、接近攻撃で射線の空く位置へ動かす
+   * - 判定には、その攻撃が発動するティックにおける味方の予定位置(unitsAtTick)を使う(前の味方がどく予約済みなら射線が通る)。
+   * - 攻撃モード(fromMoveMode=false)で、遠隔の射程・壁は通るが味方が射線上にいる場合は、勝手に接近攻撃へ変えず、
+   *   その場での射撃を予約して「発射時に味方が射線上にいる見込み」と知らせる(移動モードでのタップ時は接近攻撃にする)。
    */
-  private attackOrCharge(u: Unit, foe: Unit): boolean {
+  private attackOrCharge(u: Unit, foe: Unit, fromMoveMode = false): boolean {
     const st = this.state;
     const plan = this.plans[u.id];
     const end = simulate(st, u, plan).end;
-    const why = reachProblem(st.map, u, end, foe, st.units);
+    const hitTick = Math.min(8, planCost(plan) + RULES.attackCost);
+    const unitsAtHit = unitsAtTick(st, this.plans, hitTick);
+    const why = reachProblem(st.map, u, end, foe, unitsAtHit);
     if (!why) return this.append(u, { type: 'attack', target: foe.id });
+    if (!fromMoveMode && stats(u).range > 1 && why === REACH.ally) {
+      const ok = this.append(u, { type: 'attack', target: foe.id });
+      if (ok) this.toast(T.err.allyInLine(hitTick));
+      return ok;
+    }
     const ap = apLeft(plan);
     // 接近攻撃で AP を使い切っても、次のキャラへは移らない(続けたタップが別のキャラに入らないように)
     const ok = this.append(u, { type: 'charge', target: foe.id, ticks: ap }, false);
     if (ok) {
-      const route = chargeRoute(st.map, u, end, foe, st.units);
+      const route = chargeRoute(st.map, u, end, foe, unitsAtHit);
       this.toast(T.err.toCharge(why, ap, route ? route.length - 1 : null, RULES.attackCost).trim());
     }
     return ok;
@@ -1594,7 +1664,7 @@ function vitals(u: Unit): string {
   return `<span class="vitals">HP ${u.hp}/${d.maxHp}${d.maxMp > 0 ? ` MP ${u.mp}/${d.maxMp}` : ''}</span>`;
 }
 
-/** 予約から移動部分だけを辿り、予定経路と予定位置を求める(他ユニットとの競合は考慮しない) */
+/** 予約から移動部分だけを辿り、予定経路と予定位置を求める(壁や押し返せない敵には入らない目安) */
 function simulate(st: GameState, u: Unit, actions: Action[]): { path: Pos[]; end: Pos } {
   let p: Pos = { x: u.x, y: u.y };
   const path = [p];
@@ -1602,6 +1672,12 @@ function simulate(st: GameState, u: Unit, actions: Action[]): { path: Pos[]; end
     if (a.type !== 'move') continue;
     const n = step(p, a.dir);
     if (st.map.tiles[n.y]?.[n.x] === '#') continue;
+    const foe = !RULES.passThroughFoes ? st.units.find((o) => o !== u && !o.down && o.side !== u.side && o.x === n.x && o.y === n.y) : undefined;
+    if (foe) {
+      const back = step(n, a.dir);
+      const pushable = canShove(u, foe) && st.map.tiles[back.y]?.[back.x] !== '#' && !st.units.some((o) => !o.down && o.x === back.x && o.y === back.y);
+      if (!pushable) continue;
+    }
     p = n;
     path.push(p);
   }
